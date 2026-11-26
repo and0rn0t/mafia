@@ -1,0 +1,51 @@
+# [cmdhide.sk] op 가 아닌 사람은 게임 명령어(cmdAllowed 목록)만 쓸 수 있고, 나머지 모든 명령어(바닐라/플러그인/관리자 명령 포함)는 막히고 목록/자동완성에서도 사라집니다(허용 목록 방식).
+#   허용: lobby, 로비(마피아 게임 명령어는 아직 정해지지 않아 cmdAllowed 에 직접 넣을 것: 안 넣으면 일반 유저는 못 씀). 마피아 서버용으로 andornot 저장소에서 옮겨 온 파일이다.
+#   op 는 영향 없음. 아래 "숨기는 명령" 설명은 예전 방식(차단 목록)이라 지금은 전부 허용 목록에 없어서 같이 막힘.
+# 숨기는 두 가지 방법:
+#   1) 명령어 실행 막기: 해당 명령을 치면 없는 명령어인 것처럼 "알 수 없는 명령" 메시지만 보냅니다("권한이 없습니다" 라고 하면 명령이 있다는 걸 알려주므로).
+#   2) 탭 자동완성/명령어 목록에서 제거(PlayerCommandSendEvent): 접속할 때와 명령 목록이 다시 보내질 때 숨길 명령을 지웁니다.
+# 숨기는 명령(허용 목록 밖이면 전부): nick, uuidmask(이 서버의 가짜 신분/UUID 가림), world, protocol/packet/packetlog/protocollib(ProtocolLib), sk/skript(Skript),
+#   pl/plugins(플러그인 목록), ver/version/about/icanhasbukkit(버전/플러그인 정보). 앞에 "bukkit:", "minecraft:", "paper:" 같은 네임스페이스가 붙은 것도 같이 처리합니다.
+# 추가하려면 cmdAllowed 함수의 목록에 소문자로 넣습니다(게임 명령어 허용). op 는 영향 없습니다.
+# 한계: 플러그인 이름은 이 명령 말고도 다른 경로(서버 응답 지연 특징, 일부 핵 클라이언트의 탐지)로 짐작될 수 있습니다. 완전한 은닉은 아닙니다.
+# 미검증: PlayerCommandSendEvent 를 skript-reflect 로 받아 getCommands() 에서 Collection#remove 가 되는지(순회는 toArray + Array.get: 비공개 반복자 클래스는 skript-reflect 가 못 부른다), on command 의 command 값(슬래시 없는 라벨)
+
+import:
+	org.bukkit.event.player.PlayerCommandSendEvent
+	java.lang.reflect.Array
+
+# 일반 유저가 쓸 수 있는 게임 명령어인지(소문자로 비교, 네임스페이스 skript:참가 같은 형태는 허용 안 함). 목록에 없으면 막고 숨긴다.
+function cmdAllowed(c: text) :: boolean:
+	set {_x} to {_c}.toLowerCase()
+	# 네임스페이스가 붙은 형태(skript:참가, minecraft:msg 등)는 이름과 상관없이 허용하지 않는다
+	set {_ns} to {_x}.contains(":")
+	if {_ns} is true:
+		return false
+	# 허용할 게임 명령어를 여기에 소문자로 추가한다. 예: if {_x} is "투표" or "마피아":
+	if {_x} is "lobby" or "로비":
+		return true
+	return false
+
+on command:
+	if player is not set:
+		stop
+	if player is op:
+		stop
+	set {_c} to command
+	if cmdAllowed({_c}) is false:
+		cancel the event
+		send "&cUnknown or incomplete command, see below for error" to player
+		send "&c&o/%{_c}%&r&c&o<--[HERE]" to player
+
+on PlayerCommandSendEvent:
+	set {_pl} to event.getPlayer()
+	if {_pl}.isOp() is true:
+		stop
+	set {_arr} to event.getCommands().toArray()
+	set {_n} to Array.getLength({_arr})
+	set {_i} to 0
+	while {_i} < {_n}:
+		set {_c} to Array.get({_arr}, {_i})
+		add 1 to {_i}
+		if cmdAllowed({_c}) is false:
+			event.getCommands().remove({_c})
