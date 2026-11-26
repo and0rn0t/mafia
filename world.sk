@@ -1,0 +1,196 @@
+# [world.sk] 월드 관리 명령(관리자 전용): 월드 만들기/불러오기, 이름 바꾸기, 목록에서 빼기(내리기), 월드 이동, 월드 목록, 자동 불러오기 목록 확인.
+# 마피아 게임 서버용으로 andornot 저장소의 world.sk 에서 게임 전용 부분(로비/결과 무대/리스폰 위치 키, 게임 진행 중 검사)을 빼고 옮겨 온 파일이다.
+# 이 파일이 쓰는 변수: {worldlist::이름}(자동으로 불러올 월드, 저장 변수, 대시 없음). 월드 생성/이동은 Bukkit API 를 직접 부른다.
+# 명령: /world list | create <이름> | rename <이름> <새 이름> | forget <이름> | tp <이름> | info
+#   list          불러온 월드 목록
+#   create <이름>  그 이름의 월드를 만들거나(없으면 새로 생성), 폴더가 있으면 불러온다. 생성 중 서버가 잠깐 멈출 수 있다.
+#   tp <이름>      불러온 월드의 스폰으로 이동
+#   rename <이름> <새 이름>  월드 폴더 이름을 바꾸고 자동 불러오기 목록의 이름도 같이 바꾼다. 월드를 내리고 폴더를 바꾼 뒤 다시 불러온다(불러와 있던 월드만).
+#                 플레이어가 있는 월드는 못 바꾼다.
+#   forget <이름>  자동으로 불러오는 목록에서 빼고, 불러와져 있으면 월드를 내린다(폴더는 그대로). 플레이어가 있는 월드는 못 내린다.
+#   info          자동으로 불러올 월드 목록과 지금 있는 월드를 보여 준다.
+# 이름 바꾸기/내리기는 월드를 저장하고 내리는 Bukkit.unloadWorld 를 쓴다(기본 월드는 서버가 못 내린다).
+# 월드 생성은 같은 이름이 이미 불러와져 있으면 그 월드를 돌려준다. 서버를 다시 켜면 on load 가 {worldlist::*} 의 월드를 다시 불러온다.
+# 미검증: Bukkit.createWorld(new WorldCreator(이름)) / WorldCreator.ofNameAndKey 호출, Bukkit.unloadWorld, new File(...).renameTo, Bukkit.getWorldContainer.
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.WorldCreator
+	org.bukkit.NamespacedKey
+	java.io.File
+
+# 월드 만들기 도구. 이름이 소문자/숫자/_.- 뿐이면 기본 방식, 한글 등이 섞이면 키를 따로 만들어서(Paper 1.21 의 월드 키 규칙) 만든다.
+function wtCreator(n: text) :: object:
+	if {_n} matches "[a-z0-9_.-]+":
+		return new WorldCreator({_n})
+	set {_h} to {_n}.hashCode()
+	set {_key} to new NamespacedKey("mafia", "w_%{_h}%")
+	return WorldCreator.ofNameAndKey({_n}, {_key})
+
+# 이름으로 월드를 가져온다(안 불러와져 있으면 불러온다)
+function wtWorld(n: text) :: world:
+	set {_w} to Bukkit.getWorld({_n})
+	if {_w} is not set:
+		set {_w} to Bukkit.createWorld(wtCreator({_n}))
+	return {_w}
+
+# 이름을 기억해 두었다가 스크립트를 불러올 때(서버 시작, /sk reload) 월드를 다시 불러온다. 플러그인 없이 만든 월드는 서버가 자동으로 올리지 않기 때문.
+# {worldlist::이름} 에 기억한다. create 가 추가하고 forget 이 뺀다(월드 폴더는 지우지 않음).
+on load:
+	loop {worldlist::*}:
+		set {_w} to wtWorld(loop-value)
+		if {_w} is not set:
+			send "[월드] 월드를 불러오지 못했습니다: %loop-value%" to console
+
+function wtLocText(l: location) :: text:
+	set {_w} to {_l}.getWorld()
+	set {_wn} to {_w}.getName()
+	set {_x} to round({_l}.getX() * 10) / 10
+	set {_y} to round({_l}.getY() * 10) / 10
+	set {_z} to round({_l}.getZ() * 10) / 10
+	set {_yaw} to round({_l}.getYaw())
+	return "&f%{_wn}% &7(%{_x}%, %{_y}%, %{_z}%) 방향 %{_yaw}%"
+
+# 월드를 내린다. 못 내리면 이유 문장, 내렸거나 원래 안 불러와져 있으면 빈 문장.
+function wtUnload(n: text) :: text:
+	set {_w} to Bukkit.getWorld({_n})
+	if {_w} is not set:
+		return ""
+	loop all players:
+		set {_pw} to loop-player.getWorld()
+		set {_pwn} to {_pw}.getName()
+		if {_pwn} is {_n}:
+			return "그 월드에 플레이어가 있습니다. 모두 다른 월드로 이동한 뒤 다시 시도해 주십시오."
+	set {_ok} to Bukkit.unloadWorld({_w}, true)
+	if {_ok} is not true:
+		return "서버가 월드를 내리지 못했습니다(서버의 기본 월드이거나 사용 중)."
+	return ""
+
+command /world [<text>] [<text>] [<text>]:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 월드 관리 (관리자 전용)
+	executable by: players
+	trigger:
+		if player is not op:
+			send "&c관리자만 사용할 수 있습니다."
+			stop
+		set {_sub} to arg-1
+		set {_n} to arg-2
+		if {_sub} is not set:
+			send "&7사용법: /world list | create <이름> | rename <이름> <새 이름> | forget <이름> | tp <이름> | info"
+			stop
+		if {_sub} is "list":
+			send "&6[월드] &7불러온 월드 목록"
+			loop all worlds:
+				set {_w} to loop-world
+				set {_wn} to {_w}.getName()
+				send "&7- &f%{_wn}%"
+			stop
+		if {_sub} is "create":
+			if {_n} is not set:
+				send "&c월드 이름을 입력해 주십시오. 예: /world create lobby"
+				stop
+			set {_old} to Bukkit.getWorld({_n})
+			if {_old} is set:
+				send "&6[월드] &f%{_n}% &7월드는 이미 불러와져 있습니다."
+				stop
+			send "&6[월드] &f%{_n}% &7월드를 만드는 중입니다. 잠시 서버가 멈출 수 있습니다."
+			set {_w} to Bukkit.createWorld(wtCreator({_n}))
+			if {_w} is not set:
+				send "&c월드를 만들지 못했습니다. 콘솔 로그를 확인해 주십시오."
+				stop
+			set {worldlist::%{_n}%} to {_n}
+			send "&a월드를 불러왔습니다. 서버를 다시 켜거나 스크립트를 불러와도 자동으로 불러옵니다. /world tp %{_n}% 로 이동할 수 있습니다."
+			stop
+		if {_sub} is "forget":
+			if {_n} is not set:
+				send "&c월드 이름을 입력해 주십시오. 예: /world forget lobby"
+				stop
+			set {_why} to wtUnload({_n})
+			if {_why} is not "":
+				send "&c%{_why}%"
+				stop
+			delete {worldlist::%{_n}%}
+			send "&7%{_n}% 월드를 자동으로 불러오는 목록에서 빼고 내렸습니다. (월드 폴더는 지우지 않았습니다)"
+			stop
+		if {_sub} is "rename":
+			set {_nn} to arg-3
+			if {_n} is not set:
+				send "&c사용법: /world rename <이름> <새 이름>"
+				stop
+			if {_nn} is not set:
+				send "&c사용법: /world rename <이름> <새 이름>"
+				stop
+			if {_nn}.contains("/"):
+				send "&c새 이름에 / \ : 는 쓸 수 없습니다."
+				stop
+			if {_nn}.contains(":"):
+				send "&c새 이름에 / \ : 는 쓸 수 없습니다."
+				stop
+			if {_nn}.contains("\"):
+				send "&c새 이름에 / \ : 는 쓸 수 없습니다."
+				stop
+			set {_dir} to Bukkit.getWorldContainer()
+			set {_src} to new File({_dir}, {_n})
+			set {_dst} to new File({_dir}, {_nn})
+			if {_src}.exists() is not true:
+				send "&c그 이름의 월드 폴더가 없습니다."
+				stop
+			if {_dst}.exists() is true:
+				send "&c새 이름의 월드 폴더가 이미 있습니다."
+				stop
+			set {_was} to false
+			if Bukkit.getWorld({_n}) is set:
+				set {_was} to true
+			if {worldlist::%{_n}%} is set:
+				set {_was} to true
+			set {_why} to wtUnload({_n})
+			if {_why} is not "":
+				send "&c%{_why}%"
+				stop
+			set {_ok} to {_src}.renameTo({_dst})
+			if {_ok} is not true:
+				send "&c폴더 이름을 바꾸지 못했습니다. 다른 프로그램이 폴더를 쓰고 있지 않은지 확인해 주십시오."
+				if {_was} is true:
+					wtWorld({_n})
+				stop
+			delete {worldlist::%{_n}%}
+			if {_was} is true:
+				set {_w} to Bukkit.createWorld(wtCreator({_nn}))
+				if {_w} is not set:
+					send "&c이름은 바꿨지만 새 월드를 불러오지 못했습니다. 콘솔 로그를 확인해 주십시오."
+					stop
+				set {worldlist::%{_nn}%} to {_nn}
+			send "&a월드 이름을 %{_n}% -> %{_nn}% 로 바꿨습니다."
+			stop
+		if {_sub} is "tp":
+			if {_n} is not set:
+				send "&c월드 이름을 입력해 주십시오. 예: /world tp lobby"
+				stop
+			set {_w} to Bukkit.getWorld({_n})
+			if {_w} is not set:
+				send "&c불러온 월드가 아닙니다. /world list 로 확인해 주십시오."
+				stop
+			# 스폰 청크를 먼저 불러오고(getChunk), Bukkit 의 teleport 를 직접 불러 성공 여부와 실제 도착 월드/좌표를 알려 준다.
+			set {_p} to player
+			set {_loc} to {_w}.getSpawnLocation()
+			{_loc}.getChunk()
+			# 탈것/올라탄 엔티티를 먼저 내려야 다른 월드로 이동이 거부되지 않는다.
+			{_p}.eject()
+			{_p}.leaveVehicle()
+			teleport {_p} to {_loc}
+			wait 2 ticks
+			set {_aw} to {_p}.getWorld()
+			set {_awn} to {_aw}.getName()
+			set {_t} to wtLocText({_p}.getLocation())
+			send "&6[월드] &7이동 결과: 지금 위치: %{_t}%"
+			stop
+		if {_sub} is "info":
+			send "&6[월드] &7월드 정보"
+			send "&7자동으로 불러올 월드: &f%{worldlist::*}%"
+			set {_cw} to player's world
+			set {_cwn} to {_cw}.getName()
+			send "&7지금 있는 월드: &f%{_cwn}%"
+			stop
+		send "&7사용법: /world list | create <이름> | rename <이름> <새 이름> | forget <이름> | tp <이름> | info"
