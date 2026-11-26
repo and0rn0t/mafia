@@ -1,0 +1,277 @@
+# [mroles.sk] 마피아 직업 정의표, 인원별 배치표, 직업 켜기/끄기, 직업 뽑기. 규칙은 ROLES.md, 구조는 DESIGN.md 를 따른다.
+# 직업 id (영문 소문자): mafia, spy, madam, witch, police, doctor, soldier, reporter, terrorist, detective, politician, thug, guardian, shaman, vigilante, madman, thief, assassin, arsonist
+# 풀(pool): mafia(마피아), support(보조: 스파이/마담/마녀), citizen(시민 팀), neutral(중립: 도둑/암살자/방화범)
+# 능력 시점(timing): nightly(밤마다) / once(게임 중 한 번) / vote(투표 시간이나 처형 때) / passive(패시브)
+# 사용하는 변수:
+#   {mcfg::role::id}   false 면 그 직업을 끈 것(저장). 없으면 켜짐. 마피아/경찰/의사는 끌 수 없다.
+#   {-m::players::*}   게임 참가자 uuid 목록(mjoin.sk 가 채움) - mAssign 이 읽는다.
+#   {-m::role::uuid}, {-m::orig::uuid}, {-m::team::uuid}  mAssign 이 채운다(팀: mafia/citizen/neutral/none. 보조 직업은 접선 전이라 none).
+# 명령(관리자 전용, 시험용): /mrole list | /mrole <직업id> on|off | /mrole check <인원> | /mrole draw <인원>
+# 미검증: 전체(서버 실행 불가). 사용한 문법: split ... at, shuffled, first N elements of, random element of, 숫자/텍스트 리스트 함수(:: texts / :: numbers).
+
+# 직업 한 줄 정의: "이름|풀|시점|설명". 설명은 ROLES.md 의 원문과 같다.
+function mRoleRow(id: text) :: text:
+	if {_id} is "mafia":
+		return "마피아|mafia|nightly|밤마다 시민 한 명을 살해합니다."
+	if {_id} is "spy":
+		return "스파이|support|nightly|밤마다 다른 플레이어를 조사해서 직업을 알아낼 수 있습니다."
+	if {_id} is "madam":
+		return "마담|support|vote|투표 시간에 마담에게 투표당한 플레이어는 능력을 사용할 수 없습니다. 대상이 마피아라면 대신 접선합니다."
+	if {_id} is "witch":
+		return "마녀|support|nightly|밤마다 다른 플레이어 한 명을 저주해서 다음 날 낮 동안 대화를 할 수 없게 만듭니다."
+	if {_id} is "police":
+		return "경찰|citizen|nightly|밤마다 다른 플레이어 한 명을 조사해서 마피아인지 알아냅니다."
+	if {_id} is "doctor":
+		return "의사|citizen|nightly|밤마다 플레이어 한 명을 치료할 수 있습니다. 치료받은 플레이어는 살해당하지 않습니다."
+	if {_id} is "soldier":
+		return "군인|citizen|passive|마피아와 도둑의 공격을 한 번 버팁니다."
+	if {_id} is "reporter":
+		return "기자|citizen|once|게임 중 한 번, 밤에 플레이어 한 명을 선택해서 다음 날 낮에 해당 플레이어의 직업을 공개합니다."
+	if {_id} is "terrorist":
+		return "테러리스트|citizen|vote|투표로 사망했을 경우, 다른 플레이어 한 명을 선택해서 길동무로 데려갑니다."
+	if {_id} is "detective":
+		return "탐정|citizen|nightly|밤마다 플레이어 한 명을 조사해서 대상이 어떤 플레이어에게 능력을 사용했는지 알아냅니다."
+	if {_id} is "politician":
+		return "정치인|citizen|passive|투표가 2표로 인정되고, 투표로 처형당하지 않습니다."
+	if {_id} is "thug":
+		return "건달|citizen|nightly|밤마다 플레이어 한 명을 협박해 다음 날에 투표를 하지 못하게 만듭니다."
+	if {_id} is "guardian":
+		return "수호자|citizen|nightly|밤에 다른 플레이어 한 명을 지킵니다. 지키고 있는 플레이어 대신 사망합니다."
+	if {_id} is "shaman":
+		return "주술사|citizen|nightly|밤마다 다른 플레이어 한 명에게 주술을 겁니다. 주술에 걸린 플레이어를 대상으로 한 능력 중 하나를 무작위로 무효화시킵니다."
+	if {_id} is "vigilante":
+		return "자경단|citizen|once|게임 중 한 번, 다른 플레이어 한 명을 죽일 수 있습니다. 대상이 시민이라면, 자신도 죽습니다."
+	if {_id} is "madman":
+		return "광인|citizen|passive|미친 사람입니다. 가짜 직업과 가짜 능력을 받고 시작하지만, 아무 효과가 없습니다."
+	if {_id} is "thief":
+		return "도둑|neutral|once|게임 중 한 번, 플레이어를 죽이고 직업을 훔칠 수 있습니다."
+	if {_id} is "assassin":
+		return "암살자|neutral|nightly|밤마다 플레이어 한 명을 죽일 수 있습니다. 군인에게 무효화당하지 않습니다."
+	if {_id} is "arsonist":
+		return "방화범|neutral|nightly|밤마다 다른 플레이어에게 기름을 뿌리거나, 불을 붙일 수 있습니다. 불을 붙이면 기름에 젖은 플레이어들을 불태웁니다. 방화는 모든 능력을 무시합니다."
+	return ""
+
+# 모든 직업 id(표시 순서: 마피아 팀, 시민 팀, 중립)
+function mRoleIds() :: texts:
+	return "mafia", "spy", "madam", "witch", "police", "doctor", "soldier", "reporter", "terrorist", "detective", "politician", "thug", "guardian", "shaman", "vigilante", "madman", "thief", "assassin" and "arsonist"
+
+# 직업 id 가 존재하는지
+function mRoleExists(id: text) :: boolean:
+	set {_row} to mRoleRow({_id})
+	if {_row} is "":
+		return false
+	return true
+
+# 정의표의 n 번째 칸(1 이름, 2 풀, 3 시점, 4 설명)
+function mRoleField(id: text, n: number) :: text:
+	set {_row} to mRoleRow({_id})
+	if {_row} is "":
+		return ""
+	set {_p::*} to split {_row} at "|"
+	return {_p::%{_n}%}
+
+function mRoleName(id: text) :: text:
+	return mRoleField({_id}, 1)
+
+function mRolePool(id: text) :: text:
+	return mRoleField({_id}, 2)
+
+function mRoleTiming(id: text) :: text:
+	return mRoleField({_id}, 3)
+
+function mRoleDesc(id: text) :: text:
+	return mRoleField({_id}, 4)
+
+# 끌 수 없는 확정 직업(마피아, 경찰, 의사)
+function mRoleLocked(id: text) :: boolean:
+	if {_id} is "mafia":
+		return true
+	if {_id} is "police":
+		return true
+	if {_id} is "doctor":
+		return true
+	return false
+
+# 직업을 켜 두었는지(확정 직업은 항상 켜짐)
+function mRoleOn(id: text) :: boolean:
+	if mRoleLocked({_id}) is true:
+		return true
+	if {mcfg::role::%{_id}%} is false:
+		return false
+	return true
+
+# 풀 안에서 켜져 있는 직업 id 목록
+function mCandidates(pool: text) :: texts:
+	loop mRoleIds():
+		set {_id} to loop-value
+		if mRolePool({_id}) is {_pool}:
+			if mRoleOn({_id}) is true:
+				add {_id} to {_c::*}
+	return {_c::*}
+
+# 지원 인원
+function mMinPlayers() :: number:
+	return 6
+
+function mMaxPlayers() :: number:
+	return 16
+
+# 인원별 팀 구성. 반환: 1 마피아, 2 보조, 3 중립, 4 시민 팀 (직업 수). 지원 인원이 아니면 빈 목록.
+function mCompo(n: number) :: numbers:
+	if {_n} is 6:
+		return 1, 0, 0 and 5
+	if {_n} is 7:
+		return 1, 0, 1 and 5
+	if {_n} is 8:
+		return 1, 1, 1 and 5
+	if {_n} is 9:
+		return 1, 1, 1 and 6
+	if {_n} is 10:
+		return 2, 1, 1 and 6
+	if {_n} is 11:
+		return 2, 1, 1 and 7
+	if {_n} is 12:
+		return 2, 1, 1 and 8
+	if {_n} is 13:
+		return 2, 1, 1 and 9
+	if {_n} is 14:
+		return 3, 1, 1 and 9
+	if {_n} is 15:
+		return 3, 1, 1 and 10
+	if {_n} is 16:
+		return 3, 1, 2 and 10
+	return 0
+
+# 시작 검사. 문제가 없으면 "" 를, 있으면 이유 문장을 돌려준다.
+function mStartCheck(n: number) :: text:
+	if {_n} < mMinPlayers():
+		return "인원이 부족합니다. %mMinPlayers()%명 이상이어야 합니다. (지금 %{_n}%명)"
+	if {_n} > mMaxPlayers():
+		return "인원이 너무 많습니다. %mMaxPlayers()%명 이하여야 합니다. (지금 %{_n}%명)"
+	set {_k::*} to mCompo({_n})
+	set {_sup} to size of mCandidates("support")
+	if {_k::2} > {_sup}:
+		return "켜진 보조 직업이 부족합니다. (필요 %{_k::2}%, 켜짐 %{_sup}%)"
+	set {_neu} to size of mCandidates("neutral")
+	if {_k::3} > {_neu}:
+		return "켜진 중립 직업이 부족합니다. (필요 %{_k::3}%, 켜짐 %{_neu}%)"
+	set {_cit} to size of mCandidates("citizen")
+	if {_k::4} > {_cit}:
+		return "켜진 시민 팀 직업이 부족합니다. (필요 %{_k::4}%, 켜짐 %{_cit}%)"
+	return ""
+
+# 인원 n 명의 직업 id 를 뽑는다(섞어서 돌려줌). 시작 검사를 통과한 인원만 부른다.
+# 마피아는 같은 id 가 여러 번, 나머지 직업은 한 번씩만. 시민 팀은 경찰과 의사를 항상 넣고 나머지를 켜진 후보에서 무작위로 뽑는다.
+function mDraw(n: number) :: texts:
+	set {_k::*} to mCompo({_n})
+	set {_i} to 0
+	while {_i} < {_k::1}:
+		add "mafia" to {_out::*}
+		add 1 to {_i}
+	set {_sup::*} to shuffled mCandidates("support")
+	set {_pick::*} to first {_k::2} elements of {_sup::*}
+	add {_pick::*} to {_out::*}
+	set {_neu::*} to shuffled mCandidates("neutral")
+	set {_pick::*} to first {_k::3} elements of {_neu::*}
+	add {_pick::*} to {_out::*}
+	add "police" and "doctor" to {_out::*}
+	loop mCandidates("citizen"):
+		if loop-value is not "police":
+			if loop-value is not "doctor":
+				add loop-value to {_rest::*}
+	set {_rest::*} to shuffled {_rest::*}
+	set {_left} to {_k::4} - 2
+	if {_left} > 0:
+		set {_pick::*} to first {_left} elements of {_rest::*}
+		add {_pick::*} to {_out::*}
+	set {_out::*} to shuffled {_out::*}
+	return {_out::*}
+
+# 직업 id 의 시작 팀: 마피아 mafia / 시민 팀 citizen / 중립 neutral / 보조 none(접선 전)
+function mStartTeam(id: text) :: text:
+	set {_pool} to mRolePool({_id})
+	if {_pool} is "support":
+		return "none"
+	return {_pool}
+
+# {-m::players::*} 의 참가자들에게 직업을 배정한다. 성공하면 true(시작 검사 통과 필요).
+function mAssign() :: boolean:
+	set {_n} to size of {-m::players::*}
+	if mStartCheck({_n}) is not "":
+		return false
+	set {_roles::*} to mDraw({_n})
+	set {_i} to 0
+	loop {-m::players::*}:
+		add 1 to {_i}
+		set {_r} to {_roles::%{_i}%}
+		set {-m::role::%loop-value%} to {_r}
+		set {-m::orig::%loop-value%} to {_r}
+		set {-m::team::%loop-value%} to mStartTeam({_r})
+	return true
+
+# 시험용 관리자 명령: 직업 목록/켜기끄기/시작 검사/직업 뽑기 결과 확인
+command /mrole [<text>] [<text>]:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 직업 설정/시험 (관리자 전용)
+	trigger:
+		if sender is a player:
+			if player is not op:
+				send "&c관리자만 사용할 수 있습니다."
+				stop
+		set {_a} to arg-1
+		if {_a} is not set:
+			send "&7사용법: /mrole list | /mrole <직업id> on|off | /mrole check <인원> | /mrole draw <인원>"
+			stop
+		if {_a} is "list":
+			loop mRoleIds():
+				set {_id} to loop-value
+				set {_st} to "&a켜짐"
+				if mRoleOn({_id}) is false:
+					set {_st} to "&c꺼짐"
+				if mRoleLocked({_id}) is true:
+					set {_st} to "&e고정"
+				set {_nm} to mRoleName({_id})
+				set {_po} to mRolePool({_id})
+				send "&7%{_id}% &f%{_nm}% &7(%{_po}%) %{_st}%"
+			stop
+		if {_a} is "check":
+			set {_n} to arg-2 parsed as number
+			if {_n} is not set:
+				send "&c인원을 숫자로 입력해 주세요."
+				stop
+			set {_why} to mStartCheck({_n})
+			if {_why} is "":
+				send "&a%{_n}%명으로 시작할 수 있습니다."
+			else:
+				send "&c%{_why}%"
+			stop
+		if {_a} is "draw":
+			set {_n} to arg-2 parsed as number
+			if {_n} is not set:
+				send "&c인원을 숫자로 입력해 주세요."
+				stop
+			set {_why} to mStartCheck({_n})
+			if {_why} is not "":
+				send "&c%{_why}%"
+				stop
+			set {_r::*} to mDraw({_n})
+			loop {_r::*}:
+				add mRoleName(loop-value) to {_nm::*}
+			send "&6[마피아] &f%{_nm::*}%"
+			stop
+		if mRoleExists({_a}) is false:
+			send "&c그런 직업 id 가 없습니다. /mrole list 로 확인해 주세요."
+			stop
+		if arg-2 is "on":
+			delete {mcfg::role::%{_a}%}
+			send "&a%{_a}% 직업을 켰습니다."
+			stop
+		if arg-2 is "off":
+			if mRoleLocked({_a}) is true:
+				send "&c확정 직업(마피아, 경찰, 의사)은 끌 수 없습니다."
+				stop
+			set {mcfg::role::%{_a}%} to false
+			send "&c%{_a}% 직업을 껐습니다."
+			stop
+		send "&7사용법: /mrole <직업id> on|off"
