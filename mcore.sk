@@ -31,6 +31,9 @@
 # 미검증: 전체(서버 실행 불가).
 # ==============================================================================
 
+import:
+	org.bukkit.Bukkit
+
 function mTimeDiscuss() :: number:
 	if {mcfg::discuss} is set:
 		return {mcfg::discuss}

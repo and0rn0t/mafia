@@ -11,6 +11,7 @@
 # 미검증: 전체(서버 실행 불가). 특히 우클릭/인벤토리 클릭 취소, 탭 이름 색(playerListName), 스펙테이터/어드벤처 전환, 월드 이동.
 
 import:
+	org.bukkit.Bukkit
 	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
 	java.util.UUID
 
@@ -327,7 +328,8 @@ on inventory click:
 		if mLobbyItemName({_cn}) is true:
 			cancel the event
 			stop
-	set {_cu} to name of cursor item of player
+	set {_ci} to player.getItemOnCursor()
+	set {_cu} to name of {_ci}
 	if {_cu} is set:
 		if mLobbyItemName({_cu}) is true:
 			cancel the event

@@ -21,6 +21,10 @@
 # 미검증: 전체(서버 실행 불가).
 # ==============================================================================
 
+import:
+	org.bukkit.Bukkit
+	java.util.UUID
+
 function mNameOf(id: text) :: text:
 	set {_p} to mPlayerOf({_id})
 	if {_p} is set:
@@ -112,7 +116,7 @@ function mResolve():
 		set {_blk} to 0
 		set {_hasblockable} to false
 		loop {_atk::%{_t}%::*}:
-			if mHas("mafia,thief,vigilante", {_r::%loop-value%}) is true:
+			if mHas("mafia,thief,vigilante", {_r::%loop-value-2%}) is true:
 				set {_hasblockable} to true
 		if {-m::role::%{_t}%} is "soldier":
 			if {_hasblockable} is true:
@@ -123,9 +127,9 @@ function mResolve():
 		# 치료: 모든 공격 무효(군인 방어는 위에서 이미 소모)
 		if {_heal::%{_t}%} is true:
 			loop {_atk::%{_t}%::*}:
-				add "healed|%loop-value%|%{_t}%" to {-m::ev::*}
-				if {_r::%loop-value%} is "thief":
-					set {_usedthief::%loop-value%} to true
+				add "healed|%loop-value-2%|%{_t}%" to {-m::ev::*}
+				if {_r::%loop-value-2%} is "thief":
+					set {_usedthief::%loop-value-2%} to true
 			continue
 		# 수호: 대신 사망(치료/군인 효과 없음)
 		set {_victim} to {_t}
@@ -138,26 +142,26 @@ function mResolve():
 			set {_left} to 0
 			set {_skipped} to false
 			loop {_atk::%{_t}%::*}:
-				set {_ra} to {_r::%loop-value%}
+				set {_ra} to {_r::%loop-value-2%}
 				if {_skipped} is false:
 					if mHas("mafia,thief,vigilante", {_ra}) is true:
 						set {_skipped} to true
-						add "blocked|%loop-value%|%{_t}%" to {-m::ev::*}
+						add "blocked|%loop-value-2%|%{_t}%" to {-m::ev::*}
 						if {_ra} is "thief":
-							set {_usedthief::%loop-value%} to true
+							set {_usedthief::%loop-value-2%} to true
 						continue
 				add 1 to {_left}
 			if {_left} is 0:
 				continue
 		set {_killed::%{_victim}%} to true
 		loop {_atk::%{_t}%::*}:
-			add "kill|%loop-value%|%{_victim}%" to {-m::ev::*}
-			if {_r::%loop-value%} is "vigilante":
-				set {_usedvig::%loop-value%} to true
+			add "kill|%loop-value-2%|%{_victim}%" to {-m::ev::*}
+			if {_r::%loop-value-2%} is "vigilante":
+				set {_usedvig::%loop-value-2%} to true
 				if {-m::team::%{_victim}%} is "citizen":
-					set {_vigdie::%loop-value%} to true
-			if {_r::%loop-value%} is "thief":
-				set {_steal::%loop-value%} to {_victim}
+					set {_vigdie::%loop-value-2%} to true
+			if {_r::%loop-value-2%} is "thief":
+				set {_steal::%loop-value-2%} to {_victim}
 	# ---- 5. 방화: 항상 별도, 모든 방어 무시
 	loop indices of {_ign::*}:
 		loop {-m::players::*}:
@@ -178,7 +182,7 @@ function mResolve():
 		set {_t} to {_act::%{_id}%}
 		set {_ro} to {_r::%{_id}%}
 		set {_tn} to mNameOf({_t})
-			if {_ro} is "police":
+		if {_ro} is "police":
 			if mLooksMafia({_t}) is true:
 				mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님은 &c마피아&b입니다.")
 			else:
