@@ -7,7 +7,7 @@
 #   - 시작하면 직업 배정, 준비 블록 제거, 참가자를 게임 월드 위치로 이동, 각자 직업 안내(제목 + 채팅). 관전자는 스펙테이터 모드로 같은 곳에 둔다.
 #   - 게임 중 접속을 끊은 참가자는 자리비움(생존 유지). 재접속하면 같은 자리로 계속한다. 참가자가 아니었던 사람이 게임 중에 들어오면 관전자(스펙테이터)가 된다(중간 참가 불가).
 #   - 관리자: /mstart (준비와 상관없이 지금 시작, 검사는 같이 한다), /mstop (게임 강제 종료 후 로비로).
-# 정해야 할 것(DESIGN.md): 광인의 가짜 직업을 무엇으로 보여 줄지(지금은 켜진 시민 팀 직업 중 무작위로 가정), 시작할 때 마피아끼리 서로 알려 줄지(지금은 알리지 않음).
+# 광인의 가짜 직업: 켜진 시민 팀 직업 중 무작위(경찰, 의사 포함, 광인 제외). 시작할 때 마피아끼리는 서로를 알고(이름 목록 안내), 보조 직업은 접선 전이라 모른다.
 # 미검증: 전체(서버 실행 불가). 특히 우클릭/인벤토리 클릭 취소, 탭 이름 색(playerListName), 스펙테이터/어드벤처 전환, 월드 이동.
 
 import:
@@ -155,7 +155,7 @@ function mLobbyBar(p: player) :: text:
 		return "&f게임 참여 &8| &a준비됨"
 	return "&f게임 참여 &8| &c준비되지 않음"
 
-# 광인에게 보여 줄 가짜 직업(켜진 시민 팀 직업 중 무작위, 광인 제외). 정해지지 않은 규칙이라 임시값.
+# 광인에게 보여 줄 가짜 직업(켜진 시민 팀 직업 중 무작위, 경찰/의사 포함, 광인 제외).
 function mFakeRole() :: text:
 	loop mCandidates("citizen"):
 		if loop-value is not "madman":
@@ -185,6 +185,25 @@ function mRoleReveal(p: player):
 		send "&a시민 팀입니다." to {_p}
 	else:
 		send "&e중립입니다. 혼자 남으면 승리합니다." to {_p}
+
+# 시작할 때 마피아(직업)끼리 서로를 알려 준다. 보조 직업은 접선 전이라 모르고, 다른 마피아가 없으면 아무것도 보내지 않는다.
+function mMafiaReveal():
+	loop {-m::players::*}:
+		if {-m::role::%loop-value%} is "mafia":
+			add loop-value to {_m::*}
+	if size of {_m::*} < 2:
+		stop
+	loop {_m::*}:
+		set {_a} to mPlayerOf(loop-value)
+		if {_a} is set:
+			set {_names::*} to ""
+			delete {_names::*}
+			loop {_m::*}:
+				if loop-value-2 is not loop-value-1:
+					set {_o} to mPlayerOf(loop-value-2)
+					if {_o} is set:
+						add name of {_o} to {_names::*}
+			send "&c함께하는 마피아: &f%{_names::*}%" to {_a}
 
 # 게임을 시작한다. 성공하면 true, 검사에 걸리면 이유를 보내고 false. by 는 결과를 받을 사람(없으면 전체 알림 없음).
 function mStart(by: object) :: boolean:
@@ -220,6 +239,7 @@ function mStart(by: object) :: boolean:
 			set {_p}'s gamemode to spectator
 			mTp({_p}, {_gl})
 			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다." to {_p}
+	mMafiaReveal()
 	mBegin()
 	mTabUpdateAll()
 	return true
