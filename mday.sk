@@ -3,12 +3,80 @@
 # 진행: every second 한 개가 {-m::state} 별로 {-m::left} 를 줄이고 0 이 되면 다음 단계로 넘긴다.
 #   night(밤 입력 시간) → [mResolve] → resolve(mSceneResolve 연출 시간) → [mResolveShow + 승패] → day(토론) → vote(mvote.sk) → [mTally, 테러리스트면 execute] → [승패] → night …  end → 10초 뒤 로비
 #   단계가 바뀔 때 mscene.sk 의 mSceneNight/mSceneDay/mSceneVote 를 부르고, 대상 선택 화면은 단계가 끝날 때 mPickCloseAll 로 닫는다.
-# 낮 시간 조절: /mdisc up|down 또는 핫바 아이템 (낮마다 한 사람 한 번, 15초, 누가 눌렀는지 알림, 0초가 되면 투표로)
-# 변수: {-m::tadj::uuid}(이 낮에 시간 조절 사용함, 낮 시작 때 초기화)
-# 미검증: 전체(서버 실행 불가).
+# 낮 시간 조절: /mdisc up|down 또는 W/S 키 (낮마다 한 사람 한 번, 15초, 누가 눌렀는지 알림, 0초가 되면 투표로)
+# 남은 시간 표시: 게임 중(밤/처리/낮/투표/길동무/종료) 모든 접속자 화면 위에 보스바로 단계 이름과 남은 초를 보여 준다(mBarUpdate, 1초마다).
+#   막대 길이는 그 단계를 시작할 때의 시간 기준(낮에 시간을 늘리면 기준도 늘어난다). 로비로 돌아가면 지운다.
+# 변수: {-m::tadj::uuid}(이 낮에 시간 조절 사용함, 낮 시작 때 초기화), {-m::bar}(보스바), {-m::barph}(단계 바뀜 감지), {-m::bartot}(막대 기준 초)
+# 미검증: 전체(서버 실행 불가). Bukkit.createBossBar 가변 인자(BarFlag...)를 빼고 부르는 것.
 # ==============================================================================
 
+import:
+	org.bukkit.Bukkit
+	org.bukkit.boss.BarColor
+	org.bukkit.boss.BarStyle
+
+function mBarClear():
+	if {-m::bar} is set:
+		{-m::bar}.removeAll()
+	delete {-m::bar}
+	delete {-m::barph}
+	delete {-m::bartot}
+
+function mBarUpdate():
+	set {_s} to mState()
+	if {_s} is "lobby":
+		mBarClear()
+		stop
+	if {-m::bar} is not set:
+		set {-m::bar} to Bukkit.createBossBar("", BarColor.WHITE, BarStyle.SOLID)
+	set {_left} to {-m::left}
+	if {_left} is not set:
+		set {_left} to 0
+	if {_left} < 0:
+		set {_left} to 0
+	set {_ph} to "%{_s}%-%{-m::day}%"
+	if {-m::barph} is not {_ph}:
+		set {-m::barph} to {_ph}
+		set {-m::bartot} to {_left}
+	if {_left} > {-m::bartot}:
+		set {-m::bartot} to {_left}
+	set {_d} to {-m::day}
+	set {_c} to BarColor.WHITE
+	if {_s} is "night":
+		set {_nm} to "&9%{_d}%일차 밤 &7· 능력 사용"
+		set {_c} to BarColor.BLUE
+	else if {_s} is "resolve":
+		set {_nm} to "&9%{_d}%일차 밤 &7· 밤이 지나가는 중"
+		set {_c} to BarColor.PURPLE
+	else if {_s} is "day":
+		set {_nm} to "&e%{_d}%일차 낮 &7· 토론"
+		set {_c} to BarColor.YELLOW
+	else if {_s} is "vote":
+		set {_nm} to "&c%{_d}%일차 낮 &7· 투표"
+		set {_c} to BarColor.RED
+	else if {_s} is "execute":
+		set {_nm} to "&c테러리스트 길동무 선택"
+		set {_c} to BarColor.RED
+	else:
+		set {_nm} to "&f게임 종료 &7· 로비로 돌아가는 중"
+	{-m::bar}.setTitle(colored "%{_nm}% &f%{_left}%초")
+	{-m::bar}.setColor({_c})
+	set {_pr} to 0
+	if {-m::bartot} > 0:
+		set {_pr} to {_left} / {-m::bartot}
+	if {_pr} > 1:
+		set {_pr} to 1
+	{-m::bar}.setProgress({_pr})
+	set {_has} to {-m::bar}.getPlayers()
+	loop all players:
+		if {_has}.contains(loop-player) is false:
+			{-m::bar}.addPlayer(loop-player)
+
+every second:
+	mBarUpdate()
+
 function mToLobby():
+	mBarClear()
 	mSceneClear()
 	mReset()
 	set {_lb} to mLobbyLoc()
