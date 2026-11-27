@@ -33,6 +33,7 @@
 #   {-ms::dummy::uuid}        원탁 더미(생존: 마네킹, 사망: 스켈레톤)
 #   {-ms::self::uuid}         밤 방의 자기 더미(본인에게만 보임)
 #   {-ms::bedL/bedC/bedR::uuid}  침대 줄의 더미 3개(본인에게만 보임. 가운데 = 지금 후보, 왼쪽 = 이전, 오른쪽 = 다음)
+#   {-ms::nameL/nameC/nameR::uuid}  침대 더미 머리 위 이름표(글자 디스플레이, 더미와 같이 보이고 숨음)
 #   {-ms::sky}                지금 보여 주는 하늘 시간(플레이어마다 setPlayerTime: 밤 13800, 낮 6000). 정리할 때 resetPlayerTime
 #   {-ms::cam::uuid}          카메라 엔티티(텍스트 디스플레이)
 #   {-ms::att::uuid}          카메라를 처음 건 뒤 지난 틱(0, 6, 25틱에 강제로 다시 건다. 끝나면 지움). 걸기 전이면 -1
@@ -53,6 +54,7 @@ import:
 	org.bukkit.entity.EntityType
 	org.bukkit.entity.Pose
 	org.bukkit.entity.Mannequin
+	org.bukkit.entity.Display$Billboard as MBillboard
 	org.bukkit.util.Vector
 	org.bukkit.event.player.PlayerMoveEvent
 	org.bukkit.event.player.PlayerInputEvent
@@ -402,8 +404,26 @@ function mSceneStart():
 			# 처음에는 아무에게도 보이지 않는다. 후보를 보여 줄 때만 본인에게 보인다(mScBedSet).
 			{_bed}.setVisibleByDefault(false)
 			set {-ms::bed%loop-value-2%::%{_id}%} to {_bed}
+			# 이름표: 베개 너머(화면에서 머리 위)에 뜨는 글자 디스플레이. 더미와 같이 보이고 숨는다.
+			set {_nl} to mScBedNameLoc({_k})
+			set {_tag} to {_nl}.getWorld().spawnEntity({_nl}, EntityType.TEXT_DISPLAY)
+			{_tag}.setPersistent(false)
+			{_tag}.setBillboard(MBillboard.CENTER)
+			{_tag}.setShadowed(true)
+			{_tag}.setVisibleByDefault(false)
+			mScTrack({_tag})
+			set {-ms::name%loop-value-2%::%{_id}%} to {_tag}
 	loop {-m::players::*}:
 		mCamMount(loop-value)
+
+# 침대 k 번째 자리의 이름표 위치: 더미 발끝(bed 장소)에서 머리 쪽(침대 카메라 화면의 위쪽 방향)으로 2.25칸, 0.4칸 위
+function mScBedNameLoc(k: number) :: location:
+	set {_b} to mScBedLoc({_k})
+	set {_yaw} to mLocLoad("bedcam").getYaw()
+	set {_x} to {_b}.getX() - sin({_yaw}) * 2.25
+	set {_z} to {_b}.getZ() + cos({_yaw}) * 2.25
+	set {_l} to new Location({_b}.getWorld(), {_x}, {_b}.getY() + 0.4, {_z})
+	return {_l}
 
 # 밤 대상 선택 침대 줄의 k 번째 자리(0 = 가운데, -1 = 화면 왼쪽(이전 후보), 1 = 화면 오른쪽(다음 후보)).
 # 침대 카메라(bedcam)가 바라보는 방향의 오른쪽으로 {mcfg::scene::bedgap}(기본 2) 칸씩 떨어진다. 방향(yaw)은 bed 장소 것.
@@ -419,7 +439,10 @@ function mScBedLoc(k: number) :: location:
 
 # 침대 더미 하나를 그 후보 모습으로 viewer 에게 보여 주거나(owner), owner 가 ""/"ignite" 면 viewer 화면에서 숨긴다.
 # 투명(setInvisible)으로 숨기면 관전 모드에서는 반투명하게 보여서(처음 만들 때 입힌 자기 스킨이 희미하게 보였다) 엔티티 자체를 숨긴다.
-function mScBedSet(e: object, owner: text, viewer: text):
+# slot 은 "L"/"C"/"R". 더미와 머리 위 이름표를 같이 다룬다(더미 자체 이름표는 발끝에 떠서 끈다).
+function mScBedSet(slot: text, owner: text, viewer: text):
+	set {_e} to {-ms::bed%{_slot}%::%{_viewer}%}
+	set {_tag} to {-ms::name%{_slot}%::%{_viewer}%}
 	if {_e} is not set:
 		stop
 	set {_p} to mPlayerOf({_viewer})
@@ -431,10 +454,17 @@ function mScBedSet(e: object, owner: text, viewer: text):
 	if {_hide} is true:
 		if {_p} is set:
 			{_p}.hideEntity(mScPlugin(), {_e})
+			if {_tag} is set:
+				{_p}.hideEntity(mScPlugin(), {_tag})
 		stop
 	mScSkin({_e}, {_owner})
+	{_e}.setCustomNameVisible(false)
+	if {_tag} is set:
+		{_tag}.text(Component.text(mNameOf({_owner})))
 	if {_p} is set:
 		{_p}.showEntity(mScPlugin(), {_e})
+		if {_tag} is set:
+			{_p}.showEntity(mScPlugin(), {_tag})
 
 # 하늘 시간(플레이어마다 따로): 밤 13800(달이 동쪽 하늘 낮게 떠 밤 방 창으로 보인다), 낮 6000(정오). 월드 시간은 그대로 둔다.
 function mScSky(night: boolean):
@@ -659,9 +689,9 @@ function mPickShow(id: text):
 			set {_nx} to {-ms::cand::%{_id}%::%{_ni}%}
 		if {_all} >= 3:
 			set {_pv} to {-ms::cand::%{_id}%::%{_pi}%}
-		mScBedSet({-ms::bedC::%{_id}%}, {_c}, {_id})
-		mScBedSet({-ms::bedL::%{_id}%}, {_pv}, {_id})
-		mScBedSet({-ms::bedR::%{_id}%}, {_nx}, {_id})
+		mScBedSet("C", {_c}, {_id})
+		mScBedSet("L", {_pv}, {_id})
+		mScBedSet("R", {_nx}, {_id})
 		mCamTo({_id}, "bedcam")
 	else:
 		mCamFace({_id}, {_c})

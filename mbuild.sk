@@ -255,7 +255,7 @@ function mBSaveSpots(w: world):
 	# 침대 더미: 위치 = 발끝(침대 북쪽 끝), yaw 90 = 머리가 남쪽 베개
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)
 	# 침대 카메라: 가운데 침대 바로 위에서 거의 수직으로 내려다본다. 화면 위쪽 = 남쪽(베개와 얼굴), 양옆 침대는 화면 가장자리에 반쯤
-	mBSaveLook("bedcam", {_w}, 0.5, 67.4, -99.05, 0.5, 65.6, -98.95)
+	mBSaveLook("bedcam", {_w}, 0.5, 66.95, -98.8, 0.5, 65.6, -98.7)
 	set {mcfg::scene::radius} to 3.2
 	set {mcfg::scene::facedist} to 1.4
 	set {mcfg::scene::faceh} to 1.1
