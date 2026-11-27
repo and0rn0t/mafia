@@ -234,3 +234,4 @@ function mReset():
 	delete {-m::dead::*}
 	delete {-m::ready::*}
 	delete {-m::cd}
+	delete {-mt::*}

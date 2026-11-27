@@ -202,9 +202,7 @@ function mMafiaReveal():
 			delete {_names::*}
 			loop {_m::*}:
 				if loop-value-2 is not loop-value-1:
-					set {_o} to mPlayerOf(loop-value-2)
-					if {_o} is set:
-						add name of {_o} to {_names::*}
+					add mNameOf(loop-value-2) to {_names::*}
 			send "&c함께하는 마피아: &f%{_names::*}%" to {_a}
 
 # 게임을 시작한다. 성공하면 true, 검사에 걸리면 이유를 보내고 false. by 는 결과를 받을 사람(없으면 전체 알림 없음).
@@ -212,6 +210,7 @@ function mStart(by: object) :: boolean:
 	if mState() is not "lobby":
 		return false
 	set {-m::players::*} to mLobbyPlayers()
+	add mTestBots() to {-m::players::*}
 	set {_n} to size of {-m::players::*}
 	set {_why} to mStartCheck({_n})
 	if {_why} is "":

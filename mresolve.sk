@@ -26,6 +26,8 @@ import:
 	java.util.UUID
 
 function mNameOf(id: text) :: text:
+	if mTestName({_id}) is not "":
+		return mTestName({_id})
 	set {_p} to mPlayerOf({_id})
 	if {_p} is set:
 		return name of {_p}

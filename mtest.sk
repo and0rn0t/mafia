@@ -1,0 +1,264 @@
+# ==============================================================================
+# [mtest.sk] 혼자 시험하기: 가짜 참가자(봇)를 넣어 게임을 진행한다. 관리자 전용. 실제 게임에는 영향 없음(봇을 넣지 않으면 아무 일도 안 함).
+# 명령(관리자 전용):
+#   /mtest start [봇 수]       로비에서 봇(기본 7명)을 넣고 바로 시작한다. 접속 중인 사람(관전 선택 제외) + 봇이 참가자
+#   /mtest role <직업id> [이름]  내(또는 그 참가자의) 직업을 게임 중에 바꾼다(시험용, 직업 중복 검사 없음). 이름은 봇 이름 또는 닉네임
+#   /mtest info                모든 참가자의 직업/팀/생존/이번 밤 선택/투표와 남은 시간
+#   /mtest skip                지금 단계를 바로 끝낸다(남은 시간 1초)
+#   /mtest kill <이름>          그 참가자를 바로 사망 처리한다(승패 판정은 다음 단계 끝에서)
+#   /mtest auto                내 입력도 봇처럼 자동으로 할지 켜고 끈다
+#   /mtest stop                게임을 끝내고 로비로(= /mstop)
+# 봇 동작: 밤이 시작되고 2~(밤 시간-2)초 사이 무작위 시점에 고를 수 있는 대상 중 무작위로 능력을 쓴다(방화범은 기름에 젖은 사람이 있으면 1/3 확률로 점화).
+#          투표 시간에는 80% 확률로 자기를 뺀 생존자에게 무작위로 투표한다. 테러리스트 길동무는 시간이 끝날 때 무작위(mday.sk 기본 동작).
+# 봇의 밤 결과(조사 결과 등)는 /mtest info 를 친 관리자와, 결과가 나올 때 시험 중인 관리자에게 채팅으로 보여 준다.
+# 변수: {-mt::bots::*}(봇 uuid 목록), {-mt::name::uuid}(봇 이름), {-mt::when::uuid}(이번 단계에 행동할 남은 초), {-mt::phase}(단계 바뀜 감지),
+#       {-mt::auto::uuid}(관리자 자동 입력), {-mt::tester::*}(봇 결과를 받을 관리자 uuid). mReset 이 {-mt::*} 를 지운다.
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+import:
+	java.util.UUID
+
+# mStart 가 부른다: 이번 게임에 넣을 봇 uuid 목록(없으면 비어 있음)
+function mTestBots() :: texts:
+	return {-mt::bots::*}
+
+# 봇 이름(봇이 아니면 "")
+function mTestName(id: text) :: text:
+	if {-mt::name::%{_id}%} is set:
+		return {-mt::name::%{_id}%}
+	return ""
+
+function mIsBot(id: text) :: boolean:
+	if {-mt::name::%{_id}%} is set:
+		return true
+	return false
+
+# 이름(봇 이름 또는 닉네임)으로 참가자 uuid 찾기. 없으면 ""
+function mTestFind(n: text) :: text:
+	loop {-m::players::*}:
+		if mNameOf(loop-value) is {_n}:
+			return loop-value
+	return ""
+
+# 자동으로 행동할 참가자: 봇 + 자동 입력을 켠 관리자
+function mTestAutoOn(id: text) :: boolean:
+	if mIsBot({_id}) is true:
+		return true
+	if {-mt::auto::%{_id}%} is true:
+		return true
+	return false
+
+function mTestNight(id: text):
+	if mActCheck({_id}) is not "":
+		stop
+	if mActRole({_id}) is "arsonist":
+		loop {-m::players::*}:
+			if {-m::oil::%loop-value%} is true:
+				if {-m::alive::%loop-value%} is true:
+					set {_oiled} to true
+		if {_oiled} is true:
+			if chance of 33%:
+				mSetIgnite({_id})
+				stop
+	set {_c::*} to mTargets({_id})
+	if size of {_c::*} is 0:
+		stop
+	mSetAct({_id}, random element of {_c::*})
+
+function mTestVote(id: text):
+	if mVoteCan({_id}) is not "":
+		stop
+	if chance of 20%:
+		stop
+	loop {-m::players::*}:
+		if loop-value is not {_id}:
+			if {-m::alive::%loop-value%} is true:
+				add loop-value to {_c::*}
+	if size of {_c::*} is 0:
+		stop
+	mVoteCast({_id}, random element of {_c::*})
+
+# 봇의 밤 결과를 시험 중인 관리자에게 보여 준다(mResolveShow 다음, 낮이 시작될 때)
+function mTestShowInfo():
+	loop {-mt::tester::*}:
+		set {_t} to mPlayerOf(loop-value)
+		if {_t} is set:
+			loop {-mt::bots::*}:
+				set {_bn} to mTestName(loop-value-2)
+				loop {-m::info::%loop-value-2%::*}:
+					send "&8[봇 %{_bn}%] &r%loop-value-3%" to {_t}
+
+every second:
+	if size of {-mt::bots::*} is 0:
+		stop
+	if mRunning() is not true:
+		stop
+	set {_s} to mState()
+	set {_ph} to "%{_s}%-%{-m::day}%"
+	if {-mt::phase} is not {_ph}:
+		set {-mt::phase} to {_ph}
+		delete {-mt::when::*}
+		if {_s} is "day":
+			mTestShowInfo()
+		loop {-m::players::*}:
+			if mTestAutoOn(loop-value) is true:
+				set {_max} to {-m::left} - 2
+				if {_max} < 2:
+					set {_max} to 2
+				set {-mt::when::%loop-value%} to random integer between 1 and {_max}
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		if {-mt::when::%{_id}%} is set:
+			subtract 1 from {-mt::when::%{_id}%}
+			if {-mt::when::%{_id}%} <= 0:
+				delete {-mt::when::%{_id}%}
+				if {_s} is "night":
+					mTestNight({_id})
+				else if {_s} is "vote":
+					mTestVote({_id})
+
+function mTestTeamName(t: text) :: text:
+	if {_t} is "mafia":
+		return "&c마피아 팀"
+	if {_t} is "citizen":
+		return "&a시민 팀"
+	if {_t} is "neutral":
+		return "&e중립"
+	return "&7무소속"
+
+command /mtest [<text>] [<text>] [<text>]:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 혼자 시험하기(봇) (관리자 전용)
+	executable by: players
+	trigger:
+		if player is not op:
+			send "&c관리자만 사용할 수 있습니다."
+			stop
+		set {_me} to "%uuid of player%"
+		set {_a} to arg-1
+		if {_a} is not set:
+			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | skip | kill <이름> | auto | stop"
+			stop
+		if {_a} is "start":
+			if mState() is not "lobby":
+				send "&c게임이 이미 진행 중입니다. /mtest stop 으로 먼저 끝내 주세요."
+				stop
+			set {_n} to 7
+			if arg-2 is set:
+				set {_n} to arg-2 parsed as integer
+				if {_n} is not set:
+					send "&c봇 수를 숫자로 입력해 주세요."
+					stop
+			if {_n} < 0:
+				set {_n} to 0
+			if {_n} > 15:
+				set {_n} to 15
+			delete {-mt::*}
+			loop {_n} times:
+				set {_u} to UUID.randomUUID()
+				set {_id} to "%{_u}%"
+				add {_id} to {-mt::bots::*}
+				set {-mt::name::%{_id}%} to "봇%loop-value%"
+			add {_me} to {-mt::tester::*}
+			if mStart(player) is not true:
+				delete {-mt::*}
+				send "&c시작하지 못했습니다. (위의 이유를 확인해 주세요)"
+				stop
+			send "&6[시험] &7봇 %{_n}%명과 게임을 시작했습니다. /mtest info 로 직업을 볼 수 있습니다."
+			stop
+		if {_a} is "stop":
+			mToLobby()
+			broadcast "&6[마피아] &7시험 게임을 끝내고 로비로 돌아왔습니다."
+			stop
+		if mRunning() is not true:
+			send "&c게임 중에만 쓸 수 있습니다. 먼저 /mtest start"
+			stop
+		if {_a} is "info":
+			set {_s} to mState()
+			send "&6[시험] &7단계 &f%{_s}% &7%{-m::day}%일차, 남은 시간 &f%{-m::left}%초"
+			loop {-m::players::*}:
+				set {_id} to loop-value
+				set {_nm} to mNameOf({_id})
+				set {_rn} to mRoleName({-m::role::%{_id}%})
+				set {_tm} to mTestTeamName({-m::team::%{_id}%})
+				set {_al} to "&a생존"
+				if {-m::alive::%{_id}%} is not true:
+					set {_al} to "&8사망"
+				set {_ex} to ""
+				if {-m::fake::%{_id}%} is set:
+					set {_ex} to " &7(가짜: %mRoleName({-m::fake::%{_id}%})%)"
+				if {-m::act::%{_id}%} is set:
+					set {_ex} to "%{_ex}% &7밤 → &f%mNameOf({-m::act::%{_id}%})%"
+				if {-m::actmode::%{_id}%} is "ignite":
+					set {_ex} to "%{_ex}% &6점화"
+				if {-m::vote::%{_id}%} is set:
+					set {_ex} to "%{_ex}% &7투표 → &f%mNameOf({-m::vote::%{_id}%})%"
+				if {-m::contact::%{_id}%} is true:
+					set {_ex} to "%{_ex}% &c접선"
+				if {-m::oil::%{_id}%} is true:
+					set {_ex} to "%{_ex}% &6기름"
+				send "&7- &f%{_nm}% &e%{_rn}% %{_tm}% %{_al}%%{_ex}%"
+			if {-mt::tester::*} does not contain {_me}:
+				add {_me} to {-mt::tester::*}
+			stop
+		if {_a} is "skip":
+			set {-m::left} to 1
+			send "&7지금 단계를 끝냅니다."
+			stop
+		if {_a} is "auto":
+			if {-mt::auto::%{_me}%} is true:
+				delete {-mt::auto::%{_me}%}
+				send "&7내 입력 자동: &c꺼짐"
+			else:
+				set {-mt::auto::%{_me}%} to true
+				send "&7내 입력 자동: &a켜짐 &7(다음 단계부터)"
+			stop
+		if {_a} is "kill":
+			if arg-2 is not set:
+				send "&7사용법: /mtest kill <이름>"
+				stop
+			set {_t} to mTestFind(arg-2)
+			if {_t} is "":
+				send "&c그런 참가자가 없습니다."
+				stop
+			if {-m::alive::%{_t}%} is not true:
+				send "&c이미 사망했습니다."
+				stop
+			mDie({_t})
+			mTabUpdateAll()
+			send "&7%arg-2% 님을 사망 처리했습니다."
+			stop
+		if {_a} is "role":
+			set {_r} to arg-2
+			if {_r} is not set:
+				send "&7사용법: /mtest role <직업id> [이름]  (직업 id 는 /mrole list)"
+				stop
+			if mRoleExists({_r}) is false:
+				send "&c그런 직업 id 가 없습니다. /mrole list 로 확인해 주세요."
+				stop
+			set {_t} to {_me}
+			if arg-3 is set:
+				set {_t} to mTestFind(arg-3)
+				if {_t} is "":
+					send "&c그런 참가자가 없습니다."
+					stop
+			if {-m::players::*} does not contain {_t}:
+				send "&c게임 참가자가 아닙니다."
+				stop
+			set {-m::role::%{_t}%} to {_r}
+			set {-m::orig::%{_t}%} to {_r}
+			set {-m::team::%{_t}%} to mStartTeam({_r})
+			delete {-m::fake::%{_t}%}
+			delete {-m::used::%{_t}%}
+			delete {-m::contact::%{_t}%}
+			if {_r} is "madman":
+				set {-m::fake::%{_t}%} to mFakeRole()
+			set {_nm} to mNameOf({_t})
+			send "&7%{_nm}% 님의 직업을 &e%mRoleName({_r})%&7(으)로 바꿨습니다."
+			set {_tp} to mPlayerOf({_t})
+			if {_tp} is set:
+				mRoleReveal({_tp})
+			stop
+		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | skip | kill <이름> | auto | stop"
