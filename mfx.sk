@@ -7,7 +7,7 @@
 # 능력을 쓴 사람(행동한 사람)이 보는 순서(확정):
 #   leave(자기 집 안: 의자에서 일어나 문으로 나감) → out(자기 집 바깥: 문을 나서 대상 집 쪽으로 걸어감) → arrive(대상 집 바깥: 걸어와 문으로 들어감)
 #   → 대상 집 안 장면(입장 → 쉼 → 능력 → 쉼 → 퇴장) → back(대상 집 바깥: 나와서 걸어감) → home(자기 집 바깥: 걸어와 들어감).
-#   수호자가 대신 죽으면 back/home 은 없다. 자기 자신에게 쓴 능력(의사 자가 치료)은 이동 없이 leave 만 본다.
+#   수호자가 대신 죽으면 back/home 은 없다. 자기 자신에게 쓴 능력(의사 자가 치료)은 집을 나서지 않고 selfheal(자기 의자에서 황금 사과를 먹고 회복) 장면만 본다.
 # 당한 사람(대상)은 자기 집 안에서 장면만 본다(행동한 사람 장면을 먼저 보고 나서). 자기에게 온 kill/burn 은 첫 번째만 본다.
 # 대상 집 안 장면(spec = "종류|행동한 사람|대상|수호자|결과|소지품", 없는 칸은 "-"):
 #   kill   결과 die: 대상이 해골(앉은 스켈레톤) / guarddie: 대상은 살고 수호자 자리에 스켈레톤 / live(의사): 아무 일 없음 / soldier: 팅! 후 아무 일 없음
@@ -400,6 +400,8 @@ function mFxLen(spec: text) :: number:
 		return 110
 	if {_k} is "leave":
 		return 60
+	if {_k} is "selfheal":
+		return 70
 	if {_k} is "out" or "back":
 		return 45
 	if {_k} is "arrive" or "home":
@@ -521,7 +523,10 @@ function mSceneResolve() :: number:
 		set {_t} to {-m::act::%{_id}%}
 		if {_skip::%{_id}%} is true:
 			delete {_t}
-		if {_t} is set:
+		if {_t} is {_id}:
+			# 자기 자신에게 쓴 능력(의사 자가 치료): 집을 나서지 않고 자기 집 의자에서 치료한다
+			mFxAddA({_id}, "selfheal|%{_id}%|%{_id}%|-|selfheal|-")
+		else if {_t} is set:
 			mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
 			if {_t} is not {_id}:
 				set {_m} to {_main::%{_id}%}
@@ -799,6 +804,28 @@ function mFxTick(vid: text, t: number):
 			{_me}.remove()
 		if {_t} is 52:
 			mFxDoor({_vid}, {_h}, false)
+		stop
+	# ---- 의사 자가 치료: 자기 의자에 앉은 채 황금 사과를 꺼내 먹고 회복한다(집을 나서지 않음)
+	if {_k} is "selfheal":
+		set {_me} to {-msc::%{_vid}%::vic}
+		if {_t} is 10:
+			{_me}.getEquipment().setItemInMainHand(new ItemStack(Material.GOLDEN_APPLE))
+			mFxSound({_vid}, "item.armor.equip_generic", 0.6, 1.2)
+		if {_t} is 16:
+			{_me}.startUsingItem(EquipmentSlot.HAND)
+		if {_t} >= 16:
+			if {_t} <= 32:
+				if mod({_t}, 4) is 0:
+					mFxSound({_vid}, "entity.generic.eat", 1, 1)
+		if {_t} is 36:
+			{_me}.clearActiveItem()
+			{_me}.getEquipment().setItemInMainHand(null)
+			mFxSound({_vid}, "entity.player.burp", 0.6, 1)
+		if {_t} is 42:
+			mFxSound({_vid}, "block.amethyst_block.chime", 1, 1.2)
+			mFxSound({_vid}, "entity.player.levelup", 0.4, 1.8)
+			mFxPE({_vid}, "HEART", {_me}, 8, 1.4, 0.4, 0)
+			mFxPE({_vid}, "HAPPY_VILLAGER", {_me}, 12, 1, 0.4, 0)
 		stop
 	set {_gd} to {-msc::%{_vid}%::grd}
 	# ---- 수호자 입장(앞 40틱): 방패를 든 수호자 더미가 대상 옆(문 반대쪽)에 선다

@@ -73,10 +73,10 @@ function mAdmOpen(p: player, menu: text):
 	else:
 		set {_menu} to "main"
 		set {_inv} to chest inventory with 3 rows named "&8마피아 관리자"
-		set {_d} to mTimeDiscuss()
+		set {_d} to mTimeDiscussPer()
 		set {_v} to mTimeVote()
 		set {_n} to mTimeNight()
-		set slot 10 of {_inv} to mAdmItem(clock, "&f낮 토론 시간: &e%{_d}%초", "&7좌클릭 +10초 / 우클릭 -10초")
+		set slot 10 of {_inv} to mAdmItem(clock, "&f낮 토론 시간: &e생존자 1명당 %{_d}%초", "&7좌클릭 +1초 / 우클릭 -1초")
 		set slot 11 of {_inv} to mAdmItem(clock, "&f투표 시간: &e%{_v}%초", "&7좌클릭 +5초 / 우클릭 -5초")
 		set slot 12 of {_inv} to mAdmItem(clock, "&f밤 능력 선택 시간: &e%{_n}%초", "&7좌클릭 +5초 / 우클릭 -5초")
 		if mFbOn() is true:
@@ -111,7 +111,11 @@ function mAdmOpen(p: player, menu: text):
 # 시간 설정 값을 더한다(5초 미만으로는 내려가지 않음)
 function mAdmTime(k: text, d: number):
 	if {_k} is "discuss":
-		set {_t} to mTimeDiscuss() + {_d}
+		set {_t} to mTimeDiscussPer() + {_d}
+		if {_t} < 5:
+			set {_t} to 5
+		set {mcfg::discper} to {_t}
+		stop
 	else if {_k} is "vote":
 		set {_t} to mTimeVote() + {_d}
 	else:
@@ -164,7 +168,7 @@ on inventory click:
 	mSound(player, "ui.button.click", 0.4, 1.4)
 	if {_m} is "main":
 		if {_s} is 10:
-			mAdmTime("discuss", 10 * {_sign})
+			mAdmTime("discuss", {_sign})
 		else if {_s} is 11:
 			mAdmTime("vote", 5 * {_sign})
 		else if {_s} is 12:

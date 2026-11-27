@@ -14,7 +14,7 @@
 #   {-m::alive::uuid}        생존 여부(true/false)
 #   {-m::role::uuid}, {-m::orig::uuid}, {-m::team::uuid}   현재 직업 / 최초 직업 / 팀(mafia, citizen, neutral, none)   mroles.sk
 #   {mcfg::role::직업id}     false 면 그 직업을 끈 것                                                           mroles.sk
-#   {mcfg::discuss}, {mcfg::vote}, {mcfg::night}   낮 토론 / 투표 / 밤 능력 선택 시간(초). 기본 200/30/30        mcore.sk(/mtime)
+#   {mcfg::discper}, {mcfg::vote}, {mcfg::night}   낮 토론(생존자 1명당) / 투표 / 밤 능력 선택 시간(초). 기본 15/30/30        mcore.sk(/mtime)
 #   {mcfg::loc::lobby::world|x|y|z|yaw|pitch}   로비 위치(없으면 서버 기본 월드 스폰)                          mcore.sk(/mloc)
 #   {mcfg::loc::game::world|x|y|z|yaw|pitch}    게임 월드 위치(게임 시작 때 참가자가 이동하는 곳)                mcore.sk(/mloc)
 #   {-m::act::uuid}          이 밤에 고른 대상 uuid                                                        mnight.sk
@@ -48,10 +48,18 @@ import:
 function mSound(p: player, s: text, v: number, pi: number):
 	{_p}.playSound({_p}, "minecraft:%{_s}%", SoundCategory.MASTER, {_v}, {_pi})
 
+# 토론 시간 = 생존자 수 × 1명당 초(기본 15초, 관리자 메뉴·/mtime discuss 로 바꾼다)
+function mTimeDiscussPer() :: number:
+	if {mcfg::discper} is set:
+		return {mcfg::discper}
+	return 15
+
 function mTimeDiscuss() :: number:
-	if {mcfg::discuss} is set:
-		return {mcfg::discuss}
-	return 200
+	set {_n} to 0
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			add 1 to {_n}
+	return {_n} * mTimeDiscussPer()
 
 function mTimeVote() :: number:
 	if {mcfg::vote} is set:
@@ -197,21 +205,21 @@ command /mtime [<text>] [<number>]:
 				send "&c관리자만 사용할 수 있습니다."
 				stop
 		if arg-1 is not set:
-			set {_d} to mTimeDiscuss()
+			set {_d} to mTimeDiscussPer()
 			set {_v} to mTimeVote()
 			set {_n} to mTimeNight()
-			send "&6[마피아] &7낮 토론 &f%{_d}%초 &7/ 투표 &f%{_v}%초 &7/ 밤 능력 선택 &f%{_n}%초"
+			send "&6[마피아] &7낮 토론 &f생존자 1명당 %{_d}%초 &7/ 투표 &f%{_v}%초 &7/ 밤 능력 선택 &f%{_n}%초"
 			send "&7사용법: /mtime discuss|vote|night <초>"
 			stop
 		if arg-2 is not set:
-			send "&c초를 숫자로 입력해 주세요. 예: /mtime discuss 200"
+			send "&c초를 숫자로 입력해 주세요. 예: /mtime discuss 15"
 			stop
 		if arg-2 < 5:
 			send "&c5초 이상으로 입력해 주세요."
 			stop
 		if arg-1 is "discuss":
-			set {mcfg::discuss} to arg-2
-			send "&a낮 토론 시간을 %arg-2%초로 정했습니다."
+			set {mcfg::discper} to arg-2
+			send "&a낮 토론 시간을 생존자 1명당 %arg-2%초로 정했습니다."
 			stop
 		if arg-1 is "vote":
 			set {mcfg::vote} to arg-2
@@ -241,6 +249,9 @@ function mReset():
 	delete {-m::left}
 	delete {-m::players::*}
 	delete {-m::nm::*}
+	delete {-m::calm}
+	delete {-m::diedsince}
+	delete {-m::drawwhy}
 	delete {-m::alive::*}
 	delete {-m::role::*}
 	delete {-m::orig::*}

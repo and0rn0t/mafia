@@ -97,6 +97,13 @@ function mToLobby():
 	mTabUpdateAll()
 
 function mStartNight():
+	# 끝나지 않는 판 판정: 지난 밤부터 사망자가 없었으면 조용한 날 수를 센다(mvote.sk 의 mWinCheck)
+	if {-m::day} > 0:
+		if {-m::diedsince} is true:
+			set {-m::calm} to 0
+		else:
+			add 1 to {-m::calm}
+	delete {-m::diedsince}
 	add 1 to {-m::day}
 	set {-m::state} to "night"
 	mNightStart()

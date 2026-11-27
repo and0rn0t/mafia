@@ -120,7 +120,24 @@ function mTakePick(t: text, v: text) :: text:
 	mStgTnt({_t}, {_v})
 	return ""
 
+# 승패 판정: 기본 승리 조건(mWinBase)으로 승부가 안 났을 때만 끝나지 않는 판을 무승부로 본다(확정)
 function mWinCheck() :: text:
+	set {_w} to mWinBase()
+	if {_w} is not "":
+		return {_w}
+	# 둘만 남았는데 어느 쪽도 상대를 없앨 방법이 없음
+	if mStalemate() is true:
+		set {-m::drawwhy} to "남은 사람끼리는 승부가 날 수 없어 무승부입니다."
+		return "draw"
+	# 사망자 없이 정해진 날 수가 지남(자리비움 등으로 멈춘 판)
+	if {-m::calm} is set:
+		if {-m::calm} >= mCalmMax():
+			set {-m::drawwhy} to "%mCalmMax()%일 동안 아무도 죽지 않아 무승부입니다."
+			return "draw"
+	return ""
+
+# 기본 승리 조건(ROLES.md 표)
+function mWinBase() :: text:
 	set {_a} to 0
 	set {_m} to 0
 	set {_c} to 0
@@ -140,6 +157,7 @@ function mWinCheck() :: text:
 				add 1 to {_nn}
 				set {_last} to loop-value
 	if {_a} is 0:
+		set {-m::drawwhy} to "생존자가 없어 무승부입니다."
 		return "draw"
 	if {_nn} > 0:
 		if {_m} is 0:
@@ -157,11 +175,66 @@ function mWinCheck() :: text:
 		return ""
 	return "citizen"
 
+# 사망자 없이 이만큼의 날(밤+낮)이 지나면 무승부. {mcfg::calm}, 기본 3
+function mCalmMax() :: number:
+	if {mcfg::calm} is set:
+		return {mcfg::calm}
+	return 3
+
+# k 가 밤에 t 를 반드시 죽일 수 있는지(t 가 매일 막을 방법이 있으면 false)
+function mCanKill(k: text, t: text) :: boolean:
+	set {_r} to {-m::role::%{_k}%}
+	set {_tr} to {-m::role::%{_t}%}
+	# 방화(기름 → 점화)는 어떤 능력으로도 막히지 않는다
+	if {_r} is "arsonist":
+		return true
+	set {_can} to false
+	if {_r} is "mafia":
+		if {_tr} is not "mafia":
+			set {_can} to true
+	else if {_r} is "assassin":
+		set {_can} to true
+	else if {_r} is "vigilante" or "thief":
+		if {-m::used::%{_k}%} is not true:
+			set {_can} to true
+	if {_can} is false:
+		return false
+	# 의사는 매일 밤 자기 자신을 치료할 수 있어 살해로는 끝낼 수 없다(군인은 한 번만 버티므로 결국 죽는다)
+	if {_tr} is "doctor":
+		return false
+	return true
+
+# 둘만 남았고, 투표로도 밤 능력으로도 어느 쪽도 상대를 없앨 수 없으면 true(승패가 이미 났으면 이 함수까지 오지 않는다)
+function mStalemate() :: boolean:
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			add loop-value to {_l::*}
+	if size of {_l::*} is not 2:
+		return false
+	set {_x} to {_l::1}
+	set {_y} to {_l::2}
+	# 낮: 건달이 협박하면 상대가 투표를 못 해 처형이 된다 / 표 수가 다르면(정치인) 처형이 된다
+	if {-m::role::%{_x}%} is "thug":
+		return false
+	if {-m::role::%{_y}%} is "thug":
+		return false
+	if mWeight({_x}) is not mWeight({_y}):
+		return false
+	# 밤: 한쪽이라도 상대를 반드시 죽일 수 있으면 끝날 수 있다
+	if mCanKill({_x}, {_y}) is true:
+		return false
+	if mCanKill({_y}, {_x}) is true:
+		return false
+	return true
+
 function mEnd(w: text):
 	set {-m::state} to "end"
 	set {-m::left} to 10
 	if {_w} is "draw":
-		broadcast "&6[마피아] &7생존자가 없어 무승부입니다."
+		set {_why} to {-m::drawwhy}
+		if {_why} is not set:
+			set {_why} to "무승부입니다."
+		broadcast "&6[마피아] &7%{_why}%"
 	else if {_w} is "mafia":
 		broadcast "&6[마피아] &c마피아 팀&7이 승리했습니다."
 	else if {_w} is "citizen":
