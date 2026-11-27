@@ -6,7 +6,8 @@
 # 배경 분리: 세 공간은 100칸씩 떨어져 있고, 각 카메라는 다른 공간을 등지는 방향을 본다(시야 거리 8청크 안이라 화면 전환 때 청크를 다시 받지 않는다).
 # 낮/밤: 서버 시간은 밤(18000)으로 고정(스켈레톤 더미가 타지 않게). 화면의 하늘은 mscene.sk 가 플레이어별로 바꾼다(낮 정오, 밤은 달이 동쪽 낮게 뜬 13800).
 # 배치(월드 mafia_map, 바닥 블록 y=64, 바닥 위 y=65):
-#   낮 광장   (0,0) 둘레 풀밭. 반지름 14 돌 광장(가운데 붉은 카펫 원과 원탁), 가로등 8개, 꽃밭, 벤치, 나무, 남쪽에 집 4채.
+#   낮 광장   (0,0) 둘레 풀밭. 반지름 14 돌 광장(가운데 붉은 카펫 원과 원탁), 가로등 8개, 꽃밭, 벤치. 둘레 사방에 집 16채(±20~27), 나무 8그루, 장터 가판대 6개,
+#             맨 바깥(±30)에 잎 울타리 벽. 투표 선택 화면(원탁 안에서 바깥을 보는 얼굴 클로즈업)의 어느 방향 배경에도 광장만 보이고 다른 공간이나 빈 지평선이 안 보인다.
 #             카메라는 북쪽에서 원탁 가까이(눈 y=68.2, z=-6.2) 남쪽으로 원탁을 크게, 뒤로 집과 하늘을 본다. 더미 자리 반지름 3.2
 #   밤 방     x 100~107, z -4~4, 천장 y=71. 동쪽 벽에 큰 유리창(z -1~1, y 66~70)으로 달이 보인다. 창 앞에 탁자(반 블록)와 꽃병, 촛불,
 #             창 옆(남쪽) 의자에 자기 더미가 카메라를 보고 앉는다. 카메라는 방 가운데쯤(x 103.3)에서 동쪽 창을 꽉 차게 본다
@@ -81,21 +82,44 @@ function mBLamp(w: world, x: number, z: number):
 	mBFill({_w}, {_x}, 65, {_z}, {_x}, 67, {_z}, "minecraft:dark_oak_fence")
 	mBSet({_w}, {_x}, 68, {_z}, "minecraft:lantern")
 
-# 집 하나(광장을 향한 북쪽 면에 문과 창). x1~x1+6, z1~z1+5
+# 집 하나(7x7, 네 면 모두 문과 창이 있어 어느 쪽에서 봐도 앞면). x1~x1+6, z1~z1+6
 function mBHouse(w: world, x1: number, z1: number, wall: text):
 	set {_x2} to {_x1} + 6
-	set {_z2} to {_z1} + 5
+	set {_z2} to {_z1} + 6
 	mBFill({_w}, {_x1}, 65, {_z1}, {_x2}, 68, {_z2}, {_wall})
-	mBFill({_w}, {_x1}, 65, {_z1}, {_x1}, 68, {_z1}, "minecraft:dark_oak_log")
-	mBFill({_w}, {_x2}, 65, {_z1}, {_x2}, 68, {_z1}, "minecraft:dark_oak_log")
-	mBFill({_w}, {_x1} + 3, 65, {_z1}, {_x1} + 3, 66, {_z1}, "minecraft:spruce_planks")
-	mBSet({_w}, {_x1} + 1, 66, {_z1}, "minecraft:glass")
-	mBSet({_w}, {_x1} + 5, 66, {_z1}, "minecraft:glass")
-	mBSet({_w}, {_x1} + 1, 68, {_z1}, "minecraft:glass")
-	mBSet({_w}, {_x1} + 5, 68, {_z1}, "minecraft:glass")
+	loop {_x1}, {_x2}:
+		set {_x} to loop-value-1
+		loop {_z1}, {_z2}:
+			mBFill({_w}, {_x}, 65, loop-value-2, {_x}, 68, loop-value-2, "minecraft:dark_oak_log")
+	loop {_z1}, {_z2}:
+		set {_z} to loop-value
+		mBFill({_w}, {_x1} + 3, 65, {_z}, {_x1} + 3, 66, {_z}, "minecraft:spruce_planks")
+		mBSet({_w}, {_x1} + 1, 66, {_z}, "minecraft:glass")
+		mBSet({_w}, {_x1} + 5, 66, {_z}, "minecraft:glass")
+		mBSet({_w}, {_x1} + 1, 68, {_z}, "minecraft:glass")
+		mBSet({_w}, {_x1} + 5, 68, {_z}, "minecraft:glass")
+	loop {_x1}, {_x2}:
+		set {_x} to loop-value
+		mBFill({_w}, {_x}, 65, {_z1} + 3, {_x}, 66, {_z1} + 3, "minecraft:spruce_planks")
+		mBSet({_w}, {_x}, 66, {_z1} + 1, "minecraft:glass")
+		mBSet({_w}, {_x}, 66, {_z1} + 5, "minecraft:glass")
+		mBSet({_w}, {_x}, 68, {_z1} + 1, "minecraft:glass")
+		mBSet({_w}, {_x}, 68, {_z1} + 5, "minecraft:glass")
 	mBFill({_w}, {_x1} - 1, 69, {_z1} - 1, {_x2} + 1, 69, {_z2} + 1, "minecraft:dark_oak_planks")
 	mBFill({_w}, {_x1}, 70, {_z1}, {_x2}, 70, {_z2}, "minecraft:dark_oak_planks")
-	mBFill({_w}, {_x1} + 1, 71, {_z1} + 1, {_x2} - 1, 71, {_z2} - 1, "minecraft:dark_oak_slab[type=bottom]")
+	mBFill({_w}, {_x1} + 1, 71, {_z1} + 1, {_x2} - 1, 71, {_z2} - 1, "minecraft:dark_oak_planks")
+	mBFill({_w}, {_x1} + 2, 72, {_z1} + 2, {_x2} - 2, 72, {_z2} - 2, "minecraft:dark_oak_slab[type=bottom]")
+
+# 장터 가판대(통 3개 + 울타리 기둥 + 천막). 가운데 (x, z), 천막 색 wool
+function mBStall(w: world, x: number, z: number, wool: text):
+	mBFill({_w}, {_x} - 1, 65, {_z}, {_x} + 1, 65, {_z}, "minecraft:barrel[facing=up]")
+	mBSet({_w}, {_x} - 1, 66, {_z}, "minecraft:pumpkin")
+	mBSet({_w}, {_x} + 1, 66, {_z}, "minecraft:melon")
+	loop -1, 1:
+		set {_dx} to loop-value-1
+		loop -1, 1:
+			mBFill({_w}, {_x} + {_dx}, 66, {_z} + loop-value-2, {_x} + {_dx}, 67, {_z} + loop-value-2, "minecraft:oak_fence")
+	mBFill({_w}, {_x} - 1, 68, {_z} - 1, {_x} + 1, 68, {_z} + 1, {_wool})
 
 function mBuild():
 	set {_w} to mBWorld()
@@ -155,17 +179,35 @@ function mBuild():
 	mBFill({_w}, 12, 65, -2, 13, 65, 2, "minecraft:azure_bluet")
 	mBFill({_w}, -13, 64, -2, -12, 64, 2, "minecraft:grass_block")
 	mBFill({_w}, -13, 65, -2, -12, 65, 2, "minecraft:red_tulip")
-	# 나무 4그루
+	# 광장 둘레: 사방에 집, 사이사이 나무와 가판대, 맨 바깥은 잎 울타리 벽(투표 선택 화면처럼 바깥을 향한 카메라에도 다른 공간/빈 지평선이 안 보이게)
+	mBFill({_w}, -31, 65, 15, 31, 74, 31, "minecraft:air")
+	mBFill({_w}, -31, 65, -31, 31, 74, -15, "minecraft:air")
+	mBFill({_w}, 15, 65, -14, 31, 74, 14, "minecraft:air")
+	mBFill({_w}, -31, 65, -14, -15, 74, 14, "minecraft:air")
+	loop -21, -12, -3, 6, 15:
+		mBHouse({_w}, loop-value, 20, "minecraft:white_terracotta")
+		mBHouse({_w}, loop-value, -27, "minecraft:birch_planks")
+	loop -12, -3, 6:
+		mBHouse({_w}, -27, loop-value, "minecraft:bricks")
+		mBHouse({_w}, 21, loop-value, "minecraft:white_terracotta")
+	loop -30, 30:
+		set {_a} to loop-value
+		mBFill({_w}, -30, 65, {_a}, 30, 69, {_a}, "minecraft:oak_leaves[persistent=true]")
+		mBFill({_w}, {_a}, 65, -30, {_a}, 69, 30, "minecraft:oak_leaves[persistent=true]")
+	mBTree({_w}, 24, 24)
+	mBTree({_w}, -24, 24)
+	mBTree({_w}, 24, -24)
+	mBTree({_w}, -24, -24)
 	mBTree({_w}, 17, 12)
 	mBTree({_w}, -17, 12)
-	mBTree({_w}, 18, -6)
-	mBTree({_w}, -18, -6)
-	# 광장 뒤쪽(남쪽) 집들
-	mBHouse({_w}, -19, 20, "minecraft:white_terracotta")
-	mBHouse({_w}, -10, 21, "minecraft:birch_planks")
-	mBHouse({_w}, 4, 21, "minecraft:white_terracotta")
-	mBHouse({_w}, 13, 20, "minecraft:bricks")
-	mBTree({_w}, -2, 25)
+	mBTree({_w}, 17, -12)
+	mBTree({_w}, -17, -12)
+	mBStall({_w}, 10, 16, "minecraft:red_wool")
+	mBStall({_w}, -10, 16, "minecraft:yellow_wool")
+	mBStall({_w}, 10, -16, "minecraft:blue_wool")
+	mBStall({_w}, -10, -16, "minecraft:lime_wool")
+	mBStall({_w}, 16, 0, "minecraft:orange_wool")
+	mBStall({_w}, -16, 0, "minecraft:white_wool")
 	# ================= 밤: 달이 보이는 작은 방 (x 100~107, z -4~4), 동쪽 창, 카메라는 서쪽에서 동쪽을 본다
 	mBFill({_w}, 75, 64, -30, 135, 64, 30, "minecraft:grass_block")
 	mBRoom({_w}, 100, -4, 107, 4, 64, 71, "minecraft:dark_oak_planks", "minecraft:spruce_planks", "minecraft:spruce_planks")
