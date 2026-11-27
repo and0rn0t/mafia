@@ -1,9 +1,9 @@
 # ==============================================================================
 # [mchat.sk] 게임 중 채팅 채널 분리, 마녀 저주. 규칙은 ROLES.md, 구조는 DESIGN.md 6번. 로비와 게임 종료(end) 상태는 건드리지 않는다.
 # 채널:
-#   - 생존 참가자: 생존 참가자만 받는다. 낮 토론/투표/처형 때만 말할 수 있고 밤(night, resolve)에는 막힌다.
+#   - 생존 참가자: 생존 참가자와 사망자·관전자가 받는다(사망자·관전자는 듣기만). 낮 토론/투표/처형 때만 말할 수 있고 밤(night, resolve)에는 막힌다.
 #   - 죽은 사람 및 관전자: 생존 참가자가 아닌 모든 사람(사망한 참가자, 관전자, 중간에 들어온 사람)끼리만 받는다. 언제든 가능.
-#   - 마피아 팀: 팀이 mafia 인 생존 참가자(마피아, 접선한 보조 직업, 마피아를 훔친 도둑)끼리. 밤(night, resolve)에만 가능.
+#   - 마피아 팀: 팀이 mafia 인 생존 참가자(마피아, 접선한 보조 직업, 마피아를 훔친 도둑)끼리 말하고, 사망자·관전자도 받는다. 밤(night, resolve)에만 가능.
 # 마녀 저주({-m::nocht::uuid}): 낮 토론(day) 동안만 말할 수 없다. 투표 시간부터는 말할 수 있다.
 # 건달 협박({-m::novote::uuid})은 투표 쪽(mvote.sk 의 mVoteCast)에서 막는다.
 # 미검증: 전체(서버 실행 불가). chat recipients 표현식(클래스 ExprChatRecipients 존재 확인), message 바꾸기.
@@ -50,6 +50,9 @@ on chat:
 		loop all players:
 			if mChatMafia(loop-player) is true:
 				add loop-player to chat recipients
+			# 사망자·관전자도 마피아 팀 대화를 본다(말은 못 섞는다)
+			else if mChatAlive(loop-player) is not true:
+				add loop-player to chat recipients
 		set message to "&c[마피아 팀] &f%{_msg}%"
 		stop
 	# 낮 토론: 마녀 저주
@@ -58,7 +61,7 @@ on chat:
 			cancel event
 			send "&5저주를 받아 오늘 토론 시간에는 말할 수 없습니다." to {_p}
 			stop
+	# 생존자 대화는 생존자와 사망자·관전자 모두 본다(사망자·관전자의 말은 위의 관전 채널로만 간다)
 	clear chat recipients
 	loop all players:
-		if mChatAlive(loop-player) is true:
-			add loop-player to chat recipients
+		add loop-player to chat recipients
