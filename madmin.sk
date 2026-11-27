@@ -1,0 +1,223 @@
+# ==============================================================================
+# [madmin.sk] 관리자 메뉴(상자 GUI, OP 전용). 규칙은 ROLES.md, 구조는 DESIGN.md 7번.
+# 명령: /madmin
+# 메뉴:
+#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
+#   roles  직업마다 켜짐(초록)/꺼짐(빨강)/고정(노랑). 클릭하면 켜고 끈다. 마피아/경찰/의사는 끌 수 없다
+#   scene  연출 장소(mscene.sk 머리말의 6곳): 좌클릭 = 지금 위치로 정하기, 우클릭 = 그 위치로 이동
+#          카메라 3곳(daycam/nightcam/bedcam)은 눈 위치와 바라보는 방향을 저장한다. 나머지는 발 위치와 바라보는 방향
+#          숫자(원탁 반지름, 얼굴 거리, 얼굴 높이, 카메라 눈 높이): 좌클릭 늘리기 / 우클릭 줄이기
+# 변수: {-madm::uuid} 지금 열어 둔 메뉴 이름(main/roles/scene). 닫으면 지운다.
+# 미검증: 전체(서버 실행 불가). chest inventory 만들기/열기, click type, raw index of event-slot 은 Skript 2.13.0 jar 의 예시 문자열로 확인.
+# ==============================================================================
+
+function mAdmItem(it: itemtype, n: text, lore: texts) :: itemtype:
+	set {_i} to {_it} named {_n}
+	set lore of {_i} to {_lore::*}
+	return {_i}
+
+function mAdmOpen(p: player, menu: text):
+	if {_menu} is "roles":
+		set {_inv} to chest inventory with 4 rows named "&8마피아 관리자 - 직업"
+		set {_i} to 0
+		loop mRoleIds():
+			set {_id} to loop-value
+			set {_nm} to mRoleName({_id})
+			set {_po} to mRolePool({_id})
+			if mRoleLocked({_id}) is true:
+				set {_it} to yellow wool
+				set {_st} to "&e고정(끌 수 없음)"
+			else if mRoleOn({_id}) is true:
+				set {_it} to lime wool
+				set {_st} to "&a켜짐 &7- 클릭하면 끕니다"
+			else:
+				set {_it} to red wool
+				set {_st} to "&c꺼짐 &7- 클릭하면 켭니다"
+			set slot {_i} of {_inv} to mAdmItem({_it}, "&f%{_nm}%", ("&7%{_id}% (%{_po}%)", {_st}, "&8%mRoleDesc({_id})%"))
+			add 1 to {_i}
+		set slot 35 of {_inv} to mAdmItem(arrow, "&7뒤로", "&7메인 메뉴")
+	else if {_menu} is "scene":
+		set {_inv} to chest inventory with 3 rows named "&8마피아 관리자 - 장소/카메라"
+		set {_i} to 0
+		loop mScKeys():
+			set {_k} to loop-value
+			set {_st} to "&c정해지지 않음"
+			if mLocSet({_k}) is true:
+				set {_l} to mLocLoad({_k})
+				set {_x} to round({_l}.getX() * 10) / 10
+				set {_y} to round({_l}.getY() * 10) / 10
+				set {_z} to round({_l}.getZ() * 10) / 10
+				set {_st} to "&a%{_x}%, %{_y}%, %{_z}%"
+			set {_it} to compass
+			if {_k} is "daycam" or "nightcam" or "bedcam":
+				set {_it} to spyglass
+			set slot {_i} of {_inv} to mAdmItem({_it}, "&f%mScLabel({_k})%", ({_st}, "&7좌클릭: 지금 위치로 정하기", "&7우클릭: 그 위치로 이동"))
+			add 1 to {_i}
+		set {_r} to mScNum("radius", 3)
+		set {_fd} to mScNum("facedist", 1.4)
+		set {_fh} to mScNum("faceh", 1.1)
+		set {_ey} to mScNum("eye", 1.62)
+		set slot 9 of {_inv} to mAdmItem(oak fence, "&f원탁 반지름: &e%{_r}%", "&7좌클릭 +0.25 / 우클릭 -0.25")
+		set slot 10 of {_inv} to mAdmItem(player head, "&f얼굴 클로즈업 거리: &e%{_fd}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
+		set slot 11 of {_inv} to mAdmItem(armor stand, "&f앉은 더미 얼굴 높이: &e%{_fh}%", "&7좌클릭 +0.05 / 우클릭 -0.05")
+		set slot 12 of {_inv} to mAdmItem(ender eye, "&f카메라 눈 높이 보정: &e%{_ey}%", ("&7카메라 탈것과 눈 사이 높이", "&7좌클릭 +0.05 / 우클릭 -0.05"))
+		set {_miss} to mSceneMissing()
+		if {_miss} is "":
+			set slot 14 of {_inv} to mAdmItem(lime concrete, "&a연출 사용 가능", "&7장소가 모두 정해졌습니다.")
+		else:
+			set slot 14 of {_inv} to mAdmItem(red concrete, "&c연출 꺼짐", ("&7빠진 장소: %{_miss}%", "&7빠진 장소가 있으면 연출 없이 진행합니다."))
+		set slot 26 of {_inv} to mAdmItem(arrow, "&7뒤로", "&7메인 메뉴")
+	else:
+		set {_menu} to "main"
+		set {_inv} to chest inventory with 3 rows named "&8마피아 관리자"
+		set {_d} to mTimeDiscuss()
+		set {_v} to mTimeVote()
+		set {_n} to mTimeNight()
+		set slot 10 of {_inv} to mAdmItem(clock, "&f낮 토론 시간: &e%{_d}%초", "&7좌클릭 +10초 / 우클릭 -10초")
+		set slot 11 of {_inv} to mAdmItem(clock, "&f투표 시간: &e%{_v}%초", "&7좌클릭 +5초 / 우클릭 -5초")
+		set slot 12 of {_inv} to mAdmItem(clock, "&f밤 능력 선택 시간: &e%{_n}%초", "&7좌클릭 +5초 / 우클릭 -5초")
+		set slot 14 of {_inv} to mAdmItem(book, "&f직업 켜고 끄기", "&7보조 3, 중립 3, 시민 팀(경찰/의사 제외)")
+		set slot 15 of {_inv} to mAdmItem(spyglass, "&f장소/카메라 설정", "&7원탁, 방, 침대, 카메라 위치")
+		if mState() is "lobby":
+			set {_cnt} to size of mLobbyPlayers()
+			set {_why} to mStartCheck({_cnt})
+			if {_why} is "":
+				set {_why} to mWorldCheck()
+			if {_why} is "":
+				set {_why} to "&a시작할 수 있습니다."
+			else:
+				set {_why} to "&c%{_why}%"
+			set slot 16 of {_inv} to mAdmItem(lime concrete, "&a게임 시작", ("&7참가 인원: %{_cnt}%명", {_why}))
+		else:
+			set {_s} to mState()
+			set slot 16 of {_inv} to mAdmItem(red concrete, "&c게임 강제 종료", ("&7지금 상태: %{_s}%", "&7클릭하면 로비로 돌아갑니다."))
+	open {_inv} to {_p}
+	set {-madm::%uuid of {_p}%} to {_menu}
+
+# 시간 설정 값을 더한다(5초 미만으로는 내려가지 않음)
+function mAdmTime(k: text, d: number):
+	if {_k} is "discuss":
+		set {_t} to mTimeDiscuss() + {_d}
+	else if {_k} is "vote":
+		set {_t} to mTimeVote() + {_d}
+	else:
+		set {_t} to mTimeNight() + {_d}
+	if {_t} < 5:
+		set {_t} to 5
+	set {mcfg::%{_k}%} to {_t}
+
+function mAdmNum(k: text, d: number, def: number):
+	set {_v} to mScNum({_k}, {_def}) + {_d}
+	set {_v} to round({_v} * 100) / 100
+	if {_v} < 0:
+		set {_v} to 0
+	set {mcfg::scene::%{_k}%} to {_v}
+
+command /madmin:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 관리자 메뉴 (관리자 전용)
+	executable by: players
+	trigger:
+		if player is not op:
+			send "&c관리자만 사용할 수 있습니다."
+			stop
+		mAdmOpen(player, "main")
+
+on inventory close:
+	delete {-madm::%uuid of player%}
+
+on inventory click:
+	set {_m} to {-madm::%uuid of player%}
+	if {_m} is not set:
+		stop
+	cancel the event
+	if player is not op:
+		stop
+	set {_raw} to raw index of event-slot
+	set {_size} to 27
+	if {_m} is "roles":
+		set {_size} to 36
+	if {_raw} >= {_size}:
+		stop
+	set {_s} to index of event-slot
+	set {_right} to false
+	if click type is right mouse button or right mouse button with shift:
+		set {_right} to true
+	set {_sign} to 1
+	if {_right} is true:
+		set {_sign} to -1
+	play sound "ui.button.click" with volume 0.4 and pitch 1.4 to player
+	if {_m} is "main":
+		if {_s} is 10:
+			mAdmTime("discuss", 10 * {_sign})
+		else if {_s} is 11:
+			mAdmTime("vote", 5 * {_sign})
+		else if {_s} is 12:
+			mAdmTime("night", 5 * {_sign})
+		else if {_s} is 14:
+			mAdmOpen(player, "roles")
+			stop
+		else if {_s} is 15:
+			mAdmOpen(player, "scene")
+			stop
+		else if {_s} is 16:
+			close player's inventory
+			if mState() is "lobby":
+				mStart(player)
+			else:
+				mToLobby()
+				broadcast "&6[마피아] &7관리자가 게임을 종료해 로비로 돌아왔습니다."
+			stop
+		else:
+			stop
+		mAdmOpen(player, "main")
+		stop
+	if {_m} is "roles":
+		if {_s} is 35:
+			mAdmOpen(player, "main")
+			stop
+		set {_ids::*} to mRoleIds()
+		set {_id} to {_ids::%{_s} + 1%}
+		if {_id} is not set:
+			stop
+		if mRoleLocked({_id}) is true:
+			send "&c확정 직업(마피아, 경찰, 의사)은 끌 수 없습니다." to player
+			stop
+		if mRoleOn({_id}) is true:
+			set {mcfg::role::%{_id}%} to false
+		else:
+			delete {mcfg::role::%{_id}%}
+		mAdmOpen(player, "roles")
+		stop
+	if {_m} is "scene":
+		if {_s} is 26:
+			mAdmOpen(player, "main")
+			stop
+		if {_s} < 6:
+			set {_keys::*} to mScKeys()
+			set {_k} to {_keys::%{_s} + 1%}
+			if {_right} is true:
+				set {_l} to mLocLoad({_k})
+				if {_l} is not set:
+					send "&c%mScLabel({_k})% 위치가 정해지지 않았습니다." to player
+					stop
+				close player's inventory
+				mTp(player, {_l})
+				stop
+			if {_k} is "daycam" or "nightcam" or "bedcam":
+				mLocSave({_k}, player.getEyeLocation())
+			else:
+				mLocSave({_k}, player's location)
+			send "&a%mScLabel({_k})% 위치를 지금 자리로 정했습니다." to player
+		else if {_s} is 9:
+			mAdmNum("radius", 0.25 * {_sign}, 3)
+		else if {_s} is 10:
+			mAdmNum("facedist", 0.1 * {_sign}, 1.4)
+		else if {_s} is 11:
+			mAdmNum("faceh", 0.05 * {_sign}, 1.1)
+		else if {_s} is 12:
+			mAdmNum("eye", 0.05 * {_sign}, 1.62)
+		else:
+			stop
+		mAdmOpen(player, "scene")

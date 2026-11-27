@@ -242,6 +242,7 @@ function mStart(by: object) :: boolean:
 			mTp({_p}, {_gl})
 			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다." to {_p}
 	mMafiaReveal()
+	mSceneStart()
 	mBegin()
 	mTabUpdateAll()
 	return true
@@ -261,6 +262,7 @@ on join:
 		if mIsPlayer({_p}) is true:
 			delete {-m::away::%{_id}%}
 			send "&6[마피아] &7게임에 다시 참여했습니다." to {_p}
+			mSceneRejoin({_p})
 		else:
 			set {_p}'s gamemode to spectator
 			send "&6[마피아] &7게임이 진행 중이라 관전자로 들어왔습니다." to {_p}

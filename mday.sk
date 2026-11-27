@@ -1,13 +1,15 @@
 # ==============================================================================
 # [mday.sk] 게임 진행 루프(밤 → 처리 → 낮 → 투표 → 처형 → 밤 …), 낮 시간 조절, 로비 복귀. 규칙은 ROLES.md, 구조는 DESIGN.md.
 # 진행: every second 한 개가 {-m::state} 별로 {-m::left} 를 줄이고 0 이 되면 다음 단계로 넘긴다.
-#   night(밤 입력 시간) → [mResolve + mResolveShow + 승패] → day(토론) → vote(mvote.sk) → [mTally, 테러리스트면 execute] → [승패] → night …  end → 10초 뒤 로비
-# 낮 시간 조절: /mdisc up|down  (낮마다 한 사람 한 번, 15초, 누가 눌렀는지 알림, 0초가 되면 투표로)
+#   night(밤 입력 시간) → [mResolve] → resolve(mSceneResolve 연출 시간) → [mResolveShow + 승패] → day(토론) → vote(mvote.sk) → [mTally, 테러리스트면 execute] → [승패] → night …  end → 10초 뒤 로비
+#   단계가 바뀔 때 mscene.sk 의 mSceneNight/mSceneDay/mSceneVote 를 부르고, 대상 선택 화면은 단계가 끝날 때 mPickCloseAll 로 닫는다.
+# 낮 시간 조절: /mdisc up|down 또는 핫바 아이템 (낮마다 한 사람 한 번, 15초, 누가 눌렀는지 알림, 0초가 되면 투표로)
 # 변수: {-m::tadj::uuid}(이 낮에 시간 조절 사용함, 낮 시작 때 초기화)
-# 미검증: 전체(서버 실행 불가). 연출(mscene.sk), 채팅 분리(mchat.sk)는 아직 없다.
+# 미검증: 전체(서버 실행 불가).
 # ==============================================================================
 
 function mToLobby():
+	mSceneClear()
 	mReset()
 	set {_lb} to mLobbyLoc()
 	loop all players:
@@ -24,19 +26,24 @@ function mStartNight():
 	set {-m::state} to "night"
 	mNightStart()
 	broadcast "&6[마피아] &7%{-m::day}%일차 밤이 시작됩니다. (%{-m::left}%초)"
+	mSceneNight()
 
 function mStartDay():
 	set {-m::state} to "day"
 	set {-m::left} to mTimeDiscuss()
 	delete {-m::tadj::*}
 	broadcast "&6[마피아] &7%{-m::day}%일차 낮입니다. 토론하세요. (%{-m::left}%초)"
+	mSceneDay()
 
 # 승패가 났으면 종료 처리하고 true
 function mCheckEnd() :: boolean:
 	set {_w} to mWinCheck()
 	if {_w} is "":
 		return false
+	mPickCloseAll()
 	mEnd({_w})
+	loop {-m::players::*}:
+		mViewAuto(loop-value, false)
 	return true
 
 every second:
@@ -52,8 +59,11 @@ every second:
 	if {-m::left} > 0:
 		stop
 	if {_s} is "night":
+		mPickCloseAll()
 		set {-m::state} to "resolve"
 		mResolve()
+		set {-m::left} to mSceneResolve()
+	else if {_s} is "resolve":
 		mResolveShow()
 		if mCheckEnd() is true:
 			stop
@@ -61,6 +71,7 @@ every second:
 	else if {_s} is "day":
 		mVoteStart()
 	else if {_s} is "vote":
+		mPickCloseAll()
 		mTally()
 		if mState() is "execute":
 			stop
@@ -68,6 +79,7 @@ every second:
 			stop
 		mStartNight()
 	else if {_s} is "execute":
+		mPickCloseAll()
 		if {-m::exe} is set:
 			set {_x} to {-m::exe}
 			loop {-m::players::*}:

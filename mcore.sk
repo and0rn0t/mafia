@@ -24,7 +24,9 @@
 #   {-m::fake::uuid}         광인에게 보여 준 가짜 직업                                                      mjoin.sk, mnight.sk
 #   {-m::contact/soldier/oil/nocht/novote/stolen::uuid}, {-m::ev/info/pub/dead::*}   밤 처리 결과·상태 (자세한 뜻은 mresolve.sk 머리말)
 #   {-m::vote/votes/tadj::uuid}, {-m::exe}   투표 대상 / 받은 표 / 낮 시간 조절 사용 / 길동무 선택 대기 테러리스트   mvote.sk, mday.sk
-# (아래 변수는 DESIGN.md 3번 참고, 해당 파일을 만들 때 이 목록에 옮긴다: nocht, novote, oil, soldier, votes, tadj, ev)
+#   {-ms::...}               화면 연출 상태(카메라, 더미, 대상 선택 화면). 목록과 뜻은 mscene.sk 머리말. mSceneClear 가 한꺼번에 지운다   mscene.sk
+#   {mcfg::loc::table/daycam/room/nightcam/bed/bedcam::...}, {mcfg::scene::radius/facedist/faceh/eye}   연출 장소와 숫자 설정   madmin.sk
+#   {-madm::uuid}            관리자 메뉴에서 지금 열어 둔 메뉴 이름                                          madmin.sk
 #
 # 위치 저장은 PvP 서버(andornot)의 gcSaveLoc/gcLoadLoc 와 같은 방식이다(월드 이름 + 좌표). 월드는 world.sk 의 /world create 로 먼저 만들어 둔다.
 # 명령(관리자 전용): /mloc lobby|game set|tp|info , /mtime discuss|vote|night <초> , /mtime (현재 값)

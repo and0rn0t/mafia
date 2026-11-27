@@ -3,7 +3,7 @@
 # 함수: mVoteStart() 투표 시작 / mVoteCast(투표자, 대상) 투표(한 번만, 바꿀 수 없음 - 확정) / mTally() 집계·처형 / mTakeStart(테러리스트) / mTakePick(테러리스트, 대상)
 #       mWeight(id) 표 수(정치인 2) / mWinCheck() "" 진행, "draw", "mafia", "citizen", "neutral:uuid" / mEnd(승자) 종료 처리(mday.sk 의 mToLobby 로 복귀)
 # 변수: {-m::vote::uuid}(투표 대상), {-m::votes::uuid}(받은 표), {-m::exe}(처형된 테러리스트 uuid, 길동무 선택 대기 중)
-# 시험용 명령: /mvote <닉네임>, /mtake <닉네임>(테러리스트 길동무). GUI 는 나중에 연결한다.
+# 명령: /mvote <닉네임>, /mtake <닉네임>(테러리스트 길동무). 화면 선택(좌/우클릭, F)은 mscene.sk 가 같은 함수를 부른다.
 # 마담: 투표 시간에 마담에게 투표당한 사람은 직후 밤 능력 불가({-m::sealed}). 대상이 마피아 직업이면 봉인 대신 접선. 마담의 표도 일반 표로 센다.
 # 미검증: 전체(서버 실행 불가).
 # ==============================================================================
@@ -18,7 +18,8 @@ function mVoteStart():
 	delete {-m::votes::*}
 	set {-m::state} to "vote"
 	set {-m::left} to mTimeVote()
-	broadcast "&6[마피아] &7투표 시간입니다. /mvote <닉네임> 으로 투표하세요. (%{-m::left}%초)"
+	broadcast "&6[마피아] &7투표 시간입니다. 핫바의 대상 고르기(또는 /mvote <닉네임>)로 투표하세요. (%{-m::left}%초)"
+	mSceneVote()
 
 function mVoteCast(v: text, t: text) :: text:
 	if mState() is not "vote":
@@ -91,7 +92,8 @@ function mTally():
 		set {-m::left} to 15
 		set {_tp} to mPlayerOf({_x})
 		if {_tp} is set:
-			send "&c길동무를 고르세요. /mtake <닉네임> (15초, 시간 초과 시 무작위)" to {_tp}
+			send "&c길동무를 고르세요. 좌/우클릭으로 고르고 F 로 확정(또는 /mtake <닉네임>). 15초가 지나면 무작위로 정해집니다." to {_tp}
+		mSceneTake({_x})
 
 function mTakePick(t: text, v: text) :: text:
 	if mState() is not "execute":

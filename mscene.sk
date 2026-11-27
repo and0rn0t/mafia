@@ -1,0 +1,808 @@
+# ==============================================================================
+# [mscene.sk] 화면 연출: 고정 카메라, 원탁/방/침대 더미, 대상 선택(좌/우클릭 바꾸기, F 확정, 방벽 = 선택하지 않음), 밤 사건 연출, 게임 중 핫바.
+# 규칙은 ROLES.md "화면 연출", 구조는 DESIGN.md. 장소/카메라 위치는 madmin.sk(관리자 메뉴)에서 정한다.
+#
+# 장소 키(mcore.sk 의 mLocSave/mLocLoad 로 저장, {mcfg::loc::키::...}):
+#   table     원탁 가운데(바닥 높이). 참가자 더미가 이 둘레(반지름 {mcfg::scene::radius})에 앉는다
+#   daycam    낮 전체 카메라(서 있는 눈 위치와 바라보는 방향)
+#   room      밤 방에서 자기 더미가 앉는 곳
+#   nightcam  밤 방 카메라
+#   bed       밤 대상 선택 때 대상 더미가 눕는 침대 위치
+#   bedcam    침대 카메라
+# 숫자 설정: {mcfg::scene::radius}(원탁 반지름, 기본 3), {mcfg::scene::facedist}(얼굴 클로즈업 거리, 기본 1.4),
+#            {mcfg::scene::faceh}(앉은 더미 얼굴 높이, 기본 1.1), {mcfg::scene::eye}(카메라 탈것과 눈 높이 차이, 기본 1.62)
+# 장소가 하나라도 정해지지 않았으면 연출을 끄고(mSceneOn false) 예전처럼 게임 월드 위치에 서서 명령어로 진행한다.
+#
+# 변수(전부 임시):
+#   {-ms::on}                 이번 게임에서 연출을 쓰는지
+#   {-ms::ents::*}            이번 게임에서 만든 엔티티(정리용)
+#   {-ms::seat::uuid}, {-ms::seatn}   원탁 자리 번호(1부터) / 자리 수
+#   {-ms::dummy::uuid}        원탁 더미(생존: 마네킹, 사망: 스켈레톤)
+#   {-ms::self::uuid}         밤 방의 자기 더미(본인에게만 보임)
+#   {-ms::bed::uuid}          침대 더미(본인에게만 보임, 대상 선택 때 대상의 모습으로 바뀜)
+#   {-ms::cam::uuid}          카메라 탈것(아이템 디스플레이). 플레이어가 타고 있다
+#   {-ms::cx/cy/cz::uuid}, {-ms::fx/fy/fz::uuid}   카메라 현재 위치 / 현재 바라보는 점
+#   {-ms::tx/ty/tz::uuid}, {-ms::gx/gy/gz::uuid}   카메라 목표 위치 / 목표 바라보는 점 (매 틱 부드럽게 따라간다)
+#   {-ms::pick::uuid}         대상 선택 중인 종류(night / vote / take)
+#   {-ms::cand::uuid::*}, {-ms::idx::uuid}   대상 후보 uuid 목록 / 지금 보고 있는 후보 번호
+#   {-ms::last::uuid}         마지막 클릭 시각(같은 클릭이 두 번 들어오는 것 막기)
+#   {-ms::clearing}           정리 중(내리기를 막지 않음)
+#
+# 방식(미검증): 플레이어는 어드벤처 모드로 투명해지고 카메라 탈것(아이템 디스플레이, teleport duration 으로 클라이언트 보간)에 탄다.
+#   매 틱 카메라 위치와 시선(Player#lookAt)을 목표 쪽으로 조금씩 옮겨 부드럽게 이동한다. 내리기(웅크리기)는 막는다.
+#   더미는 마네킹(1.21.9+ Mannequin, 플레이어 스킨)이고 의자 대신 보이지 않는 아이템 디스플레이에 태워 앉힌다.
+#   사망자 자리는 엎드린(SWIMMING 자세) 스켈레톤으로 바꾼다. 들고 있는 아이템은 다른 사람에게 보이지 않게 장비 패킷으로 지운다.
+# 미검증: 전체(서버 실행 불가). 특히 디스플레이에 탄 카메라의 높이/보간, lookAt 반복의 떨림, 마네킹 앉기/눕기 자세, 스켈레톤 엎드리기,
+#   PlayerArmSwingEvent/EntityDismountEvent 를 skript-reflect 이벤트로 받는 것, 가변 인자(TeleportFlag) 호출, nick.sk 의 가짜 신분과 마네킹 스킨.
+# ==============================================================================
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.Location
+	org.bukkit.Material
+	org.bukkit.entity.EntityType
+	org.bukkit.entity.Pose
+	org.bukkit.entity.Player
+	org.bukkit.entity.Mannequin
+	org.bukkit.inventory.EquipmentSlot
+	org.bukkit.inventory.ItemStack
+	org.bukkit.potion.PotionEffect
+	org.bukkit.potion.PotionEffectType
+	org.bukkit.event.entity.EntityDismountEvent
+	io.papermc.paper.event.player.PlayerArmSwingEvent
+	io.papermc.paper.entity.LookAnchor
+	io.papermc.paper.entity.TeleportFlag$EntityState as MTpState
+	io.papermc.paper.datacomponent.item.ResolvableProfile
+	net.kyori.adventure.text.Component
+
+# ------------------------------------------------------------------ 설정 값
+
+function mScNum(k: text, d: number) :: number:
+	if {mcfg::scene::%{_k}%} is set:
+		return {mcfg::scene::%{_k}%}
+	return {_d}
+
+function mScPlugin() :: object:
+	return Bukkit.getPluginManager().getPlugin("Skript")
+
+function mScKeys() :: texts:
+	return "table", "daycam", "room", "nightcam", "bed", "bedcam"
+
+function mScLabel(k: text) :: text:
+	if {_k} is "table":
+		return "원탁 가운데"
+	if {_k} is "daycam":
+		return "낮 전체 카메라"
+	if {_k} is "room":
+		return "밤 방(자기 더미 자리)"
+	if {_k} is "nightcam":
+		return "밤 방 카메라"
+	if {_k} is "bed":
+		return "침대(대상 더미 자리)"
+	if {_k} is "bedcam":
+		return "침대 카메라"
+	return {_k}
+
+# 연출에 필요한 장소가 전부 정해졌으면 "", 아니면 빠진 장소 이름
+function mSceneMissing() :: text:
+	loop mScKeys():
+		if mLocSet(loop-value) is false:
+			add mScLabel(loop-value) to {_m::*}
+	if size of {_m::*} is 0:
+		return ""
+	return "%{_m::*}%"
+
+function mSceneOn() :: boolean:
+	if {-ms::on} is true:
+		return true
+	return false
+
+# ------------------------------------------------------------------ 더미
+
+function mScTrack(e: object):
+	add {_e} to {-ms::ents::*}
+
+# 보이지 않는 의자(아이템 디스플레이)를 만들고 그 위에 마네킹을 앉힌다. owner 는 스킨을 가져올 uuid.
+function mScSeated(l: location, owner: text) :: object:
+	set {_w} to {_l}.getWorld()
+	set {_seat} to {_w}.spawnEntity({_l}, EntityType.ITEM_DISPLAY)
+	{_seat}.setPersistent(false)
+	mScTrack({_seat})
+	set {_m} to {_w}.spawnEntity({_l}, EntityType.MANNEQUIN)
+	mScDummySetup({_m}, {_owner})
+	{_seat}.addPassenger({_m})
+	{_m}.setRotation({_l}.getYaw(), 0)
+	return {_m}
+
+function mScDummySetup(m: object, owner: text):
+	{_m}.setPersistent(false)
+	{_m}.setInvulnerable(true)
+	{_m}.setSilent(true)
+	{_m}.setImmovable(true)
+	{_m}.setDescription(Component.empty())
+	mScTrack({_m})
+	mScSkin({_m}, {_owner})
+
+# 마네킹의 스킨과 이름을 그 참가자로 바꾼다(접속 중일 때만 스킨을 가져온다)
+function mScSkin(m: object, owner: text):
+	set {_p} to mPlayerOf({_owner})
+	if {_p} is set:
+		{_m}.setProfile(ResolvableProfile.resolvableProfile({_p}.getPlayerProfile()))
+	else:
+		{_m}.setProfile(Mannequin.defaultProfile())
+	set {_n} to mNameOf({_owner})
+	{_m}.customName(Component.text({_n}))
+	{_m}.setCustomNameVisible(true)
+
+# 이 엔티티를 viewer 한 사람에게만 보이게 한다
+function mScOnlyFor(e: object, viewer: text):
+	{_e}.setVisibleByDefault(false)
+	set {_p} to mPlayerOf({_viewer})
+	if {_p} is set:
+		{_p}.showEntity(mScPlugin(), {_e})
+
+# 원탁 자리 i(1부터)의 위치. 바라보는 방향은 원탁 가운데.
+function mScSeatLoc(i: number) :: location:
+	set {_t} to mLocLoad("table")
+	set {_n} to {-ms::seatn}
+	set {_a} to 360 * ({_i} - 1) / {_n}
+	set {_r} to mScNum("radius", 3)
+	set {_x} to {_t}.getX() + {_r} * cos({_a})
+	set {_z} to {_t}.getZ() + {_r} * sin({_a})
+	set {_l} to new Location({_t}.getWorld(), {_x}, {_t}.getY(), {_z}, {_a} + 90, 0)
+	return {_l}
+
+# 사망: 원탁 자리의 마네킹을 엎드린 스켈레톤으로 바꾼다
+function mSceneDead(id: text):
+	if mSceneOn() is not true:
+		stop
+	set {_old} to {-ms::dummy::%{_id}%}
+	if {_old} is set:
+		set {_v} to {_old}.getVehicle()
+		{_old}.remove()
+		if {_v} is set:
+			{_v}.remove()
+	set {_i} to {-ms::seat::%{_id}%}
+	if {_i} is not set:
+		stop
+	set {_l} to mScSeatLoc({_i})
+	set {_sk} to {_l}.getWorld().spawnEntity({_l}, EntityType.SKELETON)
+	{_sk}.setPersistent(false)
+	{_sk}.setAI(false)
+	{_sk}.setSilent(true)
+	{_sk}.setInvulnerable(true)
+	{_sk}.setGravity(false)
+	{_sk}.setPose(Pose.SWIMMING, true)
+	mScTrack({_sk})
+	set {-ms::dummy::%{_id}%} to {_sk}
+
+# ------------------------------------------------------------------ 카메라
+
+# 목표 카메라 위치/바라보는 점을 정한다. snap 이 true 면 바로 그 자리로 옮긴다.
+function mCamGoal(id: text, px: number, py: number, pz: number, fx: number, fy: number, fz: number, snap: boolean):
+	set {-ms::tx::%{_id}%} to {_px}
+	set {-ms::ty::%{_id}%} to {_py}
+	set {-ms::tz::%{_id}%} to {_pz}
+	set {-ms::gx::%{_id}%} to {_fx}
+	set {-ms::gy::%{_id}%} to {_fy}
+	set {-ms::gz::%{_id}%} to {_fz}
+	if {_snap} is true:
+		set {-ms::cx::%{_id}%} to {_px}
+		set {-ms::cy::%{_id}%} to {_py}
+		set {-ms::cz::%{_id}%} to {_pz}
+		set {-ms::fx::%{_id}%} to {_fx}
+		set {-ms::fy::%{_id}%} to {_fy}
+		set {-ms::fz::%{_id}%} to {_fz}
+
+# 저장된 카메라 장소(눈 위치 + 방향)로 목표를 정한다
+function mCamTo(id: text, key: text, snap: boolean):
+	set {_l} to mLocLoad({_key})
+	if {_l} is not set:
+		stop
+	set {_yaw} to {_l}.getYaw()
+	set {_pit} to {_l}.getPitch()
+	set {_dx} to -1 * sin({_yaw}) * cos({_pit})
+	set {_dy} to -1 * sin({_pit})
+	set {_dz} to cos({_yaw}) * cos({_pit})
+	set {_x} to {_l}.getX()
+	set {_y} to {_l}.getY()
+	set {_z} to {_l}.getZ()
+	mCamGoal({_id}, {_x}, {_y}, {_z}, {_x} + {_dx} * 6, {_y} + {_dy} * 6, {_z} + {_dz} * 6, {_snap})
+
+# 원탁에 앉은 대상(t)의 얼굴을 가까이서 보는 카메라
+function mCamFace(id: text, t: text):
+	set {_i} to {-ms::seat::%{_t}%}
+	if {_i} is not set:
+		stop
+	set {_s} to mScSeatLoc({_i})
+	set {_a} to 360 * ({_i} - 1) / {-ms::seatn}
+	set {_d} to mScNum("facedist", 1.4)
+	set {_fy} to {_s}.getY() + mScNum("faceh", 1.1)
+	set {_fx} to {_s}.getX()
+	set {_fz} to {_s}.getZ()
+	set {_px} to {_fx} - cos({_a}) * {_d}
+	set {_pz} to {_fz} - sin({_a}) * {_d}
+	mCamGoal({_id}, {_px}, {_fy} + 0.1, {_pz}, {_fx}, {_fy}, {_fz}, false)
+
+# 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때)
+function mViewAuto(id: text, snap: boolean):
+	set {_s} to mState()
+	if {-m::alive::%{_id}%} is true:
+		if {_s} is "night" or "resolve":
+			mCamTo({_id}, "nightcam", {_snap})
+			stop
+	mCamTo({_id}, "daycam", {_snap})
+
+# 카메라 탈것을 만들고(없으면) 플레이어를 태운다. 접속 중일 때만.
+function mCamMount(id: text):
+	set {_p} to mPlayerOf({_id})
+	if {_p} is not set:
+		stop
+	set {_cam} to {-ms::cam::%{_id}%}
+	if {_cam} is set:
+		if {_cam}.isValid() is false:
+			delete {_cam}
+	if {_cam} is not set:
+		set {_l} to mLocLoad("daycam")
+		set {_cam} to {_l}.getWorld().spawnEntity({_l}, EntityType.ITEM_DISPLAY)
+		{_cam}.setPersistent(false)
+		{_cam}.setTeleportDuration(2)
+		mScTrack({_cam})
+		set {-ms::cam::%{_id}%} to {_cam}
+	if {_p} is not op:
+		set {_p}'s gamemode to adventure
+	{_p}.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, -1, 0, false, false))
+	mTp({_p}, {_cam}.getLocation())
+	{_cam}.addPassenger({_p})
+	mViewAuto({_id}, true)
+
+# 매 틱: 카메라를 목표 쪽으로 조금씩 옮기고 시선을 맞춘다
+function mCamTick(id: text):
+	set {_p} to mPlayerOf({_id})
+	if {_p} is not set:
+		stop
+	set {_cam} to {-ms::cam::%{_id}%}
+	if {_cam} is not set:
+		stop
+	if {-ms::tx::%{_id}%} is not set:
+		stop
+	set {_k} to 0.2
+	loop "x", "y", "z":
+		set {_c} to {-ms::c%loop-value%::%{_id}%}
+		set {_t} to {-ms::t%loop-value%::%{_id}%}
+		set {-ms::c%loop-value%::%{_id}%} to {_c} + ({_t} - {_c}) * {_k}
+		set {_f} to {-ms::f%loop-value%::%{_id}%}
+		set {_g} to {-ms::g%loop-value%::%{_id}%}
+		set {-ms::f%loop-value%::%{_id}%} to {_f} + ({_g} - {_f}) * {_k}
+	set {_eye} to mScNum("eye", 1.62)
+	set {_l} to new Location({_cam}.getWorld(), {-ms::cx::%{_id}%}, {-ms::cy::%{_id}%} - {_eye}, {-ms::cz::%{_id}%})
+	{_cam}.teleport({_l}, MTpState.RETAIN_PASSENGERS)
+	if {_cam}.getPassengers().contains({_p}) is false:
+		{_cam}.addPassenger({_p})
+	{_p}.lookAt({-ms::fx::%{_id}%}, {-ms::fy::%{_id}%}, {-ms::fz::%{_id}%}, LookAnchor.EYES)
+
+every 1 tick:
+	if mSceneOn() is not true:
+		stop
+	loop {-m::players::*}:
+		mCamTick(loop-value)
+
+# ------------------------------------------------------------------ 게임 시작/정리
+
+# mStart 가 직업 배정과 이동을 끝낸 뒤 부른다. 장소가 다 정해졌을 때만 연출을 켠다.
+function mSceneStart():
+	delete {-ms::on}
+	if mSceneMissing() is not "":
+		broadcast "&6[마피아] &7연출 장소가 정해지지 않아 연출 없이 진행합니다. (&f%mSceneMissing()%&7)"
+		stop
+	set {-ms::on} to true
+	set {-ms::seatn} to size of {-m::players::*}
+	set {_i} to 0
+	loop {-m::players::*}:
+		add 1 to {_i}
+		set {_id} to loop-value
+		set {-ms::seat::%{_id}%} to {_i}
+		set {-ms::dummy::%{_id}%} to mScSeated(mScSeatLoc({_i}), {_id})
+		set {_self} to mScSeated(mLocLoad("room"), {_id})
+		mScOnlyFor({_self}, {_id})
+		set {-ms::self::%{_id}%} to {_self}
+		set {_bl} to mLocLoad("bed")
+		set {_bed} to {_bl}.getWorld().spawnEntity({_bl}, EntityType.MANNEQUIN)
+		mScDummySetup({_bed}, {_id})
+		{_bed}.setPose(Pose.SLEEPING, true)
+		mScOnlyFor({_bed}, {_id})
+		set {-ms::bed::%{_id}%} to {_bed}
+	loop {-m::players::*}:
+		mCamMount(loop-value)
+
+# 다시 접속한 참가자: 카메라에 다시 태우고, 혼자만 보이던 더미를 다시 보여 준다
+function mSceneRejoin(p: player):
+	if mSceneOn() is not true:
+		stop
+	set {_id} to "%uuid of {_p}%"
+	loop "self", "bed":
+		set {_e} to {-ms::%loop-value%::%{_id}%}
+		if {_e} is set:
+			{_p}.showEntity(mScPlugin(), {_e})
+	mCamMount({_id})
+	mHotbar({_p})
+
+# 연출 엔티티를 전부 지우고 플레이어를 원래대로 돌린다(mToLobby 가 부른다)
+function mSceneClear():
+	set {-ms::clearing} to true
+	loop all players:
+		set {_p} to loop-player
+		if {-ms::cam::%uuid of {_p}%} is set:
+			{_p}.leaveVehicle()
+			{_p}.removePotionEffect(PotionEffectType.INVISIBILITY)
+		mHotbarClear({_p})
+	loop {-ms::ents::*}:
+		set {_e} to loop-value
+		{_e}.eject()
+		{_e}.remove()
+	delete {-ms::*}
+
+# 내리기(웅크리기) 막기
+on EntityDismountEvent:
+	if {-ms::clearing} is true:
+		stop
+	if mSceneOn() is not true:
+		stop
+	set {_e} to event.getEntity()
+	if {_e} is not instance of Player:
+		stop
+	set {_u} to {_e}.getUniqueId()
+	if {-ms::cam::%{_u}%} is set:
+		event.setCancelled(true)
+
+# 게임 중 참가자는 다치지 않는다
+on damage:
+	if mSceneOn() is not true:
+		stop
+	if victim is a player:
+		if mIsPlayer(victim) is true:
+			cancel event
+
+# ------------------------------------------------------------------ 단계 연출
+
+function mSceneNight():
+	if mSceneOn() is not true:
+		stop
+	loop {-m::players::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			send title "&8%{-m::day}%일차 밤" with subtitle "&7능력을 쓸 대상을 고르세요" to {_p} for 2 seconds with fadein 10 ticks and fade out 10 ticks
+		mViewAuto(loop-value, false)
+		if mActCheck(loop-value) is "":
+			mPickOpen(loop-value, "night")
+
+function mSceneDay():
+	if mSceneOn() is not true:
+		stop
+	set {_n} to size of {-m::dead::*}
+	set {_sub} to "&7지난 밤에는 아무도 사망하지 않았습니다"
+	if {_n} > 0:
+		loop {-m::dead::*}:
+			add mNameOf(loop-value) to {_nm::*}
+		set {_sub} to "&c%{_nm::*}% &7님이 사망했습니다"
+	loop {-m::players::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			send title "&e%{-m::day}%일차 낮" with subtitle {_sub} to {_p} for 3 seconds with fadein 10 ticks and fade out 10 ticks
+		mViewAuto(loop-value, false)
+
+function mSceneVote():
+	if mSceneOn() is not true:
+		stop
+	loop {-m::players::*}:
+		if mVoteCan(loop-value) is "":
+			mPickOpen(loop-value, "vote")
+
+function mSceneTake(id: text):
+	if mSceneOn() is not true:
+		stop
+	mPickOpen({_id}, "take")
+
+# 투표할 수 있는 상태인지(대상과 무관). 문제가 없으면 "".
+function mVoteCan(id: text) :: text:
+	if mState() is not "vote":
+		return "투표 시간이 아닙니다."
+	if {-m::alive::%{_id}%} is not true:
+		return "사망한 플레이어는 투표할 수 없습니다."
+	if {-m::away::%{_id}%} is true:
+		return "자리비움 상태입니다."
+	if {-m::novote::%{_id}%} is true:
+		return "건달에게 협박당해 오늘은 투표할 수 없습니다."
+	if {-m::vote::%{_id}%} is set:
+		return "이미 투표했습니다."
+	return ""
+
+# 밤 처리 결과를 관련된 사람에게만 보여 준다(자기가 한 일 → 자기가 당한 일 순서, 2초 간격).
+# 돌려주는 값: 연출에 걸리는 초(최소 3초). 연출을 쓰지 않으면 1.
+# 연출 내용은 임시(제목 문구만). 무엇을 어디까지 보여 줄지는 아직 정해지지 않았다(DESIGN.md 9번 질문).
+function mSceneResolve() :: number:
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		set {_ty} to {_e::1}
+		set {_a} to {_e::2}
+		set {_t} to {_e::3}
+		set {_tn} to mNameOf({_t})
+		if {_ty} is "kill":
+			add "&c%{_tn}% 님을 공격했습니다" to {_do::%{_a}%::*}
+		else if {_ty} is "burn":
+			add "&6%{_tn}% 님이 불길에 휩싸였습니다" to {_do::%{_a}%::*}
+			add "&6불길에 휩싸였습니다" to {_got::%{_t}%::*}
+		else if {_ty} is "contact":
+			add "&c마피아와 접선했습니다" to {_do::%{_a}%::*}
+		else if {_ty} is "steal":
+			add "&e%{_tn}% 님의 직업을 훔쳤습니다" to {_do::%{_a}%::*}
+		else if {_ty} is "die":
+			add "&4당신은 사망했습니다" to {_got::%{_t}%::*}
+	set {_max} to 0
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		delete {_seq::*}
+		add {_do::%{_id}%::*} to {_seq::*}
+		add {_got::%{_id}%::*} to {_seq::*}
+		if size of {_seq::*} > {_max}:
+			set {_max} to size of {_seq::*}
+		set {_p} to mPlayerOf({_id})
+		if {_p} is set:
+			if size of {_seq::*} is 0:
+				send title "" with subtitle "&7밤이 지나가고 있습니다..." to {_p} for 3 seconds
+			else:
+				mSceneSeq({_p}, {_seq::*})
+	if mSceneOn() is not true:
+		return 1
+	set {_sec} to {_max} * 2 + 1
+	if {_sec} < 3:
+		set {_sec} to 3
+	return {_sec}
+
+function mSceneSeq(p: player, lines: texts):
+	loop {_lines::*}:
+		send title loop-value with subtitle "" to {_p} for 2 seconds with fadein 5 ticks and fade out 5 ticks
+		wait 2 seconds
+
+# ------------------------------------------------------------------ 대상 선택
+
+function mPickName() :: text:
+	return "&e대상 선택"
+
+function mPickOpenName() :: text:
+	return "&e대상 고르기"
+
+function mPickNoneName() :: text:
+	return "&c선택하지 않음"
+
+function mIgniteName() :: text:
+	return "&6점화"
+
+function mDiscUpName() :: text:
+	return "&a토론 시간 +15초"
+
+function mDiscDownName() :: text:
+	return "&c토론 시간 -15초"
+
+# 고를 수 있는 후보 목록
+function mPickCands(id: text, mode: text) :: texts:
+	if {_mode} is "night":
+		return mTargets({_id})
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			if {_mode} is "vote":
+				add loop-value to {_l::*}
+			else if loop-value is not {_id}:
+				add loop-value to {_l::*}
+	return {_l::*}
+
+function mPickOpen(id: text, mode: text):
+	set {_c::*} to mPickCands({_id}, {_mode})
+	if size of {_c::*} is 0:
+		stop
+	set {-ms::pick::%{_id}%} to {_mode}
+	delete {-ms::cand::%{_id}%::*}
+	set {-ms::cand::%{_id}%::*} to {_c::*}
+	set {-ms::idx::%{_id}%} to 1
+	set {_p} to mPlayerOf({_id})
+	if {_p} is set:
+		mHotbar({_p})
+		{_p}.getInventory().setHeldItemSlot(0)
+	mPickShow({_id})
+
+function mPickClose(id: text):
+	delete {-ms::pick::%{_id}%}
+	delete {-ms::cand::%{_id}%::*}
+	delete {-ms::idx::%{_id}%}
+	mViewAuto({_id}, false)
+	set {_p} to mPlayerOf({_id})
+	if {_p} is set:
+		mHotbar({_p})
+
+function mPickCloseAll():
+	loop {-m::players::*}:
+		if {-ms::pick::%loop-value%} is set:
+			mPickClose(loop-value)
+
+function mPickCur(id: text) :: text:
+	set {_i} to {-ms::idx::%{_id}%}
+	return {-ms::cand::%{_id}%::%{_i}%}
+
+# 지금 후보를 화면에 보여 준다(밤: 침대 더미를 그 사람 모습으로, 낮: 원탁의 그 사람 얼굴)
+function mPickShow(id: text):
+	set {_c} to mPickCur({_id})
+	if {_c} is not set:
+		stop
+	if {-ms::pick::%{_id}%} is "night":
+		set {_bed} to {-ms::bed::%{_id}%}
+		if {_bed} is set:
+			mScSkin({_bed}, {_c})
+		mCamTo({_id}, "bedcam", false)
+	else:
+		mCamFace({_id}, {_c})
+	mPickBar({_id})
+
+function mPickBar(id: text):
+	set {_p} to mPlayerOf({_id})
+	if {_p} is not set:
+		stop
+	set {_c} to mPickCur({_id})
+	set {_n} to mNameOf({_c})
+	set {_i} to {-ms::idx::%{_id}%}
+	set {_all} to size of {-ms::cand::%{_id}%::*}
+	send action bar colored "&f%{_n}% &7(%{_i}%/%{_all}%) &8| &7좌/우클릭: 바꾸기 &8| &eF: 확정" to {_p}
+
+function mPickMove(id: text, d: number):
+	set {_all} to size of {-ms::cand::%{_id}%::*}
+	if {_all} is 0:
+		stop
+	set {_i} to {-ms::idx::%{_id}%} + {_d}
+	if {_i} < 1:
+		set {_i} to {_all}
+	if {_i} > {_all}:
+		set {_i} to 1
+	set {-ms::idx::%{_id}%} to {_i}
+	set {_p} to mPlayerOf({_id})
+	if {_p} is set:
+		play sound "ui.button.click" with volume 0.4 and pitch 1.6 to {_p}
+	mPickShow({_id})
+
+function mPickConfirm(id: text):
+	set {_mode} to {-ms::pick::%{_id}%}
+	set {_c} to mPickCur({_id})
+	set {_p} to mPlayerOf({_id})
+	if {_c} is not set:
+		stop
+	set {_n} to mNameOf({_c})
+	if {_mode} is "night":
+		set {_why} to mSetAct({_id}, {_c})
+		set {_ok} to "&a%{_n}% 님을 골랐습니다."
+	else if {_mode} is "vote":
+		set {_why} to mVoteCast({_id}, {_c})
+		set {_ok} to "&a%{_n}% 님에게 투표했습니다."
+	else:
+		set {_why} to mTakePick({_id}, {_c})
+		set {_ok} to "&c%{_n}% 님을 길동무로 데려갑니다."
+		if {_why} is "":
+			set {-m::left} to 1
+	if {_p} is set:
+		if {_why} is not "":
+			send "&c%{_why}%" to {_p}
+			stop
+		send {_ok} to {_p}
+		play sound "block.note_block.chime" with volume 0.6 and pitch 1.2 to {_p}
+	mPickClose({_id})
+
+function mPickSkip(id: text):
+	set {_mode} to {-ms::pick::%{_id}%}
+	set {_p} to mPlayerOf({_id})
+	if {_mode} is "night":
+		mClearAct({_id})
+		set {_m} to "&7이번 밤에는 능력을 쓰지 않습니다."
+	else if {_mode} is "vote":
+		set {_m} to "&7투표하지 않았습니다. 투표 시간 안에는 다시 고를 수 있습니다."
+	else:
+		set {_m} to "&7고르지 않으면 시간이 끝날 때 무작위로 정해집니다."
+	if {_p} is set:
+		send {_m} to {_p}
+	mPickClose({_id})
+
+# ------------------------------------------------------------------ 게임 중 핫바
+
+function mHotbarItem(n: text) :: itemtype:
+	if {_n} is mPickName():
+		set {_i} to paper named {_n}
+		set lore of {_i} to "&7좌클릭/우클릭: 대상 바꾸기", "&7F: 확정"
+	else if {_n} is mPickNoneName():
+		set {_i} to barrier named {_n}
+		set lore of {_i} to "&7우클릭: 아무도 고르지 않기"
+	else if {_n} is mPickOpenName():
+		set {_i} to paper named {_n}
+		set lore of {_i} to "&7우클릭: 대상 고르기 화면"
+	else if {_n} is mIgniteName():
+		set {_i} to blaze powder named {_n}
+		set lore of {_i} to "&7우클릭: 기름에 젖은 사람을 모두 불태웁니다"
+	else if {_n} is mDiscUpName():
+		set {_i} to lime dye named {_n}
+		set lore of {_i} to "&7우클릭: 낮마다 한 번(늘리기/줄이기 합쳐서)"
+	else:
+		set {_i} to red dye named {_n}
+		set lore of {_i} to "&7우클릭: 낮마다 한 번(늘리기/줄이기 합쳐서)"
+	return {_i}
+
+function mHotbarNames() :: texts:
+	return mPickName(), mPickNoneName(), mPickOpenName(), mIgniteName(), mDiscUpName(), mDiscDownName()
+
+# 지금 상황에 맞는 핫바(칸 0~8). 게임 아이템이 아닌 칸은 건드리지 않는다.
+function mHotbar(p: player):
+	set {_id} to "%uuid of {_p}%"
+	if mIsPlayer({_p}) is not true:
+		stop
+	set {_s} to mState()
+	if {-ms::pick::%{_id}%} is set:
+		set {_w::1} to mPickName()
+		set {_w::9} to mPickNoneName()
+	else if {_s} is "night":
+		if mActCheck({_id}) is "":
+			if size of mTargets({_id}) > 0:
+				set {_w::1} to mPickOpenName()
+			if mActRole({_id}) is "arsonist":
+				set {_w::2} to mIgniteName()
+	else if {_s} is "vote":
+		if mVoteCan({_id}) is "":
+			set {_w::1} to mPickOpenName()
+	else if {_s} is "execute":
+		if {-m::exe} is {_id}:
+			set {_w::1} to mPickOpenName()
+	else if {_s} is "day":
+		if {-m::alive::%{_id}%} is true:
+			if {-m::tadj::%{_id}%} is not true:
+				set {_w::4} to mDiscUpName()
+				set {_w::6} to mDiscDownName()
+	loop 9 times:
+		set {_slot} to loop-value - 1
+		set {_want} to {_w::%loop-value%}
+		set {_have} to name of slot {_slot} of {_p}'s inventory
+		if {_want} is set:
+			if {_have} is not {_want}:
+				set slot {_slot} of {_p}'s inventory to mHotbarItem({_want})
+		else if {_have} is set:
+			if mHotbarNames() contains {_have}:
+				clear slot {_slot} of {_p}'s inventory
+
+function mHotbarClear(p: player):
+	loop 9 times:
+		set {_slot} to loop-value - 1
+		set {_have} to name of slot {_slot} of {_p}'s inventory
+		if {_have} is set:
+			if mHotbarNames() contains {_have}:
+				clear slot {_slot} of {_p}'s inventory
+
+# 다른 사람이 든 아이템이 보이지 않게(투명해도 손에 든 아이템은 보이므로) 장비 패킷으로 지운다
+function mHideHands():
+	set {_air} to new ItemStack(Material.AIR)
+	loop {-m::players::*}:
+		set {_v} to mPlayerOf(loop-value)
+		if {_v} is set:
+			loop {-m::players::*}:
+				if loop-value-2 is not loop-value-1:
+					set {_o} to mPlayerOf(loop-value-2)
+					if {_o} is set:
+						{_v}.sendEquipmentChange({_o}, EquipmentSlot.HAND, {_air})
+						{_v}.sendEquipmentChange({_o}, EquipmentSlot.OFF_HAND, {_air})
+
+every second:
+	if mRunning() is not true:
+		stop
+	loop {-m::players::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			mHotbar({_p})
+			if {-ms::pick::%loop-value%} is set:
+				mPickBar(loop-value)
+	if mSceneOn() is true:
+		mHideHands()
+
+on item held:
+	if mSceneOn() is not true:
+		stop
+	if mIsPlayer(player) is not true:
+		stop
+	wait 1 tick
+	mHideHands()
+
+# ------------------------------------------------------------------ 입력
+
+# 같은 클릭이 두 번 들어오는 것(주 손/보조 손, 엔티티/허공) 막기. 처리해도 되면 true.
+function mClickOk(id: text) :: boolean:
+	set {_l} to {-ms::last::%{_id}%}
+	if {_l} is set:
+		if difference between {_l} and now < 3 ticks:
+			return false
+	set {-ms::last::%{_id}%} to now
+	return true
+
+on right click:
+	if mRunning() is not true:
+		stop
+	if mIsPlayer(player) is not true:
+		stop
+	set {_h} to event.getHand()
+	if {_h} is set:
+		if {_h}.name() is not "HAND":
+			cancel the event
+			stop
+	set {_tn} to name of player's tool
+	if {_tn} is not set:
+		stop
+	if mHotbarNames() does not contain {_tn}:
+		stop
+	cancel the event
+	set {_id} to "%uuid of player%"
+	if mClickOk({_id}) is not true:
+		stop
+	if {_tn} is mPickName():
+		if {-ms::pick::%{_id}%} is set:
+			mPickMove({_id}, 1)
+	else if {_tn} is mPickNoneName():
+		if {-ms::pick::%{_id}%} is set:
+			mPickSkip({_id})
+	else if {_tn} is mPickOpenName():
+		set {_s} to mState()
+		if {_s} is "night":
+			mPickOpen({_id}, "night")
+		else if {_s} is "vote":
+			mPickOpen({_id}, "vote")
+		else if {_s} is "execute":
+			mPickOpen({_id}, "take")
+	else if {_tn} is mIgniteName():
+		set {_why} to mSetIgnite({_id})
+		if {_why} is "":
+			send "&6점화를 골랐습니다. 밤이 끝나면 기름에 젖은 사람이 모두 불탑니다." to player
+		else:
+			send "&c%{_why}%" to player
+	else if {_tn} is mDiscUpName():
+		make player execute command "/mdisc up"
+	else if {_tn} is mDiscDownName():
+		make player execute command "/mdisc down"
+	mHotbar(player)
+
+# 좌클릭(허공이든 엔티티든 팔을 휘두르면 들어온다): 이전 후보
+on PlayerArmSwingEvent:
+	if mRunning() is not true:
+		stop
+	set {_p} to event.getPlayer()
+	set {_u} to {_p}.getUniqueId()
+	set {_id} to "%{_u}%"
+	if {-ms::pick::%{_id}%} is not set:
+		stop
+	if mClickOk({_id}) is not true:
+		stop
+	mPickMove({_id}, -1)
+
+# F: 확정
+on swap hand items:
+	if mRunning() is not true:
+		stop
+	if mIsPlayer(player) is not true:
+		stop
+	cancel event
+	set {_id} to "%uuid of player%"
+	if {-ms::pick::%{_id}%} is set:
+		mPickConfirm({_id})
+
+# 게임 중 참가자는 게임 아이템을 버리거나 옮길 수 없다
+on drop:
+	if mRunning() is not true:
+		stop
+	if mIsPlayer(player) is true:
+		cancel the event
+
+on inventory click:
+	if mRunning() is not true:
+		stop
+	if mIsPlayer(player) is not true:
+		stop
+	if {-madm::%uuid of player%} is set:
+		stop
+	cancel the event

@@ -1,0 +1,64 @@
+# ==============================================================================
+# [mchat.sk] 게임 중 채팅 채널 분리, 마녀 저주. 규칙은 ROLES.md, 구조는 DESIGN.md 6번. 로비와 게임 종료(end) 상태는 건드리지 않는다.
+# 채널:
+#   - 생존 참가자: 생존 참가자만 받는다. 낮 토론/투표/처형 때만 말할 수 있고 밤(night, resolve)에는 막힌다.
+#   - 죽은 사람 및 관전자: 생존 참가자가 아닌 모든 사람(사망한 참가자, 관전자, 중간에 들어온 사람)끼리만 받는다. 언제든 가능.
+#   - 마피아 팀: 팀이 mafia 인 생존 참가자(마피아, 접선한 보조 직업, 마피아를 훔친 도둑)끼리. 밤(night, resolve)에만 가능.
+# 마녀 저주({-m::nocht::uuid}): 낮 토론(day) 동안만 말할 수 없다. 투표 시간부터는 말할 수 있다.
+# 건달 협박({-m::novote::uuid})은 투표 쪽(mvote.sk 의 mVoteCast)에서 막는다.
+# 미검증: 전체(서버 실행 불가). chat recipients 표현식(클래스 ExprChatRecipients 존재 확인), message 바꾸기.
+# ==============================================================================
+
+# 생존 참가자인지(자리비움도 생존이면 포함)
+function mChatAlive(p: player) :: boolean:
+	set {_id} to "%uuid of {_p}%"
+	if {-m::players::*} does not contain {_id}:
+		return false
+	if {-m::alive::%{_id}%} is true:
+		return true
+	return false
+
+function mChatMafia(p: player) :: boolean:
+	if mChatAlive({_p}) is not true:
+		return false
+	if {-m::team::%uuid of {_p}%} is "mafia":
+		return true
+	return false
+
+on chat:
+	if mRunning() is not true:
+		stop
+	set {_p} to player
+	set {_id} to "%uuid of {_p}%"
+	set {_s} to mState()
+	set {_msg} to message
+	# 죽은 사람 및 관전자 채널
+	if mChatAlive({_p}) is not true:
+		clear chat recipients
+		loop all players:
+			if mChatAlive(loop-player) is not true:
+				add loop-player to chat recipients
+		set message to "&8[관전] &7%{_msg}%"
+		stop
+	# 밤: 마피아 팀만
+	if {_s} is "night" or "resolve":
+		if mChatMafia({_p}) is not true:
+			cancel event
+			send "&7밤에는 말할 수 없습니다." to {_p}
+			stop
+		clear chat recipients
+		loop all players:
+			if mChatMafia(loop-player) is true:
+				add loop-player to chat recipients
+		set message to "&c[마피아 팀] &f%{_msg}%"
+		stop
+	# 낮 토론: 마녀 저주
+	if {_s} is "day":
+		if {-m::nocht::%{_id}%} is true:
+			cancel event
+			send "&5저주를 받아 오늘 토론 시간에는 말할 수 없습니다." to {_p}
+			stop
+	clear chat recipients
+	loop all players:
+		if mChatAlive(loop-player) is true:
+			add loop-player to chat recipients
