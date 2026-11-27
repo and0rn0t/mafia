@@ -234,6 +234,10 @@ function mStart(by: object) :: boolean:
 		return false
 	loop {-m::players::*}:
 		set {-m::alive::%loop-value%} to true
+		# 표시 이름을 시작할 때 저장(나간 사람도 닉네임 그대로)
+		set {_np} to mPlayerOf(loop-value)
+		if {_np} is set:
+			set {-m::nm::%loop-value%} to name of {_np}
 	delete {-m::ready::*}
 	delete {-m::cd}
 	set {_gl} to mGameLoc()
@@ -260,6 +264,13 @@ on join:
 	set {_id} to "%uuid of {_p}%"
 	if mState() is "lobby":
 		delete {-m::ready::%{_id}%}
+		# 게임 도중 서버가 꺼졌다 켜진 경우: 관전 모드·밤하늘이 남아 있으면 되돌린다
+		{_p}.resetPlayerTime()
+		{_p}.resetPlayerWeather()
+		if gamemode of {_p} is spectator:
+			{_p}.setSpectatorTarget(null)
+			if {_p} is op:
+				set {_p}'s gamemode to creative
 		if {_p} is not op:
 			clear {_p}'s inventory
 			set {_p}'s gamemode to adventure
@@ -285,6 +296,9 @@ on quit:
 	else:
 		if mIsPlayer(player) is true:
 			set {-m::away::%{_id}%} to true
+		else:
+			remove {_id} from {-ms::spec::*}
+			delete {-ms::watch::%{_id}%}
 	delete {-m::cd}
 
 # 준비/관전 블록 우클릭

@@ -150,6 +150,7 @@ function mFxPart(vid: text, name: text, l: location, n: number):
 # 그 사람에게만 보이는 엔티티로 만든다
 function mFxOnly(e: object, vid: text):
 	{_e}.setPersistent(false)
+	{_e}.addScoreboardTag("mafia_tmp")
 	{_e}.setVisibleByDefault(false)
 	mScTrack({_e})
 	set {_p} to mPlayerOf({_vid})
@@ -527,6 +528,11 @@ function mFxRun(vid: text):
 		while {_t} < {_len}:
 			wait 1 tick
 			if mSceneOn() is not true:
+				stop
+			# 보던 사람이 나가면 장면을 접는다(다시 들어오면 mSceneRejoin 이 평소 화면으로)
+			if mPlayerOf({_vid}) is not set:
+				mFxCleanup({_vid})
+				delete {-msq::%{_vid}%::*}
 				stop
 			add 1 to {_t}
 			mFxTick({_vid}, {_t})

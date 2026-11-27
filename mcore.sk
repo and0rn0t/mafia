@@ -240,6 +240,7 @@ function mReset():
 	delete {-m::day}
 	delete {-m::left}
 	delete {-m::players::*}
+	delete {-m::nm::*}
 	delete {-m::alive::*}
 	delete {-m::role::*}
 	delete {-m::orig::*}

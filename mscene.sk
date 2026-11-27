@@ -139,10 +139,19 @@ function mScDummySetup(m: object, owner: text):
 	mScSkin({_m}, {_owner})
 
 # 마네킹의 스킨과 이름을 그 참가자로 바꾼다(접속 중일 때만 스킨을 가져온다)
+# 마네킹용 프로필: nick.sk 의 nickProfile(닉을 쓰면 가짜 UUID·가짜 스킨, 아니면 원래 프로필)
+function mScProfOf(p: player) :: object:
+	return ResolvableProfile.resolvableProfile(nickProfile({_p}))
+
 function mScSkin(m: object, owner: text):
-	set {_p} to mPlayerOf({_owner})
-	if {_p} is set:
-		{_m}.setProfile(ResolvableProfile.resolvableProfile({_p}.getPlayerProfile()))
+	# 닉네임(nick.sk) 사용자는 가짜 프로필로(진짜 UUID/스킨 노출 방지). 게임 시작 때 저장한 것을 우선 쓴다(나가도 같은 스킨).
+	set {_rp} to {-ms::prof::%{_owner}%}
+	if {_rp} is not set:
+		set {_p} to mPlayerOf({_owner})
+		if {_p} is set:
+			set {_rp} to mScProfOf({_p})
+	if {_rp} is set:
+		{_m}.setProfile({_rp})
 	else:
 		{_m}.setProfile(Mannequin.defaultProfile())
 	set {_n} to mNameOf({_owner})
@@ -467,6 +476,11 @@ function mSceneStart():
 		stop
 	set {-ms::on} to true
 	set {-ms::seatn} to size of {-m::players::*}
+	# 스킨을 시작할 때 저장해 둔다(중간에 나가도 같은 가짜 스킨, 진짜 프로필은 쓰지 않음)
+	loop {-m::players::*}:
+		set {_pp} to mPlayerOf(loop-value)
+		if {_pp} is set:
+			set {-ms::prof::%loop-value%} to mScProfOf({_pp})
 	set {_i} to 0
 	loop {-m::players::*}:
 		add 1 to {_i}
@@ -911,3 +925,42 @@ on PlayerInputEvent:
 			make {_p} execute command "/mdisc up"
 		else if {_press::*} contains "s":
 			make {_p} execute command "/mdisc down"
+
+# ------------------------------------------------------------------ /sk reload 복구
+
+# 게임 중에 스크립트를 다시 불러오면 진행 중이던 장면·컷신(wait 이 있는 함수)이 끊긴다.
+# 남은 장면용 엔티티(태그 mafia_tmp)를 지우고, 미뤄 둔 해골을 놓고, 모두를 평소 화면으로 되돌린다. 게임 진행 변수는 그대로라 이어서 진행된다.
+# 끊긴 컷신 뒤에 하려던 일(예: 화형 뒤 길동무 선택 화면)은 다시 하지 않는다(시간이 끝나면 무작위 처리는 그대로).
+on load:
+	if mSceneOn() is not true:
+		stop
+	wait 5 ticks
+	if mSceneOn() is not true:
+		stop
+	loop all entities:
+		set {_e} to loop-entity
+		if {_e}.getScoreboardTags().contains("mafia_tmp") is true:
+			{_e}.remove()
+	mFxClear()
+	delete {-ms::stage}
+	loop indices of {-ms::hold::*}:
+		add loop-index to {_held::*}
+	loop {_held::*}:
+		mStgRelease(loop-value)
+	loop {-m::players::*}:
+		add loop-value to {_all::*}
+	loop {-ms::spec::*}:
+		add loop-value to {_all::*}
+	loop {_all::*}:
+		set {_id} to loop-value
+		set {_p} to mPlayerOf({_id})
+		if {_p} is set:
+			{_p}.clearTitle()
+			set {_h} to 0
+			while {_h} <= 12:
+				mFxDoorReset({_id}, {_h})
+				add 1 to {_h}
+			mFxSelf({_id}, true)
+			mCamMount({_id})
+			mViewAuto({_id})
+	broadcast "&6[마피아] &7스크립트를 다시 불러와 연출을 정리했습니다. 게임은 이어서 진행됩니다."

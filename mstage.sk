@@ -223,6 +223,7 @@ function mStgTnt(t: text, v: text):
 	{_tnt}.setGravity(false)
 	{_tnt}.setFuseTicks(400)
 	{_tnt}.setPersistent(false)
+	{_tnt}.addScoreboardTag("mafia_tmp")
 	mScTrack({_tnt})
 	mStgSoundAll("entity.tnt.primed", 1, 1)
 	# 포물선으로 25틱 동안 날아간다
