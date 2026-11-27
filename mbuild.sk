@@ -84,33 +84,112 @@ function mBLamp(w: world, x: number, z: number):
 	mBFill({_w}, {_x}, 65, {_z}, {_x}, 67, {_z}, "minecraft:dark_oak_fence")
 	mBSet({_w}, {_x}, 68, {_z}, "minecraft:lantern")
 
-# 집 하나(7x7, 네 면 모두 문과 창이 있어 어느 쪽에서 봐도 앞면). x1~x1+6, z1~z1+6
-function mBHouse(w: world, x1: number, z1: number, wall: text):
+# ---- 플레이어 집 12채(광장 둘레). 각 참가자가 한 채씩 쓴다(mscene.sk 가 자리 순서대로 배정, 13명 이상이면 1번 집부터 다시 같이 씀).
+# 집 = 바깥 7x7(x1~x1+6, z1~z1+6), 안 5x5, 바닥 y=64, 안 높이 65~68, 지붕은 y=69부터.
+# 안 배치(모든 집 같음, 달이 동쪽에 뜨므로 창은 항상 동쪽 벽): 동쪽 벽 큰 창(z1+2~4, y66~68), 창 앞 탁자(x1+5, z1+2~3 반 블록) 위 꽃병과 촛불,
+#   창 옆 의자(x1+5, z1+4)에 자기 더미가 서쪽(카메라)을 보고 앉는다. 책장 2개, 카펫. 카메라는 서쪽에서 창을 본다.
+# 문(side): n = 북쪽 벽 가운데, s = 남쪽 벽 가운데, w = 서쪽 벽 남쪽 끝, e = 동쪽 벽 북쪽 끝(서쪽 줄 집, 창 옆). 광장 쪽이나 옆 골목으로 난다.
+function mBHomeDef(i: number) :: text:
+	if {_i} <= 4:
+		set {_xs::*} to -17, -8, 1, 10
+		return "%{_xs::%{_i}%}%|20|n|minecraft:white_terracotta"
+	if {_i} <= 8:
+		set {_xs::*} to -17, -8, 1, 10
+		return "%{_xs::%{_i} - 4%}%|-27|s|minecraft:birch_planks"
+	if {_i} <= 10:
+		set {_zs::*} to -8, 2
+		return "21|%{_zs::%{_i} - 8%}%|w|minecraft:bricks"
+	set {_zs::*} to -8, 2
+	return "-27|%{_zs::%{_i} - 10%}%|e|minecraft:bricks"
+
+function mBHomeBuild(w: world, i: number):
+	set {_d::*} to split mBHomeDef({_i}) at "|"
+	set {_x1} to ({_d::1} parsed as number)
+	set {_z1} to ({_d::2} parsed as number)
+	set {_side} to {_d::3}
+	set {_wall} to {_d::4}
 	set {_x2} to {_x1} + 6
 	set {_z2} to {_z1} + 6
+	mBFill({_w}, {_x1}, 64, {_z1}, {_x2}, 64, {_z2}, "minecraft:dark_oak_planks")
 	mBFill({_w}, {_x1}, 65, {_z1}, {_x2}, 68, {_z2}, {_wall})
+	mBFill({_w}, {_x1} + 1, 65, {_z1} + 1, {_x2} - 1, 68, {_z2} - 1, "minecraft:air")
 	loop {_x1}, {_x2}:
 		set {_x} to loop-value-1
 		loop {_z1}, {_z2}:
 			mBFill({_w}, {_x}, 65, loop-value-2, {_x}, 68, loop-value-2, "minecraft:dark_oak_log")
+	# 작은 창(문 자리는 아래에서 문으로 덮는다)
 	loop {_z1}, {_z2}:
-		set {_z} to loop-value
-		mBFill({_w}, {_x1} + 3, 65, {_z}, {_x1} + 3, 66, {_z}, "minecraft:spruce_planks")
-		mBSet({_w}, {_x1} + 1, 66, {_z}, "minecraft:glass")
-		mBSet({_w}, {_x1} + 5, 66, {_z}, "minecraft:glass")
-		mBSet({_w}, {_x1} + 1, 68, {_z}, "minecraft:glass")
-		mBSet({_w}, {_x1} + 5, 68, {_z}, "minecraft:glass")
-	loop {_x1}, {_x2}:
-		set {_x} to loop-value
-		mBFill({_w}, {_x}, 65, {_z1} + 3, {_x}, 66, {_z1} + 3, "minecraft:spruce_planks")
-		mBSet({_w}, {_x}, 66, {_z1} + 1, "minecraft:glass")
-		mBSet({_w}, {_x}, 66, {_z1} + 5, "minecraft:glass")
-		mBSet({_w}, {_x}, 68, {_z1} + 1, "minecraft:glass")
-		mBSet({_w}, {_x}, 68, {_z1} + 5, "minecraft:glass")
+		mBSet({_w}, {_x1} + 1, 66, loop-value, "minecraft:glass")
+		mBSet({_w}, {_x1} + 5, 66, loop-value, "minecraft:glass")
+	mBSet({_w}, {_x1}, 66, {_z1} + 2, "minecraft:glass")
+	# 동쪽 큰 창(달)
+	mBFill({_w}, {_x2}, 66, {_z1} + 2, {_x2}, 68, {_z1} + 4, "minecraft:glass")
+	# 지붕(맨 아래 판자층이 안쪽 천장)
 	mBFill({_w}, {_x1} - 1, 69, {_z1} - 1, {_x2} + 1, 69, {_z2} + 1, "minecraft:dark_oak_planks")
 	mBFill({_w}, {_x1}, 70, {_z1}, {_x2}, 70, {_z2}, "minecraft:dark_oak_planks")
 	mBFill({_w}, {_x1} + 1, 71, {_z1} + 1, {_x2} - 1, 71, {_z2} - 1, "minecraft:dark_oak_planks")
 	mBFill({_w}, {_x1} + 2, 72, {_z1} + 2, {_x2} - 2, 72, {_z2} - 2, "minecraft:dark_oak_slab[type=bottom]")
+	# 가구
+	mBSet({_w}, {_x1} + 5, 65, {_z1} + 2, "minecraft:oak_slab[type=top]")
+	mBSet({_w}, {_x1} + 5, 65, {_z1} + 3, "minecraft:oak_slab[type=top]")
+	mBSet({_w}, {_x1} + 5, 66, {_z1} + 3, "minecraft:potted_poppy")
+	mBSet({_w}, {_x1} + 5, 66, {_z1} + 2, "minecraft:candle[candles=2,lit=true]")
+	mBSet({_w}, {_x1} + 5, 65, {_z1} + 4, "minecraft:spruce_stairs[facing=east]")
+	mBFill({_w}, {_x1} + 1, 65, {_z1} + 1, {_x1} + 1, 66, {_z1} + 2, "minecraft:bookshelf")
+	mBFill({_w}, {_x1} + 2, 65, {_z1} + 3, {_x1} + 3, 65, {_z1} + 4, "minecraft:brown_carpet")
+	# 문
+	set {_dl::*} to split mBHomeDoor({_i}) at "|"
+	set {_dx} to ({_dl::1} parsed as number)
+	set {_dz} to ({_dl::2} parsed as number)
+	set {_face} to {_dl::3}
+	mBSet({_w}, {_dx}, 65, {_dz}, "minecraft:oak_door[half=lower,facing=%{_face}%,hinge=left,open=false]")
+	mBSet({_w}, {_dx}, 66, {_dz}, "minecraft:oak_door[half=upper,facing=%{_face}%,hinge=left,open=false]")
+
+# 문 블록 x|z|문 방향(안쪽)|바깥 방향 x|바깥 방향 z|문 안쪽 한 칸 x|z
+function mBHomeDoor(i: number) :: text:
+	set {_d::*} to split mBHomeDef({_i}) at "|"
+	set {_x1} to ({_d::1} parsed as number)
+	set {_z1} to ({_d::2} parsed as number)
+	set {_s} to {_d::3}
+	if {_s} is "n":
+		return "%{_x1} + 3%|%{_z1}%|south|0|-1|%{_x1} + 3.5%|%{_z1} + 1.5%"
+	if {_s} is "s":
+		return "%{_x1} + 3%|%{_z1} + 6%|north|0|1|%{_x1} + 3.5%|%{_z1} + 5.5%"
+	if {_s} is "w":
+		return "%{_x1}%|%{_z1} + 5%|east|-1|0|%{_x1} + 1.5%|%{_z1} + 5.5%"
+	return "%{_x1} + 6%|%{_z1} + 1%|west|1|0|%{_x1} + 5.5%|%{_z1} + 1.5%"
+
+# 집 i 의 연출 자리를 저장한다(블록은 건드리지 않음). 키: h<i>seat, cam, door, in, mid, out, ext, visit, guard, fireA, fireB
+function mBHomeSpots(w: world, i: number):
+	set {_d::*} to split mBHomeDef({_i}) at "|"
+	set {_x1} to ({_d::1} parsed as number)
+	set {_z1} to ({_d::2} parsed as number)
+	set {_dl::*} to split mBHomeDoor({_i}) at "|"
+	set {_dx} to ({_dl::1} parsed as number)
+	set {_dz} to ({_dl::2} parsed as number)
+	set {_ox} to ({_dl::4} parsed as number)
+	set {_oz} to ({_dl::5} parsed as number)
+	set {_ix} to ({_dl::6} parsed as number)
+	set {_iz} to ({_dl::7} parsed as number)
+	set {mcfg::house::%{_i}%::face} to {_dl::3}
+	set {_k} to "h%{_i}%"
+	mBSaveYaw("%{_k}%seat", {_w}, {_x1} + 5.5, 65.5, {_z1} + 4.5, 90)
+	mBSaveLook("%{_k}%cam", {_w}, {_x1} + 1.4, 66.3, {_z1} + 2.4, {_x1} + 6, 67.4, {_z1} + 3.6)
+	mBSaveYaw("%{_k}%door", {_w}, {_dx}, 65, {_dz}, 0)
+	mBSaveYaw("%{_k}%in", {_w}, {_ix}, 65, {_iz}, 0)
+	mBSaveYaw("%{_k}%mid", {_w}, {_x1} + 3.5, 65, {_z1} + 3.2, 0)
+	mBSaveYaw("%{_k}%visit", {_w}, {_x1} + 4.2, 65, {_z1} + 3.9, 0)
+	mBSaveYaw("%{_k}%guard", {_w}, {_x1} + 4.3, 65, {_z1} + 5.4, 0)
+	mBSaveYaw("%{_k}%fireA", {_w}, {_x1} + 1, 65, {_z1} + 1, 0)
+	mBSaveYaw("%{_k}%fireB", {_w}, {_x1} + 4, 65, {_z1} + 5, 0)
+	# 문 바깥 한 칸(바깥을 봄)과 바깥 카메라(문 앞 4칸, 옆으로 1.6칸, 문을 봄)
+	set {_px} to {_dx} + 0.5 + {_ox}
+	set {_pz} to {_dz} + 0.5 + {_oz}
+	mBSaveLook("%{_k}%out", {_w}, {_px}, 65, {_pz}, {_px} + {_ox}, 65, {_pz} + {_oz})
+	# 옆으로 비킬 방향: 남북으로 난 문은 동쪽(+x), 동서로 난 문은 남쪽(+z). 장터 가판대를 피한다
+	set {_sx} to abs({_oz})
+	set {_sz} to abs({_ox})
+	mBSaveLook("%{_k}%ext", {_w}, {_px} + {_ox} * 4 + {_sx} * 1.6, 66.9, {_pz} + {_oz} * 4 + {_sz} * 1.6, {_dx} + 0.5, 66.2, {_dz} + 0.5)
 
 # 장터 가판대(통 3개 + 울타리 기둥 + 천막). 가운데 (x, z), 천막 색 wool
 function mBStall(w: world, x: number, z: number, wool: text):
@@ -186,12 +265,8 @@ function mBuild():
 	mBFill({_w}, -31, 65, -31, 31, 74, -15, "minecraft:air")
 	mBFill({_w}, 15, 65, -14, 31, 74, 14, "minecraft:air")
 	mBFill({_w}, -31, 65, -14, -15, 74, 14, "minecraft:air")
-	loop -21, -12, -3, 6, 15:
-		mBHouse({_w}, loop-value, 20, "minecraft:white_terracotta")
-		mBHouse({_w}, loop-value, -27, "minecraft:birch_planks")
-	loop -12, -3, 6:
-		mBHouse({_w}, -27, loop-value, "minecraft:bricks")
-		mBHouse({_w}, 21, loop-value, "minecraft:white_terracotta")
+	loop 12 times:
+		mBHomeBuild({_w}, loop-value)
 	loop -30, 30:
 		set {_a} to loop-value
 		mBFill({_w}, -30, 65, {_a}, 30, 69, {_a}, "minecraft:oak_leaves[persistent=true]")
@@ -208,8 +283,6 @@ function mBuild():
 	mBStall({_w}, -10, 16, "minecraft:yellow_wool")
 	mBStall({_w}, 10, -16, "minecraft:blue_wool")
 	mBStall({_w}, -10, -16, "minecraft:lime_wool")
-	mBStall({_w}, 16, 0, "minecraft:orange_wool")
-	mBStall({_w}, -16, 0, "minecraft:white_wool")
 	# ================= 밤: 달이 보이는 작은 방 (x 100~107, z -4~4), 동쪽 창, 카메라는 서쪽에서 동쪽을 본다
 	mBFill({_w}, 75, 64, -30, 135, 64, 30, "minecraft:grass_block")
 	mBRoom({_w}, 100, -4, 107, 4, 64, 71, "minecraft:dark_oak_planks", "minecraft:spruce_planks", "minecraft:spruce_planks")
@@ -245,7 +318,7 @@ function mBuild():
 
 # 맵 구조 버전. 블록 배치(건물)를 바꾸면 이 숫자를 올린다. 서버 맵이 이 버전보다 낮으면 관리자에게 /mbuild 를 다시 하라고 알린다.
 function mBVer() :: number:
-	return 7
+	return 8
 
 # 게임 위치, 연출 장소 6곳, 숫자 설정을 저장한다. 블록은 건드리지 않는다.
 # 스크립트를 불러올 때(on load)도 자동으로 다시 저장하므로, 카메라 위치만 바꾼 경우에는 /sk reload 만 하면 적용된다.
@@ -254,15 +327,12 @@ function mBSaveSpots(w: world):
 	mBSaveYaw("table", {_w}, 0.5, 65, 0.5, 0)
 	# 낮: 원탁 가까이(원탁 가운데까지 약 6칸)에서 남쪽으로 내려다본다
 	mBSaveLook("daycam", {_w}, 0.5, 67.6, -5, 0.5, 65.4, 0.5)
-	mBSaveYaw("room", {_w}, 107.5, 65.5, 2.5, 90)
-	# 밤 연출(mfx.sk) 자리: 문 안쪽(방문자가 나타남), 문 블록, 대상 앞, 수호자 자리, 불타는 바닥 범위
-	mBSaveYaw("fxdoor", {_w}, 107.5, 65, -3, 90)
-	mBSaveYaw("fxdoorblock", {_w}, 108, 65, -3, 0)
-	mBSaveYaw("fxvisit", {_w}, 106.2, 65, 1.6, 0)
-	mBSaveYaw("fxguard", {_w}, 106.2, 65, 3.6, 180)
-	mBSaveYaw("fxfireA", {_w}, 100, 65, -3, 0)
-	mBSaveYaw("fxfireB", {_w}, 106, 65, 3, 0)
-	mBSaveLook("nightcam", {_w}, 103.3, 66.7, 0.9, 108, 67.6, 0.9)
+	# 플레이어 집 12채의 연출 자리(밤 배경, 문, 방문, 바깥 카메라). room/nightcam 은 예전 키라 1번 집을 가리키게 둔다
+	loop 12 times:
+		mBHomeSpots({_w}, loop-value)
+	set {mcfg::house::n} to 12
+	mBSaveYaw("room", {_w}, -11.5, 65.5, 24.5, 90)
+	mBSaveLook("nightcam", {_w}, -15.6, 66.3, 22.4, -11, 67.4, 23.6)
 	# 침대 더미: 위치 = 발끝(침대 북쪽 끝), yaw 90 = 머리가 남쪽 베개
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)
 	# 침대 카메라: 가운데 침대 바로 위에서 거의 수직으로 내려다본다. 화면 위쪽 = 남쪽(베개와 얼굴), 양옆 침대는 화면 가장자리에 반쯤
