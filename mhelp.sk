@@ -165,4 +165,4 @@ command /mhelp [<text>] [<text>]:
 		send "&f /mstart &7/ &f/mstop &7게임 시작 / 강제 종료"
 		send "&f /mbuild &7맵(mafia_map) 짓기  &f/mloc lobby|game set|tp|info &7위치"
 		send "&f /mtime discuss|vote|night <초> &7시간 (토론은 생존자 1명당 초)"
-		send "&f /mrole &7직업 켜고 끄기  &f/mtest &7봇과 혼자 시험하기"
+		send "&f /mrole &7직업 켜고 끄기  &f/mtest &7봇과 혼자 시험하기(mtest.sk 가 있을 때)"

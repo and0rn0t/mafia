@@ -6,7 +6,7 @@
 #   {mcfg::role::id}   false 면 그 직업을 끈 것(저장). 없으면 켜짐. 마피아/경찰/의사는 끌 수 없다.
 #   {-m::players::*}   게임 참가자 uuid 목록(mjoin.sk 가 채움) - mAssign 이 읽는다.
 #   {-m::role::uuid}, {-m::orig::uuid}, {-m::team::uuid}  mAssign 이 채운다(팀: mafia/citizen/neutral/none. 보조 직업은 접선 전이라 none).
-# 명령(관리자 전용, 시험용): /mrole list | /mrole <직업id> on|off | /mrole check <인원> | /mrole draw <인원>
+# 명령(관리자 전용): /mrole list | /mrole <직업id> on|off
 # 미검증: 전체(서버 실행 불가). 사용한 문법: split ... at, shuffled, first N elements of, random element of, 숫자/텍스트 리스트 함수(:: texts / :: numbers).
 
 # 직업 한 줄 정의: "이름|풀|시점|설명". 설명은 ROLES.md 의 원문과 같다.
@@ -223,11 +223,11 @@ function mAssign() :: boolean:
 		set {-m::team::%loop-value%} to mStartTeam({_r})
 	return true
 
-# 시험용 관리자 명령: 직업 목록/켜기끄기/시작 검사/직업 뽑기 결과 확인
+# 관리자 명령: 직업 목록, 켜기/끄기(관리자 메뉴 /madmin 의 직업 화면과 같다)
 command /mrole [<text>] [<text>]:
 	permission: minecraft.command.op
 	permission message: &c권한이 없습니다.
-	description: 마피아 직업 설정/시험 (관리자 전용)
+	description: 마피아 직업 켜고 끄기 (관리자 전용)
 	trigger:
 		if sender is a player:
 			if player is not op:
@@ -235,7 +235,7 @@ command /mrole [<text>] [<text>]:
 				stop
 		set {_a} to arg-1
 		if {_a} is not set:
-			send "&7사용법: /mrole list | /mrole <직업id> on|off | /mrole check <인원> | /mrole draw <인원>"
+			send "&7사용법: /mrole list | /mrole <직업id> on|off"
 			stop
 		if {_a} is "list":
 			loop mRoleIds():
@@ -248,31 +248,6 @@ command /mrole [<text>] [<text>]:
 				set {_nm} to mRoleName({_id})
 				set {_po} to mRolePool({_id})
 				send "&7%{_id}% &f%{_nm}% &7(%{_po}%) %{_st}%"
-			stop
-		if {_a} is "check":
-			set {_n} to arg-2 parsed as number
-			if {_n} is not set:
-				send "&c인원을 숫자로 입력해 주세요."
-				stop
-			set {_why} to mStartCheck({_n})
-			if {_why} is "":
-				send "&a%{_n}%명으로 시작할 수 있습니다."
-			else:
-				send "&c%{_why}%"
-			stop
-		if {_a} is "draw":
-			set {_n} to arg-2 parsed as number
-			if {_n} is not set:
-				send "&c인원을 숫자로 입력해 주세요."
-				stop
-			set {_why} to mStartCheck({_n})
-			if {_why} is not "":
-				send "&c%{_why}%"
-				stop
-			set {_r::*} to mDraw({_n})
-			loop {_r::*}:
-				add mRoleName(loop-value) to {_nm::*}
-			send "&f%{_nm::*}%"
 			stop
 		if mRoleExists({_a}) is false:
 			send "&c그런 직업 id 가 없습니다. /mrole list 로 확인해 주세요."
