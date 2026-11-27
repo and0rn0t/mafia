@@ -2,11 +2,10 @@
 # [madmin.sk] 관리자 메뉴(상자 GUI, OP 전용). 규칙은 ROLES.md, 구조는 DESIGN.md 7번.
 # 명령: /madmin
 # 메뉴:
-#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 연속 퍼블 금지 켜고 끄기, 테러리스트 길동무 선택 시간, 승리 팀 라인업 위치({mcfg::loc::lineup}, mbuild 가 안 건드림), 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
+#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 연속 퍼블 금지 켜고 끄기, 테러리스트 길동무 선택 시간, 승리 팀 라인업 위치({mcfg::loc::lineup}, mbuild 가 안 건드림), 직업 켜고 끄기, 로비 위치(22번 칸, 좌클릭 여기로 / 우클릭 이동), 맵/연출, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
 #   roles  직업마다 켜짐(초록)/꺼짐(빨강)/고정(노랑). 클릭하면 켜고 끈다. 마피아/경찰/의사는 끌 수 없다
-#   scene  연출 장소(mscene.sk 머리말의 6곳): 좌클릭 = 지금 위치로 정하기, 우클릭 = 그 위치로 이동
-#          카메라 3곳(daycam/nightcam/bedcam)은 눈 위치와 바라보는 방향을 저장한다. 나머지는 발 위치와 바라보는 방향
-#          숫자(원탁 반지름, 얼굴 거리, 얼굴 높이, 카메라 눈 높이): 좌클릭 늘리기 / 우클릭 줄이기
+#   scene  맵/연출(4줄): 장소 6곳과 집 12채는 클릭하면 이동만 한다(장소는 /mbuild 가 정하고 스크립트를 불러올 때마다 코드 값으로 다시 저장하므로 여기서 바꾸지 않는다).
+#          숫자 7개(원탁 반지름, 얼굴 거리·높이, 침대 간격, 어깨너머 카메라 뒤·옆·높이): 좌클릭 늘리기 / 우클릭 줄이기, 기본값 되돌리기. 맵 버전·연출 상태 표시.
 # 변수: {-madm::uuid} 지금 열어 둔 메뉴 이름(main/roles/scene). 닫으면 지운다.
 # 미검증: 전체(서버 실행 불가). chest inventory 만들기/열기, click type, raw index of event-slot 은 Skript 2.13.0 jar 의 예시 문자열로 확인.
 # ==============================================================================
@@ -40,11 +39,12 @@ function mAdmOpen(p: player, menu: text):
 			add 1 to {_i}
 		set slot 35 of {_inv} to mAdmItem(arrow, "&7뒤로", "&7메인 메뉴")
 	else if {_menu} is "scene":
-		set {_inv} to chest inventory with 3 rows named "&8마피아 관리자 - 장소/카메라"
+		# 맵 장소는 /mbuild 가 정하고 스크립트를 불러올 때마다 코드 값으로 다시 저장한다(mbuild.sk mBSaveSpots). 그래서 여기서는 이동해서 보기만 한다.
+		set {_inv} to chest inventory with 4 rows named "&8마피아 관리자 - 맵/연출"
 		set {_i} to 0
-		loop mScKeys():
+		loop "table", "daycam", "room", "nightcam", "bed", "bedcam":
 			set {_k} to loop-value
-			set {_st} to "&c정해지지 않음"
+			set {_st} to "&c없음 (/mbuild 필요)"
 			if mLocSet({_k}) is true:
 				set {_l} to mLocLoad({_k})
 				set {_x} to round({_l}.getX() * 10) / 10
@@ -54,22 +54,53 @@ function mAdmOpen(p: player, menu: text):
 			set {_it} to compass
 			if {_k} is "daycam" or "nightcam" or "bedcam":
 				set {_it} to spyglass
-			set slot {_i} of {_inv} to mAdmItem({_it}, "&f%mScLabel({_k})%", ({_st}, "&7좌클릭: 지금 위치로 정하기", "&7우클릭: 그 위치로 이동"))
+			set slot {_i} of {_inv} to mAdmItem({_it}, "&f%mScLabel({_k})%", ({_st}, "&7클릭: 그 위치로 이동(카메라는 그 눈높이·방향)"))
 			add 1 to {_i}
-		set {_r} to mScNum("radius", 3)
-		set {_fd} to mScNum("facedist", 1.4)
-		set {_fh} to mScNum("faceh", 1.1)
-		set slot 9 of {_inv} to mAdmItem(oak fence, "&f원탁 반지름: &e%{_r}%", "&7좌클릭 +0.25 / 우클릭 -0.25")
-		set slot 10 of {_inv} to mAdmItem(player head, "&f얼굴 클로즈업 거리: &e%{_fd}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
-		set slot 11 of {_inv} to mAdmItem(armor stand, "&f앉은 더미 얼굴 높이: &e%{_fh}%", "&7좌클릭 +0.05 / 우클릭 -0.05")
-		set {_bg} to mScNum("bedgap", 2)
-		set slot 12 of {_inv} to mAdmItem(red bed, "&f밤 침대 간격: &e%{_bg}%", ("&7가운데 침대와 양옆 침대 사이 칸 수", "&7좌클릭 +0.25 / 우클릭 -0.25"))
+		# 카메라·자리 숫자(다음 게임부터 적용). /mbuild 와 스크립트 불러오기가 덮어쓰지 않는다.
+		set {_n1} to mScNum("radius", 3.2)
+		set {_n2} to mScNum("facedist", 1.4)
+		set {_n3} to mScNum("faceh", 1.1)
+		set {_n4} to mScNum("bedgap", 2)
+		set {_n5} to mScNum("backdist", 1.6)
+		set {_n6} to mScNum("sidedist", 0.9)
+		set {_n7} to mScNum("camh", 1.9)
+		set slot 9 of {_inv} to mAdmItem(oak fence, "&f원탁 반지름: &e%{_n1}%", "&7좌클릭 +0.25 / 우클릭 -0.25")
+		set slot 10 of {_inv} to mAdmItem(player head, "&f얼굴 클로즈업 거리: &e%{_n2}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
+		set slot 11 of {_inv} to mAdmItem(armor stand, "&f앉은 더미 얼굴 높이: &e%{_n3}%", "&7좌클릭 +0.05 / 우클릭 -0.05")
+		set slot 12 of {_inv} to mAdmItem(red bed, "&f밤 침대 간격: &e%{_n4}%", ("&7가운데 침대와 양옆 침대 사이 칸 수", "&7좌클릭 +0.25 / 우클릭 -0.25"))
+		set slot 13 of {_inv} to mAdmItem(ender eye, "&f어깨너머 카메라 뒤 거리: &e%{_n5}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
+		set slot 14 of {_inv} to mAdmItem(ender eye, "&f어깨너머 카메라 옆 거리: &e%{_n6}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
+		set slot 15 of {_inv} to mAdmItem(ender eye, "&f어깨너머 카메라 높이: &e%{_n7}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
+		set slot 17 of {_inv} to mAdmItem(barrier, "&c숫자 기본값으로", "&7위의 숫자 7개를 처음 값으로 되돌립니다.")
+		# 집 12채(바깥 문 앞으로 이동)
+		set {_h} to 1
+		while {_h} <= 12:
+			set {_hs} to 17 + {_h}
+			set {_hk} to "h%{_h}%out"
+			set {_st} to "&c없음 (/mbuild 필요)"
+			if mLocSet({_hk}) is true:
+				set {_st} to "&a클릭: 문 앞으로 이동"
+			set slot {_hs} of {_inv} to mAdmItem(oak door, "&f%{_h}%번 집", {_st})
+			add 1 to {_h}
+		# 상태
+		set {_ok::*} to "&7맵 버전: &f%{mcfg::mapver}% &7(코드 %mBVer()%)"
+		if {mcfg::mapver} is not mBVer():
+			add "&e맵 구조가 바뀌었습니다. /mbuild 를 다시 실행해 주세요." to {_ok::*}
 		set {_miss} to mSceneMissing()
+		if {_miss} is not "":
+			add "&c빠진 장소: %{_miss}%" to {_ok::*}
+		if mFxOn() is not true:
+			add "&c밤 장면 장소가 없어 밤 연출 없이 진행합니다." to {_ok::*}
+		set {_good} to false
 		if {_miss} is "":
-			set slot 14 of {_inv} to mAdmItem(lime concrete, "&a연출 사용 가능", "&7장소가 모두 정해졌습니다.")
+			if mFxOn() is true:
+				set {_good} to true
+		if {_good} is true:
+			set slot 31 of {_inv} to mAdmItem(lime concrete, "&a연출 사용 가능", {_ok::*})
 		else:
-			set slot 14 of {_inv} to mAdmItem(red concrete, "&c연출 꺼짐", ("&7빠진 장소: %{_miss}%", "&7빠진 장소가 있으면 연출 없이 진행합니다."))
-		set slot 26 of {_inv} to mAdmItem(arrow, "&7뒤로", "&7메인 메뉴")
+			set slot 31 of {_inv} to mAdmItem(red concrete, "&c연출 일부 꺼짐", {_ok::*})
+		set slot 33 of {_inv} to mAdmItem(bricks, "&f맵 다시 짓기", ("&7/mbuild 로 mafia_map 을 새로 짓습니다.", "&7클릭하면 명령 안내를 채팅에 보냅니다."))
+		set slot 35 of {_inv} to mAdmItem(arrow, "&7뒤로", "&7메인 메뉴")
 	else:
 		set {_menu} to "main"
 		set {_inv} to chest inventory with 3 rows named "&8마피아 관리자"
@@ -84,7 +115,7 @@ function mAdmOpen(p: player, menu: text):
 		else:
 			set slot 13 of {_inv} to mAdmItem(gray dye, "&f연속 퍼블 금지: &c꺼짐", ("&7지난 게임 1일차 밤에 죽은 사람은", "&7이번 게임 1일차 밤에 살해 대상이 될 수 없습니다.", "&7클릭하면 켭니다."))
 		set slot 14 of {_inv} to mAdmItem(book, "&f직업 켜고 끄기", "&7보조 3, 중립 3, 시민 팀(경찰/의사 제외)")
-		set slot 15 of {_inv} to mAdmItem(spyglass, "&f장소/카메라 설정", "&7원탁, 방, 침대, 카메라 위치")
+		set slot 15 of {_inv} to mAdmItem(spyglass, "&f맵/연출", ("&7장소로 이동해 보기, 카메라 숫자 조정", "&7맵 상태 확인"))
 		if mState() is "lobby":
 			set {_cnt} to size of mLobbyPlayers()
 			set {_why} to mStartCheck({_cnt})
@@ -105,6 +136,11 @@ function mAdmOpen(p: player, menu: text):
 			set {_ll} to mLocLoad("lineup")
 			set {_lu} to "&a%round({_ll}.getX())%, %round({_ll}.getY())%, %round({_ll}.getZ())% (%{_ll}.getWorld().getName()%)"
 		set slot 21 of {_inv} to mAdmItem(armor stand, "&f승리 팀 라인업 위치", ({_lu}, "&7좌클릭: 지금 서 있는 곳(줄 가운데 더미 발 위치)으로 정하기", "&7  바라보는 방향 = 더미가 볼 방향(90도 단위로 맞춤), 카메라는 그 앞", "&7우클릭: 그 위치로 이동", "&8/mbuild 가 바꾸지 않는다"))
+		set {_lb} to "&c정해지지 않음(기본 월드 스폰)"
+		if mLocSet("lobby") is true:
+			set {_bl} to mLocLoad("lobby")
+			set {_lb} to "&a%round({_bl}.getX())%, %round({_bl}.getY())%, %round({_bl}.getZ())% (%{_bl}.getWorld().getName()%)"
+		set slot 22 of {_inv} to mAdmItem(white bed, "&f로비 위치", ({_lb}, "&7좌클릭: 지금 서 있는 곳(보는 방향 포함)으로 정하기", "&7우클릭: 그 위치로 이동", "&8게임이 끝나면 모두 여기로 돌아옵니다"))
 	open {_inv} to {_p}
 	set {-madm::%uuid of {_p}%} to {_menu}
 
@@ -154,7 +190,7 @@ on inventory click:
 		stop
 	set {_raw} to raw index of event-slot
 	set {_size} to 27
-	if {_m} is "roles":
+	if {_m} is "roles" or "scene":
 		set {_size} to 36
 	if {_raw} >= {_size}:
 		stop
@@ -192,6 +228,17 @@ on inventory click:
 			set {_l2} to new Location({_l}.getWorld(), {_l}.getBlockX() + 0.5, {_l}.getY(), {_l}.getBlockZ() + 0.5, {_yaw}, 0)
 			mLocSave("lineup", {_l2})
 			send "&a승리 팀 라인업 위치를 정했습니다. (더미가 보는 방향 %{_yaw}%도)" to player
+		else if {_s} is 22:
+			if {_right} is true:
+				set {_ll} to mLocLoad("lobby")
+				if {_ll} is not set:
+					send "&c로비 위치가 정해지지 않았습니다." to player
+					stop
+				close player's inventory
+				mTp(player, {_ll})
+				stop
+			mLocSave("lobby", player's location)
+			send "&a로비 위치를 지금 서 있는 곳으로 정했습니다." to player
 		else if {_s} is 13:
 			if mFbOn() is true:
 				set {mcfg::nofb} to false
@@ -233,33 +280,55 @@ on inventory click:
 		mAdmOpen(player, "roles")
 		stop
 	if {_m} is "scene":
-		if {_s} is 26:
+		if {_s} is 35:
 			mAdmOpen(player, "main")
 			stop
 		if {_s} < 6:
-			set {_keys::*} to mScKeys()
+			set {_keys::*} to "table", "daycam", "room", "nightcam", "bed", "bedcam"
 			set {_k} to {_keys::%{_s} + 1%}
-			if {_right} is true:
-				set {_l} to mLocLoad({_k})
+			set {_l} to mLocLoad({_k})
+			if {_l} is not set:
+				send "&c%mScLabel({_k})% 위치가 없습니다. /mbuild 를 먼저 실행해 주세요." to player
+				stop
+			# 카메라는 눈 위치로 저장돼 있어서 발 위치로 바꿔 이동한다
+			if {_k} is "daycam" or "nightcam" or "bedcam":
+				set {_l} to {_l}.clone()
+				{_l}.subtract(0, 1.62, 0)
+			close player's inventory
+			mTp(player, {_l})
+			stop
+		if {_s} >= 18:
+			if {_s} <= 29:
+				set {_h} to {_s} - 17
+				set {_l} to mLocLoad("h%{_h}%out")
 				if {_l} is not set:
-					send "&c%mScLabel({_k})% 위치가 정해지지 않았습니다." to player
+					send "&c%{_h}%번 집 위치가 없습니다. /mbuild 를 먼저 실행해 주세요." to player
 					stop
 				close player's inventory
 				mTp(player, {_l})
 				stop
-			if {_k} is "daycam" or "nightcam" or "bedcam":
-				mLocSave({_k}, player.getEyeLocation())
-			else:
-				mLocSave({_k}, player's location)
-			send "&a%mScLabel({_k})% 위치를 지금 자리로 정했습니다." to player
-		else if {_s} is 9:
-			mAdmNum("radius", 0.25 * {_sign}, 3)
+		if {_s} is 33:
+			close player's inventory
+			send "&6[마피아] &7맵을 새로 지으려면 &f/mbuild &7를 입력하세요. (월드 mafia_map 을 다시 만듭니다)" to player
+			stop
+		if {_s} is 9:
+			mAdmNum("radius", 0.25 * {_sign}, 3.2)
 		else if {_s} is 10:
 			mAdmNum("facedist", 0.1 * {_sign}, 1.4)
 		else if {_s} is 11:
 			mAdmNum("faceh", 0.05 * {_sign}, 1.1)
 		else if {_s} is 12:
 			mAdmNum("bedgap", 0.25 * {_sign}, 2)
+		else if {_s} is 13:
+			mAdmNum("backdist", 0.1 * {_sign}, 1.6)
+		else if {_s} is 14:
+			mAdmNum("sidedist", 0.1 * {_sign}, 0.9)
+		else if {_s} is 15:
+			mAdmNum("camh", 0.1 * {_sign}, 1.9)
+		else if {_s} is 17:
+			loop "radius", "facedist", "faceh", "bedgap", "backdist", "sidedist", "camh":
+				delete {mcfg::scene::%loop-value%}
+			send "&a카메라·자리 숫자를 기본값으로 되돌렸습니다." to player
 		else:
 			stop
 		mAdmOpen(player, "scene")

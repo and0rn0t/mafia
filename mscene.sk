@@ -186,7 +186,7 @@ function mScSeatLoc(i: number) :: location:
 	set {_t} to mLocLoad("table")
 	set {_n} to {-ms::seatn}
 	set {_a} to 360 * ({_i} - 1) / {_n}
-	set {_r} to mScNum("radius", 3)
+	set {_r} to mScNum("radius", 3.2)
 	set {_x} to {_t}.getX() + {_r} * cos({_a})
 	set {_z} to {_t}.getZ() + {_r} * sin({_a})
 	set {_l} to new Location({_t}.getWorld(), {_x}, {_t}.getY(), {_z}, {_a} + 90, 0)

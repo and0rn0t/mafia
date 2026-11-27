@@ -24,7 +24,7 @@ function cmdAllowed(c: text) :: boolean:
 	# 허용할 게임 명령어를 여기에 소문자로 추가한다. 예: if {_x} is "투표" or "마피아":
 	if {_x} is "lobby" or "로비":
 		return true
-	if {_x} is "mvote" or "mtake" or "mdisc":
+	if {_x} is "mvote" or "mtake" or "mdisc" or "mhelp" or "마피아":
 		return true
 	return false
 

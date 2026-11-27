@@ -381,10 +381,6 @@ function mBSaveSpots(w: world):
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)
 	# 침대 카메라: 가운데 침대 바로 위에서 거의 수직으로 내려다본다. 화면 위쪽 = 남쪽(베개와 얼굴), 양옆 침대는 화면 가장자리에 반쯤
 	mBSaveLook("bedcam", {_w}, 0.5, 66.35, -98.65, 0.5, 65.6, -98.55)
-	set {mcfg::scene::radius} to 3.2
-	set {mcfg::scene::facedist} to 1.4
-	set {mcfg::scene::faceh} to 1.1
-	set {mcfg::scene::bedgap} to 2
 
 # 맵이 있으면 연출 위치를 지금 코드 값으로 다시 저장하고, 맵 버전이 낮으면 관리자에게 알린다(월드는 world.sk 의 on load 가 불러온다)
 on load:
