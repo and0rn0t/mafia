@@ -7,9 +7,11 @@
 #   /mtest skip                지금 단계를 바로 끝낸다(남은 시간 1초)
 #   /mtest kill <이름>          그 참가자를 바로 사망 처리한다(승패 판정은 다음 단계 끝에서)
 #   /mtest auto                내 입력도 봇처럼 자동으로 할지 켜고 끈다
+#   /mtest ai <이름>            그 봇이 아는 것과 의심 점수를 본다
 #   /mtest stop                게임을 끝내고 로비로(= /mstop)
-# 봇 동작: 밤이 시작되고 2~(밤 시간-2)초 사이 무작위 시점에 고를 수 있는 대상 중 무작위로 능력을 쓴다(방화범은 기름에 젖은 사람이 있으면 1/3 확률로 점화).
-#          투표 시간에는 80% 확률로 자기를 뺀 생존자에게 무작위로 투표한다. 테러리스트 길동무는 시간이 끝날 때 무작위(mday.sk 기본 동작).
+# 봇 동작(규칙 기반 AI, 아래 "봇 AI"): 밤·투표 시간 중 무작위 시점에 직업과 아는 것·의심 점수로 판단해 능력을 쓰고 투표한다.
+#   낮에는 말도 한다(경찰 결과 밝히기, 의심 가는 사람 말하기, 고발당하면 해명, 마피아는 거짓 고발·거짓 경찰 주장). 사람 채팅의 고발/변호도 듣는다.
+#   테러리스트 봇은 화형 컷신 뒤 가장 의심 가는 사람을 길동무로 고른다.
 # 봇의 밤 결과(조사 결과 등)는 다른 사람에게 보여 주지 않는다(실제 게임처럼 조사한 본인에게만 간다. 봇은 받을 사람이 없어서 아무에게도 안 보임).
 # 변수: {-mt::bots::*}(봇 uuid 목록), {-mt::name::uuid}(봇 이름), {-mt::when::uuid}(이번 단계에 행동할 남은 초), {-mt::phase}(단계 바뀜 감지),
 #       {-mt::auto::uuid}(관리자 자동 입력). mReset 이 {-mt::*} 를 지운다.
@@ -36,27 +38,226 @@ function mTestAutoOn(id: text) :: boolean:
 		return true
 	return false
 
+# ------------------------------------------------------------------ 봇 AI(규칙 기반)
+# 봇마다 아는 것과 의심 점수를 들고 판단한다.
+#   아는 것 {-mt::k::봇::대상} = "mafia"(마피아 팀) / "town"(마피아 아님) / "evil"(중립 살인 직업 등). 출처: 자기 조사 결과, 기자 특종, 같은 마피아 팀.
+#   의심 {-mt::sus::봇::대상} 숫자(높을수록 의심). 시작할 때 0~15 무작위. 주장(채팅)·투표·조사로 바뀐다.
+#   공개 주장 {-mt::claim::사람} = 주장한 직업("police" 등). 의사·수호자가 지킬 사람을 고를 때 쓴다.
+#   채팅 {-mt::said::봇} = 이번 낮에 한 말 수(낮마다 2마디까지)
+# 밤: 직업별로 고른다(마피아끼리는 같은 대상). 투표: 아는 마피아 → 가장 의심 + 지금 표가 몰린 사람(따라가기). 마피아 팀은 팀원을 피하고 위협(주장한 사람, 팀원을 고발한 사람)을 노린다.
+# 낮 채팅: 경찰 봇은 조사 결과를 밝히고, 의심 가는 사람을 말하고, 고발당하면 해명한다. 마피아 봇은 가끔 거짓 고발이나 거짓 경찰 주장을 한다.
+# 사람 채팅도 듣는다: 말에 참가자 번호나 닉네임과 "마피아"가 있으면 고발, "시민"/"아니" 가 있으면 변호로 받아들인다.
+
+# 봇 b 가 t 를 어떻게 아는지("" = 모름)
+function mBotK(b: text, t: text) :: text:
+	if {-mt::k::%{_b}%::%{_t}%} is set:
+		return {-mt::k::%{_b}%::%{_t}%}
+	return ""
+
+function mBotSus(b: text, t: text) :: number:
+	if {-mt::sus::%{_b}%::%{_t}%} is set:
+		return {-mt::sus::%{_b}%::%{_t}%}
+	return 0
+
+function mBotAddSus(b: text, t: text, d: number):
+	set {-mt::sus::%{_b}%::%{_t}%} to mBotSus({_b}, {_t}) + {_d}
+
+# 봇이 마피아 팀(마피아 직업이거나 접선한 보조)인지
+function mBotEvilSide(b: text) :: boolean:
+	if {-m::team::%{_b}%} is "mafia":
+		return true
+	return false
+
+# 직업 id → 봇이 아는 값
+function mBotKOfRole(r: text) :: text:
+	set {_po} to mRolePool({_r})
+	if {_po} is "mafia":
+		return "mafia"
+	if {_po} is "neutral":
+		if {_r} is "jester":
+			return "town"
+		return "evil"
+	if {_po} is "support":
+		return "evil"
+	return "town"
+
+# 게임 시작 때 한 번: 의심 초기값, 마피아 팀은 서로 안다
+function mBotInit():
+	delete {-mt::k::*}
+	delete {-mt::sus::*}
+	delete {-mt::claim::*}
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			loop {-m::players::*}:
+				set {_t} to loop-value-2
+				if {_t} is not {_b}:
+					set {-mt::sus::%{_b}%::%{_t}%} to random integer between 0 and 15
+			if mBotEvilSide({_b}) is true:
+				loop {-m::players::*}:
+					if {-m::team::%loop-value-2%} is "mafia":
+						set {-mt::k::%{_b}%::%loop-value-2%} to "mafia"
+
+# 낮이 시작될 때: 지난 밤 자기 조사 결과와 기자 특종, 새로 접선한 팀원을 반영한다
+function mBotLearn():
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			set {_r} to {-m::inv::%{_b}%}
+			set {_t} to {-m::act::%{_b}%}
+			if {_r} is set:
+				if {_t} is set:
+					if {_r} is "mafia":
+						set {-mt::k::%{_b}%::%{_t}%} to "mafia"
+						set {-mt::sus::%{_b}%::%{_t}%} to 100
+					else if {_r} is "town":
+						set {-mt::k::%{_b}%::%{_t}%} to "town"
+						set {-mt::sus::%{_b}%::%{_t}%} to -50
+					else if {_r} starts with "role:":
+						set {_ro} to {_r}
+						replace all "role:" in {_ro} with ""
+						set {_kv} to mBotKOfRole({_ro})
+						set {-mt::k::%{_b}%::%{_t}%} to {_kv}
+						if {_kv} is "town":
+							set {-mt::sus::%{_b}%::%{_t}%} to -50
+						else:
+							set {-mt::sus::%{_b}%::%{_t}%} to 90
+					else if {_r} starts with "tgt:":
+						# 탐정: 대상이 누군가에게 능력을 썼다 = 조금 수상
+						mBotAddSus({_b}, {_t}, 10)
+			loop {-m::rep::*}:
+				set {-mt::k::%{_b}%::%loop-value-2%} to mBotKOfRole({-m::role::%loop-value-2%})
+			if mBotEvilSide({_b}) is true:
+				loop {-m::players::*}:
+					if {-m::team::%loop-value-2%} is "mafia":
+						set {-mt::k::%{_b}%::%loop-value-2%} to "mafia"
+
+# 살아 있는 다른 참가자 중 점수가 가장 높은 사람(c 목록 안에서). 같은 마피아 팀원은 마피아 팀 봇이 고르지 않는다
+function mBotBest(b: text, c: texts, mode: text) :: text:
+	set {_best} to ""
+	set {_bs} to -9999
+	loop {_c::*}:
+		set {_t} to loop-value
+		set {_ok} to true
+		if {_t} is {_b}:
+			set {_ok} to false
+		if {-m::alive::%{_t}%} is not true:
+			set {_ok} to false
+		if mBotEvilSide({_b}) is true:
+			if {-m::team::%{_t}%} is "mafia":
+				set {_ok} to false
+		if {_ok} is true:
+			set {_s} to random number between 0 and 8
+			if {_mode} is "sus":
+				add mBotSus({_b}, {_t}) to {_s}
+				if mBotK({_b}, {_t}) is "town":
+					subtract 200 from {_s}
+				if mBotK({_b}, {_t}) is "mafia":
+					add 200 to {_s}
+			else if {_mode} is "unknown":
+				# 조사: 아직 모르는 사람, 그중 의심 가는 사람
+				if mBotK({_b}, {_t}) is not "":
+					subtract 500 from {_s}
+				add mBotSus({_b}, {_t}) to {_s}
+			else if {_mode} is "threat":
+				# 마피아 팀: 직업을 밝힌 사람, 팀원을 의심하는 사람
+				if {-mt::claim::%{_t}%} is set:
+					add 60 to {_s}
+				add mBotSus({_b}, {_t}) to {_s}
+			else if {_mode} is "protect":
+				# 지키기: 경찰 등 직업을 밝힌 사람, 시민으로 아는 사람
+				if {-mt::claim::%{_t}%} is set:
+					add 60 to {_s}
+				if mBotK({_b}, {_t}) is "town":
+					add 30 to {_s}
+				subtract mBotSus({_b}, {_t}) from {_s}
+			if {_s} > {_bs}:
+				set {_bs} to {_s}
+				set {_best} to {_t}
+	return {_best}
+
+# 밤 능력
 function mTestNight(id: text):
 	if mActCheck({_id}) is not "":
 		stop
-	if mActRole({_id}) is "arsonist":
-		loop {-m::players::*}:
-			if {-m::oil::%loop-value%} is true:
-				if {-m::alive::%loop-value%} is true:
-					set {_oiled} to true
-		if {_oiled} is true:
-			if chance of 33%:
-				mSetIgnite({_id})
-				stop
+	set {_role} to mActRole({_id})
 	set {_c::*} to mTargets({_id})
 	if size of {_c::*} is 0:
 		stop
-	mSetAct({_id}, random element of {_c::*})
+	set {_t} to ""
+	if {_role} is "mafia":
+		# 마피아끼리 같은 대상(먼저 고른 봇의 선택을 따른다)
+		set {_key} to "%{-m::day}%"
+		if {-mt::mk::%{_key}%} is set:
+			if {_c::*} contains {-mt::mk::%{_key}%}:
+				set {_t} to {-mt::mk::%{_key}%}
+		if {_t} is "":
+			set {_t} to mBotBest({_id}, {_c::*}, "threat")
+			set {-mt::mk::%{_key}%} to {_t}
+	else if {_role} is "doctor":
+		if chance of 35%:
+			if {_c::*} contains {_id}:
+				set {_t} to {_id}
+		if {_t} is "":
+			set {_t} to mBotBest({_id}, {_c::*}, "protect")
+	else if {_role} is "guardian":
+		set {_t} to mBotBest({_id}, {_c::*}, "protect")
+	else if {_role} is "police" or "spy" or "detective":
+		set {_t} to mBotBest({_id}, {_c::*}, "unknown")
+	else if {_role} is "reporter":
+		if {-m::day} < 2:
+			stop
+		set {_t} to mBotBest({_id}, {_c::*}, "sus")
+	else if {_role} is "vigilante":
+		# 확신할 때만(아는 마피아이거나 의심이 아주 높을 때)
+		set {_t} to mBotBest({_id}, {_c::*}, "sus")
+		if {_t} is not "":
+			if mBotK({_id}, {_t}) is not "mafia":
+				if mBotSus({_id}, {_t}) < 70:
+					stop
+	else if {_role} is "thief":
+		if {-m::day} < 2:
+			stop
+		set {_t} to mBotBest({_id}, {_c::*}, "threat")
+	else if {_role} is "assassin":
+		set {_t} to mBotBest({_id}, {_c::*}, "threat")
+	else if {_role} is "arsonist":
+		set {_oil} to 0
+		set {_al} to 0
+		loop {-m::players::*}:
+			if {-m::alive::%loop-value%} is true:
+				add 1 to {_al}
+				if {-m::oil::%loop-value%} is true:
+					add 1 to {_oil}
+		set {_need} to {_al} / 2
+		if {_oil} >= {_need}:
+			mSetIgnite({_id})
+			stop
+		if {_oil} >= 2:
+			if chance of 30%:
+				mSetIgnite({_id})
+				stop
+		loop {_c::*}:
+			if {-m::oil::%loop-value%} is not true:
+				add loop-value to {_dry::*}
+		if size of {_dry::*} > 0:
+			set {_t} to random element of {_dry::*}
+	else if {_role} is "witch":
+		if mBotEvilSide({_id}) is true:
+			set {_t} to mBotBest({_id}, {_c::*}, "threat")
+		else:
+			set {_t} to mBotBest({_id}, {_c::*}, "sus")
+	else if {_role} is "thug" or "shaman":
+		set {_t} to mBotBest({_id}, {_c::*}, "sus")
+	if {_t} is "":
+		set {_t} to random element of {_c::*}
+	mSetAct({_id}, {_t})
 
+# 투표
 function mTestVote(id: text):
 	if mVoteCan({_id}) is not "":
 		stop
-	if chance of 20%:
+	if chance of 8%:
 		stop
 	loop {-m::players::*}:
 		if loop-value is not {_id}:
@@ -64,7 +265,222 @@ function mTestVote(id: text):
 				add loop-value to {_c::*}
 	if size of {_c::*} is 0:
 		stop
-	mVoteCast({_id}, random element of {_c::*})
+	set {_role} to {-m::role::%{_id}%}
+	if {_role} is "jester":
+		mVoteCast({_id}, random element of {_c::*})
+		stop
+	# 지금 표가 몰린 만큼 점수를 더해(따라가기) 고른다
+	set {_best} to ""
+	set {_bs} to -9999
+	loop {_c::*}:
+		set {_t} to loop-value
+		set {_s} to random number between 0 and 10
+		set {_v} to {-m::votes::%{_t}%}
+		if {_v} is set:
+			add {_v} * 12 to {_s}
+		if mBotEvilSide({_id}) is true:
+			if {-m::team::%{_t}%} is "mafia":
+				subtract 500 from {_s}
+			if {-mt::claim::%{_t}%} is set:
+				add 40 to {_s}
+			add mBotSus({_id}, {_t}) to {_s}
+		else:
+			add mBotSus({_id}, {_t}) to {_s}
+			if mBotK({_id}, {_t}) is "mafia":
+				add 300 to {_s}
+			else if mBotK({_id}, {_t}) is "evil":
+				add 150 to {_s}
+			else if mBotK({_id}, {_t}) is "town":
+				subtract 300 from {_s}
+		if {_s} > {_bs}:
+			set {_bs} to {_s}
+			set {_best} to {_t}
+	if {_best} is "":
+		stop
+	mVoteCast({_id}, {_best})
+
+# 테러리스트 봇의 길동무: 아는 마피아 → 가장 의심
+function mTestTake(id: text):
+	if {-m::exe} is not {_id}:
+		stop
+	loop {-m::players::*}:
+		if loop-value is not {_id}:
+			if {-m::alive::%loop-value%} is true:
+				add loop-value to {_c::*}
+	if size of {_c::*} is 0:
+		stop
+	set {_t} to mBotBest({_id}, {_c::*}, "sus")
+	if {_t} is "":
+		set {_t} to random element of {_c::*}
+	mTakePick({_id}, {_t})
+
+# ------------------------------------------------------------------ 봇 채팅
+
+# 봇이 채팅에 말한다(생존자 대화처럼 모두에게 보이고 기록에도 남는다)
+function mBotSay(b: text, msg: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	set {_line} to "<%mNumName({_b})%&r> %{_msg}%"
+	loop all players:
+		send colored {_line} to loop-player
+	mLogAdd("*", {_line})
+	mBotHear({_b}, {_msg})
+	add 1 to {-mt::said::%{_b}%}
+
+# 말한 사람 s 가 t 를 고발(kind "mafia") 또는 변호(kind "town")했다. 봇들이 받아들인다
+function mBotClaim(s: text, t: text, kind: text):
+	if {_t} is {_s}:
+		stop
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			if {_b} is not {_s}:
+				if {-m::alive::%{_b}%} is true:
+					if mBotEvilSide({_b}) is true:
+						# 마피아 팀: 팀원을 고발한 사람은 위협
+						if {_kind} is "mafia":
+							if {-m::team::%{_t}%} is "mafia":
+								mBotAddSus({_b}, {_s}, 60)
+					else if mBotK({_b}, {_s}) is "mafia":
+						# 아는 마피아의 말은 거꾸로 받아들인다
+						if {_kind} is "mafia":
+							mBotAddSus({_b}, {_t}, -20)
+					else if {_t} is {_b}:
+						# 나를 고발했는데 나는 마피아가 아니다 = 말한 사람이 수상
+						if {_kind} is "mafia":
+							mBotAddSus({_b}, {_s}, 70)
+					else:
+						set {_kt} to mBotK({_b}, {_t})
+						if {_kind} is "mafia":
+							if {_kt} is "town":
+								mBotAddSus({_b}, {_s}, 60)
+							else:
+								mBotAddSus({_b}, {_t}, 40)
+						else:
+							if {_kt} is "mafia":
+								mBotAddSus({_b}, {_s}, 60)
+							else:
+								mBotAddSus({_b}, {_t}, -25)
+					# 고발당한 봇은 해명한다(낮마다 두 마디까지)
+					if {_t} is {_b}:
+						if {_kind} is "mafia":
+							if mState() is "day" or "vote":
+								set {-mt::defend::%{_b}%} to {_s}
+
+# 말 한 줄에서 참가자(번호 또는 닉네임)와 고발/변호를 찾아 mBotClaim 으로 넘긴다
+function mBotHear(s: text, msg: text):
+	# 색 코드는 빼고 읽는다
+	set {_m} to {_msg}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+	set {_kind} to ""
+	if {_m} contains "마피아":
+		set {_kind} to "mafia"
+	else if {_m} contains "시민" or "아니":
+		set {_kind} to "town"
+	if {_kind} is "":
+		stop
+	if {_m} contains "경찰":
+		set {-mt::claim::%{_s}%} to "police"
+	set {_w::*} to split {_m} at " "
+	loop {_w::*}:
+		set {_x} to loop-value
+		replace all "번" in {_x} with ""
+		set {_no} to {_x} parsed as integer
+		if {_no} is set:
+			loop {-m::players::*}:
+				if {-m::num::%loop-value-2%} is {_no}:
+					add loop-value-2 to {_hit::*}
+	# 닉네임은 낱말이 닉네임과 같을 때만(뒤에 붙은 "님" 은 뺀다. 봇1 과 봇10 을 헷갈리지 않게)
+	loop {_w::*}:
+		set {_x} to loop-value
+		replace all "님" in {_x} with ""
+		loop {-m::players::*}:
+			if mNameOf(loop-value-2) is {_x}:
+				if {_hit::*} does not contain loop-value-2:
+					add loop-value-2 to {_hit::*}
+	loop {_hit::*}:
+		if loop-value is not {_s}:
+			mBotClaim({_s}, loop-value, {_kind})
+
+# 낮 동안 봇 한 명이 말할 차례가 되면
+function mBotTalk(b: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	if {-mt::said::%{_b}%} >= 2:
+		stop
+	set {_role} to mActRole({_b})
+	# 고발당했으면 해명
+	if {-mt::defend::%{_b}%} is set:
+		set {_s} to {-mt::defend::%{_b}%}
+		delete {-mt::defend::%{_b}%}
+		if mBotEvilSide({_b}) is true:
+			if chance of 50%:
+				mBotSay({_b}, "제가 경찰인데요, %mNumName({_s})%&r 님이 마피아에요. 저 몰아가는 거예요")
+				set {-mt::claim::%{_b}%} to "police"
+				stop
+		if {_role} is "doctor" or "police" or "soldier" or "reporter" or "detective":
+			mBotSay({_b}, "저 %mRoleName({_role})%이에요. 저 아니에요")
+			set {-mt::claim::%{_b}%} to {_role}
+		else:
+			mBotSay({_b}, "저 시민이에요. %mNumName({_s})%&r 님이 더 수상해요")
+		stop
+	# 경찰: 지난 밤 결과를 밝힌다
+	if {_role} is "police":
+		set {_t} to {-m::act::%{_b}%}
+		if {_t} is set:
+			if {-mt::told::%{_b}%::%{-m::day}%} is not set:
+				set {-mt::told::%{_b}%::%{-m::day}%} to true
+				if mBotK({_b}, {_t}) is "mafia":
+					mBotSay({_b}, "경찰입니다. %mNumName({_t})%&r 마피아에요!")
+					set {-mt::claim::%{_b}%} to "police"
+					stop
+				if chance of 50%:
+					mBotSay({_b}, "경찰인데 %mNumName({_t})%&r 님은 시민 확인했어요")
+					set {-mt::claim::%{_b}%} to "police"
+					stop
+	# 마피아 팀: 가끔 시민을 몰아간다
+	if mBotEvilSide({_b}) is true:
+		if chance of 35%:
+			loop {-m::players::*}:
+				if {-m::alive::%loop-value%} is true:
+					if {-m::team::%loop-value%} is not "mafia":
+						add loop-value to {_town::*}
+			if size of {_town::*} > 0:
+				set {_t} to mBotBest({_b}, {_town::*}, "threat")
+				if {_t} is not "":
+					mBotSay({_b}, "%mNumName({_t})%&r 님 좀 마피아 같은데요")
+		stop
+	# 광대: 일부러 수상하게
+	if {_role} is "jester":
+		if chance of 40%:
+			mBotSay({_b}, "음... 저 뽑으셔도 괜찮아요 ㅎㅎ")
+		stop
+	# 그 밖: 가장 의심 가는 사람을 말한다
+	if chance of 45%:
+		set {_best} to ""
+		set {_bs} to 30
+		loop {-m::players::*}:
+			if loop-value is not {_b}:
+				if {-m::alive::%loop-value%} is true:
+					if mBotSus({_b}, loop-value) > {_bs}:
+						set {_bs} to mBotSus({_b}, loop-value)
+						set {_best} to loop-value
+		if {_best} is not "":
+			mBotSay({_b}, "%mNumName({_best})%&r 님이 제일 수상해요. 마피아 같아요")
+
+# 사람 채팅 듣기(살아 있는 참가자가 낮·투표 시간에 한 말)
+on chat:
+	if size of {-mt::bots::*} is 0:
+		stop
+	if mRunning() is not true:
+		stop
+	if mState() is not "day" or "vote":
+		stop
+	set {_id} to "%uuid of player%"
+	if {-m::alive::%{_id}%} is not true:
+		stop
+	mBotHear({_id}, uncolored message)
+
+# ------------------------------------------------------------------ 봇 진행(1초마다)
 
 every second:
 	if size of {-mt::bots::*} is 0:
@@ -76,12 +492,29 @@ every second:
 	if {-mt::phase} is not {_ph}:
 		set {-mt::phase} to {_ph}
 		delete {-mt::when::*}
+		delete {-mt::talk::*}
+		if {_s} is "loading":
+			mBotInit()
+		if {_s} is "day":
+			delete {-mt::said::*}
+			mBotLearn()
 		loop {-m::players::*}:
 			if mTestAutoOn(loop-value) is true:
 				set {_max} to {-m::left} - 2
 				if {_max} < 2:
 					set {_max} to 2
 				set {-mt::when::%loop-value%} to random integer between 1 and {_max}
+				# 낮: 말할 때(아침 발표가 끝난 뒤 두 번)
+				if {_s} is "day":
+					if mIsBot(loop-value) is true:
+						set {_ms} to mStgMorningLen() + 2
+						set {_t1} to {_ms} + random integer between 1 and 12
+						set {_t2} to {_t1} + random integer between 8 and 25
+						set {-mt::talk::%loop-value%::1} to {_t1}
+						set {-mt::talk::%loop-value%::2} to {_t2}
+				# 처형 단계: 테러리스트 봇 길동무는 화형 컷신이 끝난 뒤
+				if {_s} is "execute":
+					set {-mt::when::%loop-value%} to mStgBurnLen() + random integer between 1 and 3
 	loop {-m::players::*}:
 		set {_id} to loop-value
 		if {-mt::when::%{_id}%} is set:
@@ -92,6 +525,21 @@ every second:
 					mTestNight({_id})
 				else if {_s} is "vote":
 					mTestVote({_id})
+				else if {_s} is "execute":
+					mTestTake({_id})
+		if {_s} is "day":
+			if mIsBot({_id}) is true:
+				loop 1 and 2:
+					set {_k} to loop-value-2
+					if {-mt::talk::%{_id}%::%{_k}%} is set:
+						subtract 1 from {-mt::talk::%{_id}%::%{_k}%}
+						if {-mt::talk::%{_id}%::%{_k}%} <= 0:
+							delete {-mt::talk::%{_id}%::%{_k}%}
+							mBotTalk({_id})
+				# 고발당하면 곧 해명
+				if {-mt::defend::%{_id}%} is set:
+					if chance of 35%:
+						mBotTalk({_id})
 
 function mTestTeamName(t: text) :: text:
 	if {_t} is "mafia":
@@ -114,7 +562,7 @@ command /mtest [<text>] [<text>] [<text>]:
 		set {_me} to "%uuid of player%"
 		set {_a} to arg-1
 		if {_a} is not set:
-			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | skip | kill <이름> | auto | stop"
+			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | skip | kill <이름> | auto | stop"
 			stop
 		if {_a} is "start":
 			if mState() is not "lobby":
@@ -175,6 +623,25 @@ command /mtest [<text>] [<text>] [<text>]:
 					set {_ex} to "%{_ex}% &6기름"
 				send "&7- &f%{_nm}% &e%{_rn}% %{_tm}% %{_al}%%{_ex}%"
 			stop
+		if {_a} is "ai":
+			if arg-2 is not set:
+				send "&7사용법: /mtest ai <봇 이름>"
+				stop
+			set {_b} to mTestFind(arg-2)
+			if {_b} is "":
+				send "&c그런 참가자가 없습니다."
+				stop
+			send "&6[시험] &f%mNameOf({_b})% &7의 생각 (아는 것 / 의심 점수)"
+			loop {-m::players::*}:
+				if loop-value is not {_b}:
+					set {_kn} to mBotK({_b}, loop-value)
+					if {_kn} is "":
+						set {_kn} to "-"
+					set {_cl} to ""
+					if {-mt::claim::%loop-value%} is set:
+						set {_cl} to " &7주장: &f%mRoleName({-mt::claim::%loop-value%})%"
+					send "&7- %mNumName(loop-value)% &7아는 것 &f%{_kn}% &7의심 &e%mBotSus({_b}, loop-value)%%{_cl}%"
+			stop
 		if {_a} is "skip":
 			set {-m::left} to 1
 			send "&7지금 단계를 끝냅니다."
@@ -233,4 +700,4 @@ command /mtest [<text>] [<text>] [<text>]:
 			if {_tp} is set:
 				mRoleReveal({_tp})
 			stop
-		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | skip | kill <이름> | auto | stop"
+		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | skip | kill <이름> | auto | stop"

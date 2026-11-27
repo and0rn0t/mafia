@@ -163,3 +163,4 @@ ROLES.md 에 없던, 설계하면서 생긴 질문이다.
 - 메시지 기록(mcore.sk): 전체 알림은 mBc(문장)로 보내고 기록한다. 본인에게만 간 것은 mLogP(uuid, 문장). 보기: /기록(/mlog), Paper 대화창(dialog)으로 띄운다(채팅에 쓰지 않음).
 - 배경음(maudio.sk, maudio_data.sk, tools/BuildPack.java): ogg 폴더 → `java tools/BuildPack.java <폴더> .` 로 mafia-pack.zip 과 maudio_data.sk(키, 길이, SHA-1)를 만든다. 팩 주소는 저장소 raw(또는 {mcfg::packurl}).
 - 장면 따라 보기(mfx.sk): 장면 보내기는 모두 mFxAud(vid) = 본인 + mFxWatchersOf(vid)(밤 처리 중 그 사람을 보는 사망자·관전자, 자기 장면 재생 중인 사람 제외)로 간다. 카메라 컷(mCamCut)과 흔들림(mCamShake)은 그 사람 장면 중이면 관전자에게도 같이 적용된다. A/D 로 바꾸면 mFxWatchSwitch 가 이전 장면을 치우고 새 장면을 붙인다.
+- 봇 AI(mtest.sk, 봇 시험 전용): 봇마다 아는 것({-mt::k::봇::대상})과 의심 점수({-mt::sus::봇::대상})로 밤 능력·투표·길동무를 고르고, 낮에 말한다(mBotSay: 생존자 대화처럼 모두에게, 기록에도 남음). 사람·봇의 말에서 번호/닉네임 + "마피아"/"시민" 을 찾아 고발·변호로 받아들인다(mBotHear → mBotClaim). /mtest ai <이름> 으로 봇의 생각을 본다.
