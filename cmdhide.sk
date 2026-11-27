@@ -26,7 +26,7 @@ function cmdAllowed(c: text) :: boolean:
 		return true
 	if {_x} is "mvote" or "mtake" or "mdisc" or "mhelp" or "마피아" or "mlog" or "기록":
 		return true
-	if {_x} is "투표" or "vote" or "길동무" or "take" or "토론" or "disc" or "도움말" or "log":
+	if {_x} is "투표" or "vote" or "길동무" or "take" or "토론" or "disc" or "도움말" or "log" or "mmemo" or "메모" or "memo":
 		return true
 	return false
 
