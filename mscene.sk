@@ -379,6 +379,11 @@ function mSceneStart():
 		set {-ms::seat::%{_id}%} to {_i}
 		set {-ms::dummy::%{_id}%} to mScSeated(mScSeatLoc({_i}), {_id})
 		set {_self} to mScSeated(mLocLoad("room"), {_id})
+		# 의자(보이지 않는 디스플레이)도 같이 본인에게만 보이게 한다. 더미만 숨기고 의자는 모두에게 보이면 첫 시험에서 더미가 안 보였다.
+		set {_seat} to {_self}.getVehicle()
+		if {_seat} is set:
+			mScOnlyFor({_seat}, {_id})
+			set {-ms::selfseat::%{_id}%} to {_seat}
 		mScOnlyFor({_self}, {_id})
 		set {-ms::self::%{_id}%} to {_self}
 		loop "L", "C", "R":
@@ -391,6 +396,8 @@ function mSceneStart():
 			set {_bed} to {_bl}.getWorld().spawnEntity({_bl}, EntityType.MANNEQUIN)
 			mScDummySetup({_bed}, {_id})
 			{_bed}.setGravity(false)
+			{_bed}.setRotation({_bl}.getYaw(), 0)
+			{_bed}.setBodyYaw({_bl}.getYaw())
 			{_bed}.setPose(Pose.SLEEPING, true)
 			{_bed}.setInvisible(true)
 			{_bed}.setCustomNameVisible(false)
@@ -442,7 +449,7 @@ function mSceneRejoin(p: player):
 	if mSceneOn() is not true:
 		stop
 	set {_id} to "%uuid of {_p}%"
-	loop "self", "bedL", "bedC", "bedR":
+	loop "selfseat", "self", "bedL", "bedC", "bedR":
 		set {_e} to {-ms::%loop-value%::%{_id}%}
 		if {_e} is set:
 			{_p}.showEntity(mScPlugin(), {_e})
