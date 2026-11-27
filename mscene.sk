@@ -4,7 +4,7 @@
 #
 # 장소 키(mcore.sk 의 mLocSave/mLocLoad 로 저장, {mcfg::loc::키::...}):
 #   table     원탁 가운데(바닥 높이). 참가자 더미가 이 둘레(반지름 {mcfg::scene::radius})에 앉는다
-#   daycam    낮 전체 카메라(눈 위치와 바라보는 방향)
+#   daycam    낮 전체 카메라(눈 위치와 바라보는 방향). 원탁 자리가 있는 참가자는 대신 자기 자리 어깨너머 카메라(mCamSeat)를 쓴다
 #   room      밤 방에서 자기 더미가 앉는 곳
 #   nightcam  밤 방 카메라
 #   bed       밤 대상 선택 침대 줄의 가운데 침대(대상 더미가 눕는 자리). 양옆 침대는 침대 카메라 오른쪽 방향으로 {mcfg::scene::bedgap}(기본 2)칸씩
@@ -244,13 +244,35 @@ function mCamFace(id: text, t: text):
 	set {_pz} to {_fz} - sin({_a}) * {_d}
 	mCamPlace({_id}, {_px}, {_fy} + 0.1, {_pz}, {_fx}, {_fy}, {_fz})
 
-# 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때). 살아 있는 사람은 밤에 밤 방, 그 밖에는 원탁 전체.
+# 낮 기본 화면: 자기 원탁 자리 더미의 등 뒤 왼쪽 위에서 어깨너머로 원탁과 광장을 본다(3인칭).
+# 자리마다 카메라가 따라가서 자기 더미가 항상 화면 오른쪽 아래에 온다(시험 화면 기준 구도).
+# 숫자: {mcfg::scene::backdist}(더미 뒤로, 기본 1.6), {mcfg::scene::sidedist}(더미 왼쪽으로, 기본 0.9), {mcfg::scene::camh}(바닥 위 높이, 기본 1.9)
+function mCamSeat(id: text) :: boolean:
+	set {_i} to {-ms::seat::%{_id}%}
+	if {_i} is not set:
+		return false
+	set {_t} to mLocLoad("table")
+	if {_t} is not set:
+		return false
+	set {_s} to mScSeatLoc({_i})
+	set {_a} to 360 * ({_i} - 1) / {-ms::seatn}
+	set {_bd} to mScNum("backdist", 1.6)
+	set {_sd} to mScNum("sidedist", 0.9)
+	set {_px} to {_s}.getX() + cos({_a}) * {_bd} - sin({_a}) * {_sd}
+	set {_pz} to {_s}.getZ() + sin({_a}) * {_bd} + cos({_a}) * {_sd}
+	set {_py} to {_t}.getY() + mScNum("camh", 1.9)
+	mCamPlace({_id}, {_px}, {_py}, {_pz}, {_t}.getX(), {_t}.getY() + 0.3, {_t}.getZ())
+	return true
+
+# 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때). 살아 있는 사람은 밤에 밤 방, 그 밖에는 자기 자리 어깨너머(자리가 없으면 원탁 전체).
 function mViewAuto(id: text):
 	set {_s} to mState()
 	if {-m::alive::%{_id}%} is true:
 		if {_s} is "night" or "resolve":
 			mCamTo({_id}, "nightcam")
 			stop
+	if mCamSeat({_id}) is true:
+		stop
 	mCamTo({_id}, "daycam")
 
 # 관전 대상을 풀었다가 다시 건다(mck 의 gSpecForce 와 같다: 같은 대상을 다시 걸면 패킷이 안 가므로 한 번 푼다)
