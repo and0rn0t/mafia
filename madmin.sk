@@ -2,7 +2,7 @@
 # [madmin.sk] 관리자 메뉴(상자 GUI, OP 전용). 규칙은 ROLES.md, 구조는 DESIGN.md 7번.
 # 명령: /madmin
 # 메뉴:
-#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 연속 퍼블 금지 켜고 끄기, 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
+#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 연속 퍼블 금지 켜고 끄기, 테러리스트 길동무 선택 시간, 승리 팀 라인업 위치({mcfg::loc::lineup}, mbuild 가 안 건드림), 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
 #   roles  직업마다 켜짐(초록)/꺼짐(빨강)/고정(노랑). 클릭하면 켜고 끈다. 마피아/경찰/의사는 끌 수 없다
 #   scene  연출 장소(mscene.sk 머리말의 6곳): 좌클릭 = 지금 위치로 정하기, 우클릭 = 그 위치로 이동
 #          카메라 3곳(daycam/nightcam/bedcam)은 눈 위치와 바라보는 방향을 저장한다. 나머지는 발 위치와 바라보는 방향
@@ -10,6 +10,9 @@
 # 변수: {-madm::uuid} 지금 열어 둔 메뉴 이름(main/roles/scene). 닫으면 지운다.
 # 미검증: 전체(서버 실행 불가). chest inventory 만들기/열기, click type, raw index of event-slot 은 Skript 2.13.0 jar 의 예시 문자열로 확인.
 # ==============================================================================
+
+import:
+	org.bukkit.Location
 
 function mAdmItem(it: itemtype, n: text, lore: texts) :: itemtype:
 	set {_i} to {_it} named {_n}
@@ -95,6 +98,13 @@ function mAdmOpen(p: player, menu: text):
 		else:
 			set {_s} to mState()
 			set slot 16 of {_inv} to mAdmItem(red concrete, "&c게임 강제 종료", ("&7지금 상태: %{_s}%", "&7클릭하면 로비로 돌아갑니다."))
+		set {_tk} to mTimeTake()
+		set slot 19 of {_inv} to mAdmItem(clock, "&f테러리스트 길동무 선택 시간: &e%{_tk}%초", "&7좌클릭 +1초 / 우클릭 -1초")
+		set {_lu} to "&c정해지지 않음"
+		if mLocSet("lineup") is true:
+			set {_ll} to mLocLoad("lineup")
+			set {_lu} to "&a%round({_ll}.getX())%, %round({_ll}.getY())%, %round({_ll}.getZ())% (%{_ll}.getWorld().getName()%)"
+		set slot 21 of {_inv} to mAdmItem(armor stand, "&f승리 팀 라인업 위치", ({_lu}, "&7좌클릭: 지금 서 있는 곳(줄 가운데 더미 발 위치)으로 정하기", "&7  바라보는 방향 = 더미가 볼 방향(90도 단위로 맞춤), 카메라는 그 앞", "&7우클릭: 그 위치로 이동", "&8/mbuild 가 바꾸지 않는다"))
 	open {_inv} to {_p}
 	set {-madm::%uuid of {_p}%} to {_menu}
 
@@ -159,6 +169,25 @@ on inventory click:
 			mAdmTime("vote", 5 * {_sign})
 		else if {_s} is 12:
 			mAdmTime("night", 5 * {_sign})
+		else if {_s} is 19:
+			set {_tk} to mTimeTake() + {_sign}
+			if {_tk} < 3:
+				set {_tk} to 3
+			set {mcfg::take} to {_tk}
+		else if {_s} is 21:
+			if {_right} is true:
+				set {_ll} to mLocLoad("lineup")
+				if {_ll} is not set:
+					send "&c승리 팀 라인업 위치가 정해지지 않았습니다." to player
+					stop
+				close player's inventory
+				mTp(player, {_ll})
+				stop
+			set {_l} to player's location
+			set {_yaw} to round({_l}.getYaw() / 90) * 90
+			set {_l2} to new Location({_l}.getWorld(), {_l}.getBlockX() + 0.5, {_l}.getY(), {_l}.getBlockZ() + 0.5, {_yaw}, 0)
+			mLocSave("lineup", {_l2})
+			send "&a승리 팀 라인업 위치를 정했습니다. (더미가 보는 방향 %{_yaw}%도)" to player
 		else if {_s} is 13:
 			if mFbOn() is true:
 				set {mcfg::nofb} to false

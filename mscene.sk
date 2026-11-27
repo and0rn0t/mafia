@@ -172,6 +172,9 @@ function mScSeatLoc(i: number) :: location:
 function mSceneDead(id: text):
 	if mSceneOn() is not true:
 		stop
+	# 화형/TNT 컷신 중이면 컷신 끝에 바꾼다(mstage.sk 의 mStgRelease)
+	if {-ms::hold::%{_id}%} is true:
+		stop
 	set {_i} to {-ms::seat::%{_id}%}
 	if {_i} is not set:
 		stop
@@ -266,7 +269,11 @@ function mCamFace(id: text, t: text):
 # 자리마다 카메라가 따라가서 자기 더미가 항상 화면 오른쪽 아래에 온다(시험 화면 기준 구도).
 # 숫자: {mcfg::scene::backdist}(더미 뒤로, 기본 1.6), {mcfg::scene::sidedist}(더미 왼쪽으로, 기본 0.9), {mcfg::scene::camh}(바닥 위 높이, 기본 1.9)
 function mCamSeat(id: text) :: boolean:
-	set {_i} to {-ms::seat::%{_id}%}
+	return mCamSeatOf({_id}, {_id})
+
+# owner 자리 더미의 어깨너머 화면을 id 에게 보여 준다
+function mCamSeatOf(id: text, owner: text) :: boolean:
+	set {_i} to {-ms::seat::%{_owner}%}
 	if {_i} is not set:
 		return false
 	set {_t} to mLocLoad("table")
@@ -282,14 +289,51 @@ function mCamSeat(id: text) :: boolean:
 	mCamPlace({_id}, {_px}, {_py}, {_pz}, {_t}.getX(), {_t}.getY() + 0.3, {_t}.getZ())
 	return true
 
-# 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때). 살아 있는 사람은 밤에 밤 방, 그 밖에는 자기 자리 어깨너머(자리가 없으면 원탁 전체).
+# 사망자와 관전자는 A/D 로 다른 참가자 자리의 어깨너머 시점을 돌려 본다(확정). 살아 있는 참가자는 자기 자리.
+function mWatchOf(id: text) :: text:
+	if {-m::alive::%{_id}%} is true:
+		return {_id}
+	if {-ms::watch::%{_id}%} is set:
+		return {-ms::watch::%{_id}%}
+	if {-m::players::*} contains {_id}:
+		return {_id}
+	return {-m::players::1}
+
+# 사망자/관전자인지(카메라가 있고, 살아 있는 참가자가 아님)
+function mIsWatcher(id: text) :: boolean:
+	if {-ms::cam::%{_id}%} is not set:
+		return false
+	if {-m::alive::%{_id}%} is true:
+		return false
+	return true
+
+function mWatchMove(id: text, d: number):
+	set {_cur} to mWatchOf({_id})
+	set {_n} to size of {-m::players::*}
+	set {_i} to 1
+	loop {-m::players::*}:
+		if loop-value is {_cur}:
+			set {_i} to loop-index parsed as number
+	set {_i} to {_i} + {_d}
+	if {_i} < 1:
+		set {_i} to {_n}
+	if {_i} > {_n}:
+		set {_i} to 1
+	set {-ms::watch::%{_id}%} to {-m::players::%{_i}%}
+	mViewAuto({_id})
+	set {_p} to mPlayerOf({_id})
+	if {_p} is set:
+		mSound({_p}, "ui.button.click", 0.4, 1.6)
+
+# 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때). 살아 있는 사람은 밤에 밤 방, 그 밖에는 자기 자리 어깨너머.
+# 사망자/관전자는 고른 참가자 자리의 어깨너머(자리가 없으면 원탁 전체).
 function mViewAuto(id: text):
 	set {_s} to mState()
 	if {-m::alive::%{_id}%} is true:
 		if {_s} is "night" or "resolve":
 			mCamTo({_id}, "nightcam")
 			stop
-	if mCamSeat({_id}) is true:
+	if mCamSeatOf({_id}, mWatchOf({_id})) is true:
 		stop
 	mCamTo({_id}, "daycam")
 
@@ -361,6 +405,8 @@ every 1 tick:
 	if mSceneOn() is not true:
 		stop
 	loop {-m::players::*}:
+		mCamKeep(loop-value)
+	loop {-ms::spec::*}:
 		mCamKeep(loop-value)
 
 # Shift 로 카메라에서 내려오는 것을 막는다(입력은 PlayerInputEvent 가 따로 받는다)
@@ -450,6 +496,17 @@ function mSceneStart():
 			set {-ms::bed%loop-value-2%::%{_id}%} to {_bed}
 	loop {-m::players::*}:
 		mCamMount(loop-value)
+	# 관전자(참가자가 아닌 접속자)도 카메라에 붙인다(A/D 로 시점 바꾸기)
+	loop all players:
+		set {_sid} to "%uuid of loop-player%"
+		if {-m::players::*} does not contain {_sid}:
+			add {_sid} to {-ms::spec::*}
+			mCamMount({_sid})
+	# 시작 로딩 동안은 원탁 전체 화면
+	loop {-m::players::*}:
+		mCamTo(loop-value, "daycam")
+	loop {-ms::spec::*}:
+		mCamTo(loop-value, "daycam")
 
 # 밤 대상 선택 침대 줄의 k 번째 자리(0 = 가운데, -1 = 화면 왼쪽(이전 후보), 1 = 화면 오른쪽(다음 후보)).
 # 침대 카메라(bedcam)가 바라보는 방향의 오른쪽으로 {mcfg::scene::bedgap}(기본 2) 칸씩 떨어진다. 방향(yaw)은 bed 장소 것.
@@ -516,6 +573,17 @@ function mSceneRejoin(p: player):
 		{_p}.setPlayerTime({-ms::sky}, false)
 	mCamMount({_id})
 
+# 게임 중에 들어온 관전자: 카메라에 붙인다(A/D 로 시점 바꾸기)
+function mSceneSpecJoin(p: player):
+	if mSceneOn() is not true:
+		stop
+	set {_id} to "%uuid of {_p}%"
+	if {-ms::spec::*} does not contain {_id}:
+		add {_id} to {-ms::spec::*}
+	if {-ms::sky} is set:
+		{_p}.setPlayerTime({-ms::sky}, false)
+	mCamMount({_id})
+
 # 연출 엔티티를 전부 지우고 관전 대상을 푼다(mToLobby 가 부른다. 게임 모드는 mToLobby 가 되돌린다)
 function mSceneClear():
 	mFxClear()
@@ -561,17 +629,8 @@ function mSceneDay():
 		stop
 	mScSky(false)
 	mFxOilGlow()
-	set {_n} to size of {-m::dead::*}
-	set {_sub} to "&7지난 밤에는 아무도 사망하지 않았습니다"
-	if {_n} > 0:
-		loop {-m::dead::*}:
-			add mNameOf(loop-value) to {_nm::*}
-		set {_sub} to "&c%{_nm::*}% &7님이 사망했습니다"
-	loop {-m::players::*}:
-		set {_p} to mPlayerOf(loop-value)
-		if {_p} is set:
-			send title "&e%{-m::day}%일차 낮" with subtitle {_sub} to {_p} for 3 seconds with fadein 10 ticks and fade out 10 ticks
-		mViewAuto(loop-value)
+	# 낮 제목, 사망자 발표, 기자 특종(mstage.sk)
+	mStgMorning()
 
 function mSceneVote():
 	if mSceneOn() is not true:
@@ -724,8 +783,6 @@ function mPickConfirm(id: text):
 	else:
 		set {_why} to mTakePick({_id}, {_c})
 		set {_ok} to "&c%mNameOf({_c})% 님을 길동무로 데려갑니다."
-		if {_why} is "":
-			set {-m::left} to 1
 	if {_p} is set:
 		if {_why} is not "":
 			send "&c%{_why}%" to {_p}
@@ -772,6 +829,11 @@ function mKeyHint(id: text):
 	if {-ms::pick::%{_id}%} is set:
 		mPickBar({_id})
 		stop
+	if mIsWatcher({_id}) is true:
+		if {-ms::stage} is not set:
+			if mState() is not "loading":
+				send action bar colored "&7A/D: 시점 바꾸기 &8| &f%mNameOf(mWatchOf({_id}))%" to {_p}
+		stop
 	if mPickCanOpen({_id}) is not "":
 		send action bar colored "&7W: 대상 고르기" to {_p}
 		stop
@@ -785,6 +847,8 @@ every second:
 		stop
 	loop {-m::players::*}:
 		mKeyHint(loop-value)
+	loop {-ms::spec::*}:
+		mKeyHint(loop-value)
 
 # 이동 키 입력(관전 카메라에 붙어 있어도 입력 패킷은 온다는 가정, 미검증). 눌리는 순간에만 처리한다.
 on PlayerInputEvent:
@@ -792,7 +856,7 @@ on PlayerInputEvent:
 		stop
 	set {_p} to event.getPlayer()
 	set {_id} to "%uuid of {_p}%"
-	if {-m::players::*} does not contain {_id}:
+	if {-ms::cam::%{_id}%} is not set:
 		stop
 	set {_in} to event.getInput()
 	set {_now::w} to {_in}.isForward()
@@ -811,6 +875,15 @@ on PlayerInputEvent:
 			delete {-ms::in::%{_k}%::%{_id}%}
 	if size of {_press::*} is 0:
 		stop
+	# 사망자/관전자: A/D 로 다른 참가자 자리 시점(컷신 중에는 막음). 테러리스트 길동무 선택처럼 선택 화면이 열려 있으면 그쪽이 먼저
+	if mIsWatcher({_id}) is true:
+		if {-ms::pick::%{_id}%} is not set:
+			if {-ms::stage} is not set:
+				if {_press::*} contains "a":
+					mWatchMove({_id}, -1)
+				else if {_press::*} contains "d":
+					mWatchMove({_id}, 1)
+			stop
 	if {-ms::pick::%{_id}%} is set:
 		if {_press::*} contains "a":
 			mPickMove({_id}, -1)

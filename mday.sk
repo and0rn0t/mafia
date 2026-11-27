@@ -55,8 +55,13 @@ function mBarUpdate():
 		set {_nm} to "&c%{_d}%일차 낮 &7· 투표"
 		set {_c} to BarColor.RED
 	else if {_s} is "execute":
-		set {_nm} to "&c테러리스트 길동무 선택"
+		set {_nm} to "&c처형"
+		if {-m::exe} is set:
+			set {_nm} to "&c테러리스트 길동무 선택"
 		set {_c} to BarColor.RED
+	else if {_s} is "loading":
+		set {_nm} to "&e게임 준비 중"
+		set {_c} to BarColor.YELLOW
 	else:
 		set {_nm} to "&f게임 종료 &7· 로비로 돌아가는 중"
 	{-m::bar}.setTitle(colored "%{_nm}% &f%{_left}%초")
@@ -98,7 +103,8 @@ function mStartNight():
 
 function mStartDay():
 	set {-m::state} to "day"
-	set {-m::left} to mTimeDiscuss()
+	# 아침 발표(사망자, 기자 특종) 연출 시간만큼 토론 시간을 늘려 둔다(발표가 토론 시간을 잡아먹지 않게)
+	set {-m::left} to mTimeDiscuss() + mStgMorningLen()
 	delete {-m::tadj::*}
 	broadcast "&6[마피아] &7%{-m::day}%일차 낮입니다. 토론하세요. (%{-m::left}%초)"
 	mSceneDay()
@@ -112,6 +118,8 @@ function mCheckEnd() :: boolean:
 	mEnd({_w})
 	loop {-m::players::*}:
 		mViewAuto(loop-value)
+	# 승리 팀 라인업(관리자 메뉴에서 정한 위치가 있을 때)
+	mStgLineup({_w})
 	return true
 
 every second:
@@ -126,7 +134,10 @@ every second:
 	subtract 1 from {-m::left}
 	if {-m::left} > 0:
 		stop
-	if {_s} is "night":
+	if {_s} is "loading":
+		mStgReveal()
+		mStartNight()
+	else if {_s} is "night":
 		mPickCloseAll()
 		set {-m::state} to "resolve"
 		mResolve()
@@ -156,6 +167,9 @@ every second:
 						add loop-value to {_cand::*}
 			if size of {_cand::*} > 0:
 				mTakePick({_x}, random element of {_cand::*})
+			# 길동무 TNT 연출이 시작됐으면(남은 시간이 다시 채워짐) 끝날 때까지 기다린다
+			if {-m::left} > 0:
+				stop
 		if mCheckEnd() is true:
 			stop
 		mStartNight()

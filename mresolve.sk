@@ -52,6 +52,30 @@ function mDie(id: text):
 function mAddInfo(id: text, msg: text):
 	add {_msg} to {-m::info::%{_id}%::*}
 
+# 접선 알림(연출 없이 채팅만, 확정): 보조 직업에게 마피아 이름, 살아 있는 마피아에게 접선한 사람 이름과 직업.
+# now 가 true 면 바로 보내고(마담, 투표 때), false 면 다음 날 낮에 본인 결과와 같이 보낸다(스파이, 마녀).
+function mContactNotify(id: text, now: boolean):
+	loop {-m::players::*}:
+		if {-m::role::%loop-value%} is "mafia":
+			add mNameOf(loop-value) to {_mn::*}
+			add loop-value to {_mids::*}
+	set {_sn} to mNameOf({_id})
+	set {_rn} to mRoleName({-m::role::%{_id}%})
+	set {_m1} to "&c마피아와 접선했습니다. &7마피아: &f%{_mn::*}%"
+	set {_m2} to "&c%{_sn}%&7(%{_rn}%) 님이 마피아 팀으로 접선했습니다."
+	if {_now} is true:
+		set {_p} to mPlayerOf({_id})
+		if {_p} is set:
+			send {_m1} to {_p}
+		loop {_mids::*}:
+			set {_p} to mPlayerOf(loop-value)
+			if {_p} is set:
+				send {_m2} to {_p}
+	else:
+		mAddInfo({_id}, {_m1})
+		loop {_mids::*}:
+			mAddInfo(loop-value, {_m2})
+
 # 경찰에게 "마피아"로 보이는지: 마피아 직업이거나, 마피아 직업을 훔친 도둑
 function mLooksMafia(id: text) :: boolean:
 	if {-m::role::%{_id}%} is "mafia":
@@ -65,6 +89,7 @@ function mResolve():
 	delete {-m::ev::*}
 	delete {-m::info::*}
 	delete {-m::pub::*}
+	delete {-m::rep::*}
 	delete {-m::dead::*}
 	# ---- 0. 행위자 수집(밤 시작 직업 기준, 광인 제외)
 	loop {-m::players::*}:
@@ -215,6 +240,7 @@ function mResolve():
 		else if {_ro} is "reporter":
 			set {_rn} to mRoleName({-m::role::%{_t}%})
 			add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
+			add {_t} to {-m::rep::*}
 			set {_usedrep::%{_id}%} to true
 		else if {_ro} is "witch":
 			set {_noch::%{_t}%} to true
@@ -237,6 +263,7 @@ function mResolve():
 	loop indices of {_cont::*}:
 		set {-m::contact::%loop-value%} to true
 		set {-m::team::%loop-value%} to "mafia"
+		mContactNotify(loop-value, false)
 	loop indices of {_usedthief::*}:
 		set {-m::used::%loop-value%} to true
 	loop indices of {_steal::*}:
@@ -288,15 +315,16 @@ function mResolve():
 		loop indices of {_killed::*}:
 			add loop-value to {-mfb::cur::*}
 
-# 임시 표시: 채팅으로 사망 알림과 본인 결과를 보낸다. mscene.sk 가 만들어지면 연출로 교체한다.
+# 낮이 시작될 때: 사망 알림과 기자 공개(연출이 있으면 mstage.sk 의 아침 발표가 대신 한다), 본인에게만 가는 결과(조사, 접선, 도둑이 훔친 직업 등).
 function mResolveShow():
-	loop {-m::dead::*}:
-		set {_n} to mNameOf(loop-value)
-		broadcast "&6[마피아] &f%{_n}%&7 님이 사망했습니다."
-	if size of {-m::dead::*} is 0:
-		broadcast "&6[마피아] &7지난 밤에는 아무도 사망하지 않았습니다."
-	loop {-m::pub::*}:
-		broadcast loop-value
+	if mSceneOn() is not true:
+		loop {-m::dead::*}:
+			set {_n} to mNameOf(loop-value)
+			broadcast "&6[마피아] &f%{_n}%&7 님이 사망했습니다."
+		if size of {-m::dead::*} is 0:
+			broadcast "&6[마피아] &7지난 밤에는 아무도 사망하지 않았습니다."
+		loop {-m::pub::*}:
+			broadcast loop-value
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:

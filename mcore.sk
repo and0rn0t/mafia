@@ -28,6 +28,9 @@
 #   {mcfg::loc::table/daycam/room/nightcam/bed/bedcam::...}, {mcfg::scene::radius/facedist/faceh/eye}   연출 장소와 숫자 설정   madmin.sk
 #   {-madm::uuid}            관리자 메뉴에서 지금 열어 둔 메뉴 이름                                          madmin.sk
 #   {-msq::...}, {-msc::...}   밤 처리 연출의 장면 목록 / 재생 중인 장면(자세한 뜻은 mfx.sk 머리말)                         mfx.sk
+#   {-ms::spec::*}, {-ms::watch::uuid}, {-ms::hold::uuid}, {-ms::stage}   관전자 목록 / 사망자·관전자가 보는 자리 / 해골 미루기 / 컷신 중   mscene.sk, mstage.sk
+#   {-m::rep::*}             이번 밤 기자 취재 대상(아침 특종)   mresolve.sk, mstage.sk
+#   {mcfg::take}, {mcfg::loc::lineup::...}   길동무 선택 시간 / 승리 팀 라인업 위치(관리자 메뉴)   madmin.sk
 #   {-ms::house::uuid}       그 참가자의 집 번호(1~12, mScHouse). {mcfg::house::번호::face} 집 문 방향                           mscene.sk, mbuild.sk
 #   {mcfg::nofb}             false 면 연속 퍼블 금지 꺼짐(없으면 켜짐). {-mfb::prev/cur::*} 지난/이번 게임 1일차 밤 사망자(mReset 이 지우지 않음)   mnight.sk, mresolve.sk, mBegin
 #
@@ -59,6 +62,12 @@ function mTimeNight() :: number:
 	if {mcfg::night} is set:
 		return {mcfg::night}
 	return 30
+
+# 테러리스트 길동무 선택 시간(초). 관리자 메뉴에서 바꾼다. 기본 10(확정)
+function mTimeTake() :: number:
+	if {mcfg::take} is set:
+		return {mcfg::take}
+	return 10
 
 # 현재 단계("lobby" 등). 아직 정해지지 않았으면 lobby.
 function mState() :: text:
@@ -213,7 +222,9 @@ function mBegin():
 	delete {-mfb::prev::*}
 	set {-mfb::prev::*} to {-mfb::cur::*}
 	delete {-mfb::cur::*}
-	mStartNight()
+	# 3초 로딩(원탁 화면 + 액션바 loading...) 뒤 mday.sk 의 진행 루프가 직업 안내(mStgReveal)를 하고 첫 밤을 시작한다
+	set {-m::state} to "loading"
+	set {-m::left} to 3
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).
 function mReset():
@@ -244,6 +255,7 @@ function mReset():
 	delete {-m::ev::*}
 	delete {-m::info::*}
 	delete {-m::pub::*}
+	delete {-m::rep::*}
 	delete {-m::dead::*}
 	delete {-m::ready::*}
 	delete {-m::cd}

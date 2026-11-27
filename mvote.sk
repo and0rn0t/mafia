@@ -3,6 +3,7 @@
 # 함수: mVoteStart() 투표 시작 / mVoteCast(투표자, 대상) 투표(한 번만, 바꿀 수 없음 - 확정) / mTally() 집계·처형 / mTakeStart(테러리스트) / mTakePick(테러리스트, 대상)
 #       mWeight(id) 표 수(정치인 2) / mWinCheck() "" 진행, "draw", "mafia", "citizen", "neutral:uuid" / mEnd(승자) 종료 처리(mday.sk 의 mToLobby 로 복귀)
 # 변수: {-m::vote::uuid}(투표 대상), {-m::votes::uuid}(받은 표), {-m::exe}(처형된 테러리스트 uuid, 길동무 선택 대기 중)
+# 처형: 화형 컷신(mstage.sk 의 mStgBurn, 그동안 execute 단계). 테러리스트는 화형 뒤 길동무 선택(시간 mTimeTake, 관리자 메뉴), 길동무는 TNT 컷신.
 # 명령: /mvote <닉네임>, /mtake <닉네임>(테러리스트 길동무). 화면 선택(좌/우클릭, F)은 mscene.sk 가 같은 함수를 부른다.
 # 마담: 투표 시간에 마담에게 투표당한 사람은 직후 밤 능력 불가({-m::sealed}). 대상이 마피아 직업이면 봉인 대신 접선. 마담의 표도 일반 표로 센다.
 # 미검증: 전체(서버 실행 불가).
@@ -55,9 +56,7 @@ function mTally():
 					if {-m::role::%{_t}%} is "mafia":
 						set {-m::contact::%loop-value%} to true
 						set {-m::team::%loop-value%} to "mafia"
-						set {_mp} to mPlayerOf(loop-value)
-						if {_mp} is set:
-							send "&c마피아와 접선했습니다." to {_mp}
+						mContactNotify(loop-value, true)
 					else:
 						set {-m::sealed::%{_t}%} to true
 	# 종합 알림
@@ -84,16 +83,20 @@ function mTally():
 	if {-m::role::%{_x}%} is "politician":
 		broadcast "&6[마피아] &f%{_xn}%&7 님이 최다 득표했지만 처형되지 않았습니다."
 		stop
+	# 연출이 있으면 화형 컷신이 끝날 때 해골로 바꾼다(mstage.sk). 처형 단계(execute)에서 컷신 시간만큼 기다린다.
+	mStgHold({_x})
 	mDie({_x})
 	broadcast "&6[마피아] &f%{_xn}%&7 님이 투표로 처형되었습니다."
+	set {-m::state} to "execute"
+	set {-m::left} to mStgBurnLen()
 	if {-m::role::%{_x}%} is "terrorist":
 		set {-m::exe} to {_x}
-		set {-m::state} to "execute"
-		set {-m::left} to 15
+		set {-m::left} to mStgBurnLen() + mTimeTake()
 		set {_tp} to mPlayerOf({_x})
 		if {_tp} is set:
-			send "&c길동무를 고르세요. 좌/우클릭으로 고르고 F 로 확정(또는 /mtake <닉네임>). 15초가 지나면 무작위로 정해집니다." to {_tp}
-		mSceneTake({_x})
+			send "&c화형이 끝나면 길동무를 고르세요. A/D 로 고르고 스페이스로 확정(또는 /mtake <닉네임>). %mTimeTake()%초가 지나면 무작위로 정해집니다." to {_tp}
+	# 화형 컷신(연출이 없으면 바로 해골, 테러리스트면 컷신 뒤 길동무 선택 화면)
+	mStgBurn({_x})
 
 function mTakePick(t: text, v: text) :: text:
 	if mState() is not "execute":
@@ -104,10 +107,17 @@ function mTakePick(t: text, v: text) :: text:
 		return "자기 자신은 고를 수 없습니다."
 	if {-m::alive::%{_v}%} is not true:
 		return "살아 있는 참가자만 고를 수 있습니다."
+	mStgHold({_v})
 	mDie({_v})
 	set {_n} to mNameOf({_v})
 	broadcast "&6[마피아] &f%{_n}%&7 님이 테러리스트의 길동무가 되어 사망했습니다."
 	delete {-m::exe}
+	# TNT 컷신(연출이 있으면 그동안 처형 단계를 유지한다)
+	if mSceneOn() is true:
+		set {-m::left} to mStgTntLen()
+	else:
+		set {-m::left} to 1
+	mStgTnt({_t}, {_v})
 	return ""
 
 function mWinCheck() :: text:

@@ -175,10 +175,11 @@ function mRoleReveal(p: player):
 		set {-m::fake::%{_id}%} to {_shown}
 	set {_nm} to mRoleName({_shown})
 	set {_ds} to mRoleDesc({_shown})
-	send title "&e당신의 직업" with subtitle "&f%{_nm}%" to {_p} for 4 seconds with fadein 5 ticks and fade out 10 ticks
-	send "&6[마피아] &7당신의 직업은 &f%{_nm}%&7입니다." to {_p}
-	send "&7%{_ds}%" to {_p}
 	set {_pool} to mRolePool({_shown})
+	set {_c} to mTeamColor({_pool})
+	send title "&e당신의 직업" with subtitle "%{_c}%%{_nm}%" to {_p} for 4 seconds with fadein 5 ticks and fade out 10 ticks
+	send "&6[마피아] &7당신의 직업은 %{_c}%%{_nm}%&7입니다." to {_p}
+	send "&7%{_ds}%" to {_p}
 	if {_pool} is "support":
 		send "&7마피아와 접선하기 전에는 어느 팀도 아니지만, 승패는 마피아 팀을 따릅니다." to {_p}
 	else if {_pool} is "mafia":
@@ -187,6 +188,14 @@ function mRoleReveal(p: player):
 		send "&a시민 팀입니다." to {_p}
 	else:
 		send "&e중립입니다. 혼자 남으면 승리합니다." to {_p}
+
+# 팀 색: 마피아 팀(마피아, 보조) 붉은색, 시민 팀 초록색, 중립 하늘색(확정)
+function mTeamColor(pool: text) :: text:
+	if {_pool} is "mafia" or "support":
+		return "&c"
+	if {_pool} is "citizen":
+		return "&a"
+	return "&b"
 
 # 시작할 때 마피아(직업)끼리 서로를 알려 준다. 보조 직업은 접선 전이라 모르고, 다른 마피아가 없으면 아무것도 보내지 않는다.
 function mMafiaReveal():
@@ -235,12 +244,11 @@ function mStart(by: object) :: boolean:
 			if {_p} is not op:
 				set {_p}'s gamemode to adventure
 			mTp({_p}, {_gl})
-			mRoleReveal({_p})
 		else:
 			set {_p}'s gamemode to spectator
 			mTp({_p}, {_gl})
 			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다." to {_p}
-	mMafiaReveal()
+	# 직업 안내(mRoleReveal, mMafiaReveal)는 3초 로딩 뒤 mstage.sk 의 mStgReveal 이 한다
 	mSceneStart()
 	mBegin()
 	mTabUpdateAll()
@@ -265,6 +273,7 @@ on join:
 		else:
 			set {_p}'s gamemode to spectator
 			send "&6[마피아] &7게임이 진행 중이라 관전자로 들어왔습니다." to {_p}
+			mSceneSpecJoin({_p})
 	mTabUpdateAll()
 
 # 퇴장: 로비면 준비 상태를 지운다. 게임 중 참가자는 자리비움.

@@ -1,0 +1,304 @@
+# ==============================================================================
+# [mstage.sk] 낮/처형/종료/시작 컷신. 규칙은 ROLES.md "화면 연출", 구조는 DESIGN.md. 밤 처리 연출은 mfx.sk.
+#   아침 발표(mStgMorning): 낮이 시작되면 모두에게 "N일차 낮" → 지난 밤 사망자마다 원탁 자리(해골) 얼굴 클로즈업 + 타이틀 빨간 닉네임 / 서브타이틀 흰색 사망 안내, 1.5초씩
+#     → 기자 특종: 취재 대상 얼굴 클로즈업 + 타이틀 "특종" / 서브타이틀 닉네임 → 액션바와 채팅으로 직업 공개 → 각자 기본 화면. 발표 시간만큼 토론 시간이 늘어난다(mStartDay).
+#   화형(mStgBurn): 투표로 처형되면 모두 처형된 사람 얼굴 클로즈업, 더미에 불이 붙고 둘레 바닥이 불탄 뒤 해골이 된다(그동안 처형 단계). 테러리스트면 이어서 길동무 선택 화면.
+#   길동무 TNT(mStgTnt): 원탁 전체 화면에서 테러리스트 자리에서 길동무 자리로 TNT 가 날아가 터지고(블록 피해 없음, 실제 폭발이 아니라 소리와 파티클) 길동무가 해골이 된 뒤 밤이 된다.
+#   승리 라인업(mStgLineup): 게임이 끝나면 관리자 메뉴에서 정한 위치({mcfg::loc::lineup::...}, mbuild 가 건드리지 않음)에 승리 팀 더미를 일렬로 세우고
+#     모두 그 앞 카메라로 본다(결과창은 나중에 그 뒤에 세울 예정). 위치가 없으면 하지 않는다. 무승부도 하지 않는다.
+#   시작 로딩: mBegin 이 3초 loading 단계를 만들고, 그동안 원탁 전체 화면 + 액션바 노란 "loading..."(이 파일의 every second).
+#     끝나면 mStgReveal: 채팅창과 액션바를 비우고 직업 안내(mjoin.sk 의 mRoleReveal, 팀 색), 마피아끼리 알림.
+# 해골 바꾸기 미루기: 컷신이 있는 사망은 mStgHold 로 표시해 두고 mSceneDead 가 바로 해골로 바꾸지 않게 한 뒤, 컷신이 끝날 때 mStgRelease 가 바꾼다.
+# 변수: {-ms::hold::uuid}(해골 미루기) {-ms::stage}(컷신 중: 관전자 A/D 시점 바꾸기를 막음)
+# 미검증: 전체(서버 실행 불가). TNT 엔티티 이동, 더미 불 붙이기(setFireTicks), 다른 월드 라인업 카메라.
+# ==============================================================================
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.Location
+	org.bukkit.Particle
+	org.bukkit.entity.EntityType
+	org.bukkit.util.Vector
+
+# 카메라가 있는 모든 사람(참가자 + 관전자)
+function mStgViewers() :: texts:
+	loop {-m::players::*}:
+		if {-ms::cam::%loop-value%} is set:
+			add loop-value to {_l::*}
+	loop {-ms::spec::*}:
+		add loop-value to {_l::*}
+	return {_l::*}
+
+function mStgTitle(vid: text, t: text, s: text, ticks: number):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		send title {_t} with subtitle {_s} to {_p} for {_ticks} ticks with fadein 5 ticks and fade out 5 ticks
+
+function mStgSoundAll(s: text, v: number, pi: number):
+	loop mStgViewers():
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			mSound({_p}, {_s}, {_v}, {_pi})
+
+function mStgPartAll(name: text, l: location, n: number):
+	loop mStgViewers():
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			{_p}.spawnParticle(Particle.valueOf({_name}), {_l}, {_n}, 0.4, 0.4, 0.4, 0)
+
+# ------------------------------------------------------------------ 해골 바꾸기 미루기
+
+function mStgHold(id: text):
+	if mSceneOn() is true:
+		set {-ms::hold::%{_id}%} to true
+
+function mStgRelease(id: text):
+	delete {-ms::hold::%{_id}%}
+	mSceneDead({_id})
+
+# ------------------------------------------------------------------ 아침 발표
+
+# 발표에 걸리는 초(낮 제목 2 + 사망자마다 2 + 특종마다 4)
+function mStgMorningLen() :: number:
+	if mSceneOn() is not true:
+		return 0
+	return 2 + size of {-m::dead::*} * 2 + size of {-m::rep::*} * 4
+
+function mStgMorning():
+	if mSceneOn() is not true:
+		stop
+	set {-ms::stage} to true
+	set {_dead::*} to {-m::dead::*}
+	set {_rep::*} to {-m::rep::*}
+	set {_sub} to "&7지난 밤에는 아무도 사망하지 않았습니다"
+	if size of {_dead::*} > 0:
+		set {_sub} to ""
+	loop mStgViewers():
+		mViewAuto(loop-value)
+		mStgTitle(loop-value, "&e%{-m::day}%일차 낮", {_sub}, 35)
+	wait 40 ticks
+	loop {_dead::*}:
+		set {_d} to loop-value
+		set {_dn} to mNameOf({_d})
+		loop mStgViewers():
+			mCamFace(loop-value-2, {_d})
+			mStgTitle(loop-value-2, "&c%{_dn}%", "&f님이 사망했습니다", 35)
+		mStgSoundAll("block.bell.use", 0.6, 0.6)
+		wait 40 ticks
+		if mSceneOn() is not true:
+			stop
+	loop {_rep::*}:
+		set {_r} to loop-value
+		set {_rn} to mNameOf({_r})
+		set {_role} to mRoleName({-m::role::%{_r}%})
+		loop mStgViewers():
+			mCamFace(loop-value-2, {_r})
+			mStgTitle(loop-value-2, "&6특종", "&f%{_rn}%", 40)
+		mStgSoundAll("ui.cartography_table.take_result", 1, 1)
+		wait 40 ticks
+		if mSceneOn() is not true:
+			stop
+		broadcast "&6[특종] &f%{_rn}%&e 님의 직업은 &f%{_role}%&e입니다."
+		loop mStgViewers():
+			set {_p} to mPlayerOf(loop-value-2)
+			if {_p} is set:
+				send action bar colored "&6[특종] &f%{_rn}%&e 님의 직업은 &f%{_role}%&e입니다." to {_p}
+		wait 40 ticks
+		if mSceneOn() is not true:
+			stop
+	delete {-ms::stage}
+	loop mStgViewers():
+		mViewAuto(loop-value)
+
+# ------------------------------------------------------------------ 화형
+
+function mStgBurnLen() :: number:
+	if mSceneOn() is not true:
+		return 1
+	return 5
+
+function mStgBurn(x: text):
+	if mSceneOn() is not true:
+		mStgAfterBurn({_x})
+		stop
+	set {-ms::stage} to true
+	set {_xn} to mNameOf({_x})
+	loop mStgViewers():
+		mCamFace(loop-value, {_x})
+		mStgTitle(loop-value, "&c%{_xn}%", "&f화형에 처해졌습니다", 70)
+	set {_m} to {-ms::dummy::%{_x}%}
+	set {_i} to {-ms::seat::%{_x}%}
+	if {_i} is set:
+		set {_s} to mScSeatLoc({_i})
+	wait 10 ticks
+	mStgSoundAll("item.flintandsteel.use", 1, 1)
+	if {_m} is set:
+		{_m}.setFireTicks(200)
+	# 둘레 바닥 불(모두의 화면에만, 실제 블록은 그대로)
+	if {_s} is set:
+		set {_fire} to Bukkit.createBlockData("minecraft:fire")
+		loop -1, 0, 1:
+			set {_dx} to loop-value-1
+			loop -1, 0, 1:
+				if {_dx} is not 0 or loop-value-2 is not 0:
+					set {_l} to new Location({_s}.getWorld(), {_s}.getBlockX() + {_dx}, {_s}.getBlockY(), {_s}.getBlockZ() + loop-value-2)
+					add {_l} to {_fl::*}
+		loop mStgViewers():
+			set {_p} to mPlayerOf(loop-value-1)
+			if {_p} is set:
+				loop {_fl::*}:
+					{_p}.sendBlockChange(loop-value-2, {_fire})
+	wait 10 ticks
+	mStgSoundAll("entity.blaze.shoot", 1, 0.8)
+	wait 15 ticks
+	mStgSoundAll("entity.player.hurt_on_fire", 1, 1)
+	wait 35 ticks
+	if mSceneOn() is not true:
+		stop
+	mStgRelease({_x})
+	mStgSoundAll("block.fire.extinguish", 1, 1)
+	wait 15 ticks
+	loop mStgViewers():
+		set {_p} to mPlayerOf(loop-value-1)
+		if {_p} is set:
+			loop {_fl::*}:
+				set {_l} to loop-value-2
+				{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
+	delete {-ms::stage}
+	mStgAfterBurn({_x})
+
+# 화형이 끝난 뒤: 테러리스트면 길동무 선택 화면, 아니면 각자 기본 화면
+function mStgAfterBurn(x: text):
+	if {-m::exe} is {_x}:
+		if mState() is "execute":
+			mSceneTake({_x})
+			stop
+	loop mStgViewers():
+		mViewAuto(loop-value)
+
+# ------------------------------------------------------------------ 길동무 TNT
+
+function mStgTntLen() :: number:
+	return 6
+
+function mStgTnt(t: text, v: text):
+	if mSceneOn() is not true:
+		mStgRelease({_v})
+		stop
+	set {-ms::stage} to true
+	set {_vn} to mNameOf({_v})
+	loop mStgViewers():
+		mCamTo(loop-value, "daycam")
+	set {_a} to mScSeatLoc({-ms::seat::%{_t}%})
+	set {_b} to mScSeatLoc({-ms::seat::%{_v}%})
+	set {_w} to {_a}.getWorld()
+	wait 10 ticks
+	set {_tnt} to {_w}.spawnEntity(new Location({_w}, {_a}.getX(), {_a}.getY() + 1.5, {_a}.getZ()), EntityType.TNT)
+	{_tnt}.setGravity(false)
+	{_tnt}.setFuseTicks(400)
+	{_tnt}.setPersistent(false)
+	mScTrack({_tnt})
+	mStgSoundAll("entity.tnt.primed", 1, 1)
+	# 포물선으로 25틱 동안 날아간다
+	set {_k} to 0
+	while {_k} < 25:
+		wait 1 tick
+		add 1 to {_k}
+		set {_f} to {_k} / 25
+		set {_x} to {_a}.getX() + ({_b}.getX() - {_a}.getX()) * {_f}
+		set {_z} to {_a}.getZ() + ({_b}.getZ() - {_a}.getZ()) * {_f}
+		set {_y} to {_a}.getY() + 1.5 + 3 * {_f} * (1 - {_f}) * 4
+		{_tnt}.teleport(new Location({_w}, {_x}, {_y}, {_z}))
+	{_tnt}.remove()
+	set {_bl} to new Location({_w}, {_b}.getX(), {_b}.getY() + 1, {_b}.getZ())
+	mStgSoundAll("entity.generic.explode", 1, 1)
+	mStgPartAll("EXPLOSION_EMITTER", {_bl}, 1)
+	mStgPartAll("LARGE_SMOKE", {_bl}, 20)
+	if mSceneOn() is not true:
+		stop
+	mStgRelease({_v})
+	loop mStgViewers():
+		mStgTitle(loop-value, "&c%{_vn}%", "&f테러리스트의 길동무가 되었습니다", 50)
+	wait 50 ticks
+	delete {-ms::stage}
+	loop mStgViewers():
+		mViewAuto(loop-value)
+
+# ------------------------------------------------------------------ 승리 라인업
+
+# 승리 팀 참가자 uuid 목록
+function mStgWinners(w: text) :: texts:
+	if {_w} is "draw":
+		return {_none::*}
+	if {_w} starts with "neutral:":
+		set {_id} to {_w}
+		replace all "neutral:" in {_id} with ""
+		add {_id} to {_l::*}
+		return {_l::*}
+	loop {-m::players::*}:
+		set {_tm} to {-m::team::%loop-value%}
+		if {_w} is "mafia":
+			if {_tm} is "mafia":
+				add loop-value to {_l::*}
+			else if mRolePool({-m::role::%loop-value%}) is "support":
+				add loop-value to {_l::*}
+		else if {_w} is "citizen":
+			if {_tm} is "citizen":
+				add loop-value to {_l::*}
+	return {_l::*}
+
+function mStgLineup(w: text):
+	if mSceneOn() is not true:
+		stop
+	if mLocSet("lineup") is false:
+		stop
+	set {_win::*} to mStgWinners({_w})
+	set {_n} to size of {_win::*}
+	if {_n} is 0:
+		stop
+	set {_c} to mLocLoad("lineup")
+	set {_yaw} to {_c}.getYaw()
+	# 더미가 보는 방향(앞) f, 오른쪽 r
+	set {_fx} to -1 * sin({_yaw})
+	set {_fz} to cos({_yaw})
+	set {_rx} to -1 * cos({_yaw})
+	set {_rz} to -1 * sin({_yaw})
+	set {_i} to 0
+	loop {_win::*}:
+		add 1 to {_i}
+		set {_o} to ({_i} - ({_n} + 1) / 2) * 1.2
+		set {_l} to new Location({_c}.getWorld(), {_c}.getX() + {_rx} * {_o}, {_c}.getY(), {_c}.getZ() + {_rz} * {_o}, {_yaw}, 0)
+		set {_m} to {_l}.getWorld().spawnEntity({_l}, EntityType.MANNEQUIN)
+		mScDummySetup({_m}, loop-value)
+		{_m}.setCustomNameVisible(true)
+		{_m}.setRotation({_yaw}, 0)
+	# 카메라: 줄 앞 5칸, 눈높이에서 줄 가운데를 본다
+	set {_d} to 5 + {_n} * 0.3
+	set {_cam} to new Location({_c}.getWorld(), {_c}.getX() + {_fx} * {_d}, {_c}.getY() + 1.6, {_c}.getZ() + {_fz} * {_d})
+	{_cam}.setDirection(new Vector(-1 * {_fx}, -0.1, -1 * {_fz}))
+	loop mStgViewers():
+		mCamCut(loop-value, {_cam})
+
+# ------------------------------------------------------------------ 시작 로딩, 직업 안내
+
+function mStgClearChat(p: player):
+	loop 100 times:
+		send " " to {_p}
+	send action bar "" to {_p}
+
+# 로딩이 끝나면(mday.sk): 채팅창/액션바 비우기 → 직업 안내 → 마피아끼리 알림
+function mStgReveal():
+	loop all players:
+		set {_p} to loop-player
+		mStgClearChat({_p})
+		if mIsPlayer({_p}) is true:
+			mRoleReveal({_p})
+		else:
+			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다. &8(A/D: 시점 바꾸기)" to {_p}
+	mMafiaReveal()
+
+every second:
+	if mState() is not "loading":
+		stop
+	loop all players:
+		send action bar colored "&eloading..." to loop-player

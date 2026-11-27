@@ -19,10 +19,11 @@
 #   visit  그 밖의 능력: 들어와 대상 앞에 서서 직업별 연출 후 나간다(결과 칸 = 직업, 광인은 가짜 직업). 소지품과 소리/파티클:
 #          경찰 망원경(망원경 소리, 종) / 스파이 종이(책장 넘김, 지도 제작자 소리) / 의사 황금 사과(먹는 소리, 자수정 소리, 하트)
 #          탐정 책과 깃펜(책장 넘김, 사서 소리) / 기자 지도(카메라 셔터 비슷한 소리, 폭죽 소리, 빛 파티클) / 마녀 발효된 거미 눈(마녀 소리, 주문, 마녀 파티클)
-#          건달 막대기(변명자 소리, 밀치기, 화난 주민 파티클) / 주술사 자수정 조각(환술사 주문, 마법 부여 파티클) / 접선(스파이·마녀가 마피아를 고름) 거래 소리, 기쁜 주민 파티클
+#          건달 막대기(변명자 소리, 밀치기, 화난 주민 파티클) / 주술사 자수정 조각(환술사 주문, 마법 부여 파티클)
+#          마녀와 건달의 방문은 대상도 자기 집에서 본다(익명 더미). 접선(스파이·마녀가 마피아를 고름)은 연출 없이 채팅 알림만이라 그 밤 연출을 보지 않는다.
 # 모습: 행동한 사람(방문자)의 더미는 그 사람 본인에게만 자기 모습이고, 다른 사람(대상, 수호자)에게는 익명 더미(정해진 스킨)로 보인다.
 #   수호자 더미도 수호자 본인에게만 자기 모습, 대상에게는 익명. 소지품(무기 등)은 보는 사람과 상관없이 같다.
-#   무기: 마피아 구리 검, 자경단 다이아몬드 검, 암살자 네더라이트 검, 방화범 부싯돌과 부시, 도둑 철 검(임시, 정해지지 않음).
+#   무기: 마피아 구리 검, 자경단 다이아몬드 검, 암살자 네더라이트 검, 방화범 부싯돌과 부시, 도둑 철 곡괭이(확정).
 # 장면 더미와 문 열림/불은 그 장면을 보는 사람에게만 보인다(sendBlockChange). 보는 동안 그 사람의 자기 더미(밤 배경)는 숨긴다.
 # 기름 발광: 기름에 젖은 생존자의 원탁 더미와 집 더미는 모두에게 노란색으로 빛난다(팀 mafia_oil). 죽으면 더미가 해골로 바뀌어 사라진다.
 # 장소 키: 집 바깥 = h<i>door out ext, {mcfg::house::i::face}(문 방향) / 집 안(밤 방) = room nightcam fxdoor fxdoorblock fxmid fxvisit fxguard fxfireA fxfireB (mFxL 의 h=0)
@@ -87,7 +88,7 @@ function mFxWeapon(role: text) :: object:
 	if {_role} is "assassin":
 		return new ItemStack(Material.NETHERITE_SWORD)
 	if {_role} is "thief":
-		return new ItemStack(Material.IRON_SWORD)
+		return new ItemStack(Material.IRON_PICKAXE)
 	if {_role} is "arsonist":
 		return new ItemStack(Material.FLINT_AND_STEEL)
 	return {_none}
@@ -421,8 +422,8 @@ function mSceneResolve() :: number:
 			set {_main::%{_a}%} to {_s}
 			mFxAddV({_t}, {_s})
 		else if {_ty} is "contact":
-			set {_r} to mActRole({_a})
-			set {_main::%{_a}%} to "visit|%{_a}%|%{_x}%|-|contact|%mFxRoleItem({_r})%"
+			# 접선은 연출 없이 채팅 알림만(확정, mresolve.sk 의 mContactNotify). 그 사람은 이 밤 연출을 보지 않는다
+			set {_skip::%{_a}%} to true
 		else if {_ty} is "null":
 			set {_t} to {-m::act::%{_a}%}
 			if {_t} is set:
@@ -448,6 +449,8 @@ function mSceneResolve() :: number:
 	loop {-m::players::*}:
 		set {_id} to loop-value
 		set {_t} to {-m::act::%{_id}%}
+		if {_skip::%{_id}%} is true:
+			delete {_t}
 		if {_t} is set:
 			mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
 			if {_t} is not {_id}:
@@ -456,6 +459,9 @@ function mSceneResolve() :: number:
 					# 일반 방문: 결과 칸에 직업(광인은 가짜 직업)을 넣어 직업별 연출을 고른다
 					set {_r} to mActRole({_id})
 					set {_m} to "visit|%{_id}%|%{_t}%|-|%{_r}%|%mFxRoleItem({_r})%"
+					# 마녀와 건달의 방문은 대상도 자기 집에서 본다(익명 더미, 확정). 경찰 등 다른 직업은 행동한 사람만
+					if {_r} is "witch" or "thug":
+						mFxAddV({_t}, {_m})
 				set {_mf::*} to split {_m} at "|"
 				set {_home} to true
 				if {_mf::5} is "guarddie":
