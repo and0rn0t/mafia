@@ -993,7 +993,11 @@ function mPickBar(id: text):
 	set {_i} to {-ms::idx::%{_id}%}
 	set {_all} to size of {-ms::cand::%{_id}%::*}
 	# 지금 후보의 닉네임은 서브타이틀로(1초마다 다시 보내 계속 떠 있게), 조작 안내는 액션바로
-	send title "" with subtitle mPickLabel({_c}) to {_p} for 30 ticks with fadein 0 ticks and fade out 5 ticks
+	# 메모 표시도 같이(내 화면에만)
+	set {_lab} to mPickLabel({_c})
+	if {_c} is not "ignite":
+		set {_lab} to "%{_lab}% %mMemoTag({_id}, {_c})%"
+	send title "" with subtitle colored {_lab} to {_p} for 30 ticks with fadein 0 ticks and fade out 5 ticks
 	send action bar colored "&7(%{_i}%/%{_all}%) &8| &7A/D: 바꾸기 &8| &e스페이스: 확정 &8| &7Shift: 선택하지 않음" to {_p}
 
 function mPickMove(id: text, d: number):
@@ -1078,15 +1082,20 @@ function mKeyHint(id: text):
 	if mIsWatcher({_id}) is true:
 		if {-ms::stage} is not set:
 			if mState() is not "loading":
-				send action bar colored "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%" to {_p}
+				set {_hint} to "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%"
+				if mState() is "day":
+					set {_hint} to "%{_hint}% &8| &7Shift: 메모"
+				send action bar colored {_hint} to {_p}
 		stop
 	if mPickCanOpen({_id}) is not "":
 		send action bar colored "&7W: 대상 고르기" to {_p}
 		stop
 	if mState() is "day":
+		set {_hint} to "&7Shift: 메모"
 		if {-m::alive::%{_id}%} is true:
 			if {-m::tadj::%{_id}%} is not true:
-				send action bar colored "&7W: 토론 시간 +15초 &8| &7S: 토론 시간 -15초 &8(낮마다 한 번)" to {_p}
+				set {_hint} to "&7W: 토론 +15초 &8| &7S: 토론 -15초 &8| &7Shift: 메모"
+		send action bar colored {_hint} to {_p}
 
 every second:
 	if mSceneOn() is not true:
@@ -1121,6 +1130,13 @@ on PlayerInputEvent:
 			delete {-ms::in::%{_k}%::%{_id}%}
 	if size of {_press::*} is 0:
 		stop
+	# 낮: Shift 로 메모 창(대상 고르기 화면이 열려 있지 않을 때, 사망자·관전자도)
+	if mState() is "day":
+		if {-ms::pick::%{_id}%} is not set:
+			if {-ms::stage} is not set:
+				if {_press::*} contains "sneak":
+					mMemoOpen({_p})
+					stop
 	# 사망자/관전자: A/D 로 다른 참가자 자리 시점(컷신 중에는 막음). 테러리스트 길동무 선택처럼 선택 화면이 열려 있으면 그쪽이 먼저
 	if mIsWatcher({_id}) is true:
 		if {-ms::pick::%{_id}%} is not set:

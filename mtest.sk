@@ -107,6 +107,8 @@ function mBotKOfRole(r: text) :: text:
 
 # 게임 시작 때 한 번: 의심 초기값, 마피아 팀은 서로 안다
 function mBotInit():
+	delete {-mt::chat::*}
+	delete {-mt::pmem::*}
 	delete {-mt::k::*}
 	delete {-mt::sus::*}
 	delete {-mt::claim::*}
@@ -156,6 +158,7 @@ function mBotLearn():
 					else if {_r} starts with "tgt:":
 						# 탐정: 대상이 누군가에게 능력을 썼다 = 조금 수상
 						mBotAddSus({_b}, {_t}, 10)
+					mBotPMem({_b}, "밤에 %mNum({_t})%번 %mNameOf({_t})% 조사 결과: %mBotResText({_r})%")
 			loop {-m::rep::*}:
 				set {-mt::k::%{_b}%::%loop-value-2%} to mBotKOfRole({-m::role::%loop-value-2%})
 			if mBotEvilSide({_b}) is true:
@@ -164,6 +167,24 @@ function mBotLearn():
 						set {-mt::k::%{_b}%::%loop-value-2%} to "mafia"
 	# 밤 사망자를 어제 찍은 사람은 조금 수상
 	mBotDeathReview()
+
+# 조사 결과 값을 글로
+function mBotResText(r: text) :: text:
+	if {_r} is "mafia":
+		return "마피아"
+	if {_r} is "town":
+		return "마피아 아님"
+	if {_r} starts with "role:":
+		set {_x} to {_r}
+		replace all "role:" in {_x} with ""
+		return "직업은 %mRoleName({_x})%"
+	if {_r} starts with "tgt:":
+		set {_x} to {_r}
+		replace all "tgt:" in {_x} with ""
+		return "%mNum({_x})%번 %mNameOf({_x})% 에게 능력을 씀"
+	if {_r} is "ign":
+		return "대상 없이 능력을 씀"
+	return "아무에게도 능력을 쓰지 않음"
 
 # 살아 있는 다른 참가자 중 점수가 가장 높은 사람(c 목록 안에서). 같은 마피아 팀원은 마피아 팀 봇이 고르지 않는다
 function mBotBest(b: text, c: texts, mode: text) :: text:
@@ -475,6 +496,8 @@ function mBotLine(kind: text) :: text:
 		set {_l::*} to "제가 진짜 @r이에요. @t 님 거짓말이에요!", "@t 님이 @r 사칭하는 거예요. 마피아에요", "@r은 저예요. @t 님 마피아 확실해요"
 	else if {_kind} is "jester":
 		set {_l::*} to "음... 저 뽑으셔도 괜찮아요 ㅎㅎ", "제가 마피아일 수도 있죠~", "저 찍어 보실래요?", "ㅋㅋ 저 수상하죠?"
+	else if {_kind} is "reply":
+		set {_l::*} to " 님, 저요? 저는 시민이에요", " 님 왜 저를 부르세요?", " 님 생각은 어떠세요?", "음...  님 말 좀 더 들어 볼게요", " 님, 저는 아직 확신이 없어요"
 	else if {_kind} is "vote":
 		set {_l::*} to "@t 갑니다", "저는 @t", "@t 찍었어요", "@t 님 투표했어요"
 	else if {_kind} is "idle":
@@ -484,24 +507,29 @@ function mBotLine(kind: text) :: text:
 	return random element of {_l::*}
 
 # 문장에 대상·직업을 넣는다
+# 사람 부르는 말: "3번 민준"(번호와 이름을 같이)
+function mBotRef(t: text) :: text:
+	return "&6%mNum({_t})%번 &f%mNameOf({_t})%&r"
+
 function mBotFill(line: text, t: text, u: text, r: text) :: text:
 	set {_s} to {_line}
 	if {_t} is not "":
-		replace all "@t" in {_s} with "%mNumName({_t})%&r"
+		replace all "@t" in {_s} with mBotRef({_t})
 	if {_u} is not "":
-		replace all "@u" in {_s} with "%mNumName({_u})%&r"
+		replace all "@u" in {_s} with mBotRef({_u})
 	if {_r} is not "":
 		replace all "@r" in {_s} with mRoleName({_r})
 	return {_s}
 
-# 봇이 채팅에 말한다(생존자 대화처럼 모두에게 보이고 기록에도 남는다). 낮마다 세 마디까지
+# 봇이 채팅에 말한다(생존자 대화처럼 모두에게 보이고 기록에도 남는다). 낮마다 다섯 마디까지(대답 포함)
 function mBotSay(b: text, msg: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	if {-mt::said::%{_b}%} is set:
-		if {-mt::said::%{_b}%} >= 3:
+		if {-mt::said::%{_b}%} >= 5:
 			stop
 	set {_line} to "<%mNumName({_b})%&r> %{_msg}%"
+	mBotChatAdd({_b}, {_msg})
 	loop all players:
 		send colored {_line} to loop-player
 	mLogAdd("*", {_line})
@@ -736,6 +764,8 @@ function mBotLlmOn() :: boolean:
 
 # 의도 → AI 에게 줄 지시
 function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
+	if {_kind} is "reply":
+		return "%mNum({_t})%번 %mNameOf({_t})% 이(가) 너에게 이렇게 말했다: ""%{_r}%"". 네 입장(직업·팀·아는 것)에 맞게 자연스럽게 대답해라. 질문이면 답하고, 의심받으면 해명해라."
 	set {_tn} to ""
 	set {_un} to ""
 	set {_rn} to ""
@@ -787,6 +817,9 @@ function mBotCtx(b: text) :: text:
 			set {_c} to "%{_c}% 같은 팀: %{_mates::*}%. 팀원을 감싸되 티 나지 않게."
 	if {-mt::claim::%{_b}%} is set:
 		set {_c} to "%{_c}% 너는 사람들에게 %mRoleName({-mt::claim::%{_b}%})% 이라고 말해 두었다. 말이 엇갈리지 않게."
+	set {_pm} to mBotPMemText({_b})
+	if {_pm} is not "":
+		set {_c} to "%{_c}% 너만 아는 기록: %{_pm}%"
 	loop {-m::players::*}:
 		set {_t} to loop-value
 		if {_t} is not {_b}:
@@ -840,7 +873,7 @@ function mBotLlmSend(b: text, intent: text) :: boolean:
 	{_msgs}.add({_sys})
 	set {_usr} to new JsonObject()
 	{_usr}.addProperty("role", "user")
-	{_usr}.addProperty("content", "최근 채팅:%nl%%mBotRecent()%%nl%이번에 할 말: %{_intent}%%nl%한 문장만 답해라.")
+	{_usr}.addProperty("content", "%mBotHistory()%%nl%[이번에 할 말] %{_intent}%%nl%지금까지의 대화를 기억하고, 같은 말을 되풀이하지 말고, 앞뒤가 맞게 한 문장만 답해라.")
 	{_msgs}.add({_usr})
 	{_root}.add("messages", {_msgs})
 	set {_rb} to HttpRequest.newBuilder(URI.create({mcfg::llm::url}))
@@ -984,6 +1017,203 @@ function mBotLlmTest(p: player):
 	if {_ans} is "":
 		send "&e답이 비어 있습니다. 생각에 토큰을 다 쓴 것일 수 있어요. /mtest llm effort none(또는 low)을 써 보세요." to {_p}
 
+
+# ------------------------------------------------------------------ 봇 기억과 대화 이해
+# 대화 기억 {-mt::chat::*}: "[N일차] 3번 민준: 말" (사람과 봇의 생존자 대화, 게임 내내). 사건 기억은 기록({-m::log::*})의 전체 알림.
+# 개인 기억 {-mt::pmem::봇::*}: 그 봇만 아는 것(조사 결과 등, 날짜와 함께).
+# AI 가 켜져 있으면 사람의 말 한 줄마다 뜻을 읽는다(mBotLlmParse): 누구를 고발/변호했는지, 자기 직업 주장, 누구에게 말을 걸었는지 → 봇들이 받아들이고, 불린 봇은 대답한다.
+# AI 가 꺼져 있어도: 말에 봇의 번호("3번")나 이름이 있으면 그 봇이 정해 둔 문장으로 대답한다(mBotAddressed).
+
+function mBotChatAdd(s: text, msg: text):
+	set {_m} to {_msg}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+	add "[%{-m::day}%일차] %mNum({_s})%번 %mNameOf({_s})%: %{_m}%" to {-mt::chat::*}
+
+function mBotPMem(b: text, line: text):
+	add "[%{-m::day}%일차] %{_line}%" to {-mt::pmem::%{_b}%::*}
+
+# 기억을 AI 에게 줄 글로: 사건(전체 알림) 최근 40줄 + 대화 최근 40줄
+function mBotHistory() :: text:
+	set {_n} to size of {-m::log::*}
+	set {_from} to {_n} - 39
+	set {_i} to 0
+	set {_ev} to ""
+	loop {-m::log::*}:
+		add 1 to {_i}
+		if {_i} >= {_from}:
+			set {_e::*} to split loop-value at "|"
+			if {_e::1} is "*":
+				set {_l} to loop-value
+				replace first "*|" in {_l} with ""
+				replace first "|" in {_l} with " "
+				set {_l} to {_l}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+				# 봇이 한 말은 대화 기억에 따로 있으니 뺀다
+				if {_l} does not contain "<":
+					set {_ev} to "%{_ev}%%{_l}%%nl%"
+	set {_n} to size of {-mt::chat::*}
+	set {_from} to {_n} - 39
+	set {_i} to 0
+	set {_ch} to ""
+	loop {-mt::chat::*}:
+		add 1 to {_i}
+		if {_i} >= {_from}:
+			set {_ch} to "%{_ch}%%loop-value%%nl%"
+	return "[지금까지 일어난 일]%nl%%{_ev}%%nl%[지금까지의 대화]%nl%%{_ch}%"
+
+# 봇 b 의 개인 기억(글)
+function mBotPMemText(b: text) :: text:
+	set {_t} to ""
+	loop {-mt::pmem::%{_b}%::*}:
+		set {_t} to "%{_t}%%loop-value%%nl%"
+	return {_t}
+
+# 사람이 봇을 불렀는지(번호 "3번"/"3" 또는 이름) → 그 봇이 대답(조금 뒤)
+function mBotAddressed(s: text, msg: text):
+	set {_w::*} to split {_msg} at " "
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			if {-m::alive::%{_b}%} is true:
+				set {_hit} to false
+				loop {_w::*}:
+					set {_x} to loop-value-2
+					replace all "님" in {_x} with ""
+					replace all "번" in {_x} with ""
+					replace all "," in {_x} with ""
+					replace all "?" in {_x} with ""
+					if {_x} is mNameOf({_b}):
+						set {_hit} to true
+					if {_x} is "%mNum({_b})%":
+						set {_hit} to true
+				if {_hit} is true:
+					mBotQueueReply({_b}, {_s}, {_msg})
+
+function mBotQueueReply(b: text, s: text, msg: text):
+	if {_b} is {_s}:
+		stop
+	set {_m} to {_msg}
+	replace all "|" in {_m} with "/"
+	mBotQueue({_b}, "reply|%{_s}%||%{_m}%", random integer between 2 and 4)
+
+# AI 로 사람 말의 뜻을 읽는다(비동기). 결과는 mBotLlmPoll 이 mBotApplyParse 로 넘긴다
+function mBotLlmParse(s: text, msg: text):
+	set {_ps} to ""
+	loop {-m::players::*}:
+		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
+	set {_sys} to "너는 한국어 마피아 게임 채팅을 분석한다. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열."
+	set {_f} to mBotLlmPost({_sys}, {_msg}, 300)
+	if {_f} is not set:
+		stop
+	add 1 to {-mtllm::pn}
+	set {_k} to "%{-mtllm::pn}%"
+	set {-mtllm::pf::%{_k}%} to {_f}
+	set {-mtllm::ps::%{_k}%} to {_s}
+	set {-mtllm::pm::%{_k}%} to {_msg}
+	set {-mtllm::pt::%{_k}%} to {-mau::sec}
+
+# 공통 요청(시스템 지시, 사용자 글, 최대 토큰) → 비동기 결과
+function mBotLlmPost(sys: text, usr: text, maxt: number) :: object:
+	set {_root} to new JsonObject()
+	{_root}.addProperty("model", {mcfg::llm::model})
+	{_root}.addProperty("max_tokens", {_maxt})
+	if {mcfg::llm::effort} is set:
+		{_root}.addProperty("reasoning_effort", {mcfg::llm::effort})
+	set {_msgs} to new JsonArray()
+	set {_a} to new JsonObject()
+	{_a}.addProperty("role", "system")
+	{_a}.addProperty("content", {_sys})
+	{_msgs}.add({_a})
+	set {_c} to new JsonObject()
+	{_c}.addProperty("role", "user")
+	{_c}.addProperty("content", {_usr})
+	{_msgs}.add({_c})
+	{_root}.add("messages", {_msgs})
+	set {_rb} to HttpRequest.newBuilder(URI.create({mcfg::llm::url}))
+	{_rb}.timeout(Duration.ofSeconds(mBotLlmWait()))
+	{_rb}.header("Content-Type", "application/json")
+	if {mcfg::llm::key} is set:
+		{_rb}.header("Authorization", "Bearer %{mcfg::llm::key}%")
+	{_rb}.POST(HBodyPub.ofString({_root}.toString()))
+	if {-mtllm::client} is not set:
+		set {-mtllm::client} to mBotLlmClient()
+	return {-mtllm::client}.sendAsync({_rb}.build(), HBodyHand.ofString())
+
+# 뜻 읽기 결과 적용
+function mBotApplyParse(s: text, msg: text, raw: text):
+	set {_a} to {_raw}.indexOf("{")
+	set {_z} to {_raw}.lastIndexOf("}")
+	if {_a} < 0:
+		stop
+	if {_z} <= {_a}:
+		stop
+	set {_j} to {_raw}.substring({_a}, {_z} + 1)
+	set {_o} to JsonParser.parseString({_j}).getAsJsonObject()
+	loop "accuse" and "clear":
+		set {_key} to loop-value
+		if {_o}.has({_key}) is true:
+			set {_arr} to {_o}.getAsJsonArray({_key})
+			set {_n} to {_arr}.size()
+			set {_i} to 0
+			while {_i} < {_n}:
+				set {_no} to {_arr}.get({_i}).getAsInt()
+				loop {-m::players::*}:
+					if {-m::num::%loop-value-2%} is {_no}:
+						if {_key} is "accuse":
+							mBotClaim({_s}, loop-value-2, "mafia")
+						else:
+							mBotClaim({_s}, loop-value-2, "town")
+				add 1 to {_i}
+	if {_o}.has("claim") is true:
+		set {_cr} to {_o}.get("claim").getAsString()
+		if {_cr} is not "none":
+			if mRoleExists({_cr}) is true:
+				if {_cr} is not "mafia":
+					mBotSetClaim({_s}, {_cr})
+	if {_o}.has("ask") is true:
+		set {_arr} to {_o}.getAsJsonArray("ask")
+		set {_n} to {_arr}.size()
+		set {_i} to 0
+		while {_i} < {_n}:
+			set {_no} to {_arr}.get({_i}).getAsInt()
+			loop {-m::players::*}:
+				if {-m::num::%loop-value%} is {_no}:
+					if mIsBot(loop-value) is true:
+						if {-m::alive::%loop-value%} is true:
+							mBotQueueReply(loop-value, {_s}, {_msg})
+			add 1 to {_i}
+
+# 뜻 읽기 요청 확인(mBotLlmPoll 이 부른다)
+function mBotParsePoll():
+	loop indices of {-mtllm::pf::*}:
+		set {_k} to loop-value
+		set {_f} to {-mtllm::pf::%{_k}%}
+		set {_done} to false
+		set {_body} to ""
+		if {_f}.isDone() is true:
+			set {_done} to true
+			if {_f}.isCompletedExceptionally() is false:
+				set {_res} to {_f}.get()
+				if {_res}.statusCode() is 200:
+					set {_o} to JsonParser.parseString({_res}.body()).getAsJsonObject()
+					if {_o}.has("choices") is true:
+						set {_body} to {_o}.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString()
+		else if {-mau::sec} - {-mtllm::pt::%{_k}%} > mBotLlmWait() + 1:
+			set {_done} to true
+			{_f}.cancel(true)
+		if {_done} is true:
+			set {_s} to {-mtllm::ps::%{_k}%}
+			set {_m} to {-mtllm::pm::%{_k}%}
+			delete {-mtllm::pf::%{_k}%}
+			delete {-mtllm::ps::%{_k}%}
+			delete {-mtllm::pm::%{_k}%}
+			delete {-mtllm::pt::%{_k}%}
+			if {_body} is not "":
+				if mState() is "day" or "vote":
+					mBotApplyParse({_s}, {_m}, {_body})
+
+every second:
+	if size of {-mtllm::pf::*} > 0:
+		mBotParsePoll()
+
 # 사람 채팅 듣기(살아 있는 참가자가 낮·투표 시간에 한 말)
 on chat:
 	if size of {-mt::bots::*} is 0:
@@ -995,7 +1225,15 @@ on chat:
 	set {_id} to "%uuid of player%"
 	if {-m::alive::%{_id}%} is not true:
 		stop
-	mBotHear({_id}, uncolored message)
+	set {_msg} to uncolored message
+	# 봇의 대화 기억에 남긴다(AI 가 사람 말을 볼 수 있게)
+	mBotChatAdd({_id}, {_msg})
+	mBotHear({_id}, {_msg})
+	# 봇을 불렀으면(번호나 이름) 그 봇이 대답한다
+	mBotAddressed({_id}, {_msg})
+	# AI 로 말 뜻 읽기(고발·변호·직업 주장·질문 상대)
+	if mBotLlmOn() is true:
+		mBotLlmParse({_id}, {_msg})
 
 # ------------------------------------------------------------------ 봇 진행(1초마다)
 
@@ -1205,7 +1443,9 @@ command /mtest [<text>] [<text>] [<text>]:
 				set {_used::%{_k}%} to true
 				set {_id} to "%{_u}%"
 				add {_id} to {-mt::bots::*}
-				set {-mt::name::%{_id}%} to "봇%loop-value%"
+				# 사람 같은 이름(겹치지 않게)
+				set {_bn::*} to "하늘", "민준", "서연", "지호", "수아", "도윤", "하린", "예준", "지우", "시우", "유나" and "건우"
+				set {-mt::name::%{_id}%} to {_bn::%loop-value%}
 				set {-mt::skin::%{_id}%} to {_k}
 			if mStart(player) is not true:
 				delete {-mt::*}

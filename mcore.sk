@@ -49,6 +49,9 @@ import:
 	io.papermc.paper.registry.data.dialog.DialogBase$DialogAfterAction as DlgAfter
 	io.papermc.paper.registry.data.dialog.body.DialogBody
 	io.papermc.paper.registry.data.dialog.type.DialogType
+	io.papermc.paper.registry.data.dialog.ActionButton
+	io.papermc.paper.registry.data.dialog.action.DialogAction
+	net.kyori.adventure.key.Key
 	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 
 # 소리는 모두 플레이어 자신에게 붙여서 재생한다(Player#playSound(Entity, ...)). 위치에 재생하면 관전 카메라로 시점이 옮겨진 동안
@@ -263,6 +266,9 @@ function mReset():
 	delete {-m::diedsince}
 	delete {-m::drawwhy}
 	delete {-m::jwin}
+	delete {-m::pubrole::*}
+	delete {-m::solrev::*}
+	delete {-m::memo::*}
 	delete {-m::winwhy}
 	delete {-m::alive::*}
 	delete {-m::role::*}
@@ -327,7 +333,33 @@ function mLogP(id: text, t: text):
 function mLogDlgAccept(px: object, f: object):
 	set {_b} to {_f}.empty()
 	{_b}.base({-mlogdlg::base})
-	{_b}.type(DialogType.notice())
+	if {-mlogdlg::type} is set:
+		{_b}.type({-mlogdlg::type})
+	else:
+		{_b}.type(DialogType.notice())
+
+# 버튼 대화창: buttons(ActionButton 목록, java ArrayList)을 cols 줄로. 닫기 버튼은 아래에 따로
+function mDlgShow(p: player, title: text, body: text, buttons: object, cols: number):
+	set {_lb} to new ArrayList()
+	if {_body} is not "":
+		{_lb}.add(DialogBody.plainMessage(LegacyComponentSerializer.legacyAmpersand().deserialize({_body}), 300))
+	set {_tt} to LegacyComponentSerializer.legacyAmpersand().deserialize({_title})
+	set {-mlogdlg::base} to DialogBase.create({_tt}, null, true, false, DlgAfter.CLOSE, {_lb}, new ArrayList())
+	set {_close} to ActionButton.builder(LegacyComponentSerializer.legacyAmpersand().deserialize("&7닫기")).build()
+	set {-mlogdlg::type} to DialogType.multiAction({_buttons}).columns({_cols}).exitAction({_close}).build()
+	set {_h::accept} to function reference "mLogDlgAccept"
+	set {_c} to a new proxy of Consumer using {_h::*}
+	set {_d} to Dialog.create({_c})
+	delete {-mlogdlg::base}
+	delete {-mlogdlg::type}
+	{_p}.showDialog({_d})
+
+# 대화창 버튼 하나(누르면 PlayerCustomClickEvent, 키 mafia:<id>)
+function mDlgButton(label: text, id: text, w: number) :: object:
+	set {_bt} to ActionButton.builder(LegacyComponentSerializer.legacyAmpersand().deserialize({_label}))
+	{_bt}.width({_w})
+	{_bt}.action(DialogAction.customClick(Key.key("mafia", {_id}), null))
+	return {_bt}.build()
 
 function mLogShow(p: player):
 	set {_id} to "%uuid of {_p}%"

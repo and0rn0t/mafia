@@ -253,6 +253,8 @@ function mResolve():
 			set {_rn} to mRoleName({-m::role::%{_t}%})
 			add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
 			add {_t} to {-m::rep::*}
+			# 기자 특종: 모두에게 공개된 직업(메모보다 우선, 팀 색으로 표시)
+			set {-m::pubrole::%{_t}%} to {-m::role::%{_t}%}
 			set {_usedrep::%{_id}%} to true
 		else if {_ro} is "witch":
 			set {_noch::%{_t}%} to true
@@ -332,6 +334,15 @@ function mResolve():
 
 # 낮이 시작될 때: 사망 알림과 기자 공개(연출이 있으면 mstage.sk 의 아침 발표가 대신 한다), 본인에게만 가는 결과(조사, 접선, 도둑이 훔친 직업 등).
 function mResolveShow():
+	# 공격을 버텨낸 군인(밤이 끝났을 때 살아 있으면): 아침 발표 때 직업 공개(확정)
+	delete {-m::solrev::*}
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "soldier":
+			if {-m::alive::%{_e::2}%} is true:
+				if {-m::solrev::*} does not contain {_e::2}:
+					add {_e::2} to {-m::solrev::*}
+					set {-m::pubrole::%{_e::2}%} to "soldier"
 	if mSceneOn() is not true:
 		loop {-m::dead::*}:
 			set {_n} to mNameOf(loop-value)
@@ -340,6 +351,9 @@ function mResolveShow():
 			mBc("&7지난 밤에는 아무도 사망하지 않았습니다.")
 		loop {-m::pub::*}:
 			mBc(loop-value)
+		loop {-m::solrev::*}:
+			mBc("&f%mNumName(loop-value)%&7 님은 &a군인&7이었습니다! 공격을 버텨냈습니다.")
+	mTabUpdateAll()
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:

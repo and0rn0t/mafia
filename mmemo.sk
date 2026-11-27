@@ -1,0 +1,105 @@
+# ==============================================================================
+# [mmemo.sk] 메모: 다른 참가자의 직업을 추리해서 자기 화면에만 표시한다. 규칙은 ROLES.md, 구조는 DESIGN.md.
+# 여는 법: 낮에 Shift(관전 카메라 때문에 F 는 서버로 오지 않아 Shift 로 확정), 또는 /메모(/memo). 사망자·관전자도 쓸 수 있다.
+# 대화창 1: 참가자 버튼(번호 이름 + 지금 표시) → 대화창 2: 직업 버튼(팀 색) 또는 지우기.
+# 표시(메모한 사람 화면에만, 탭 목록과 대상 고르기 자막에 닉네임 옆):
+#   메모 안 한 사람 "???"(회색) / 메모한 사람 "(직업?)"(그 직업 팀 색) /
+#   모두에게 공개된 직업({-m::pubrole::uuid}: 투표로 죽지 않은 정치인, 기자 특종, 공격을 버텨낸 군인)은 메모를 무시하고 "[직업]"(팀 색) /
+#   같은 마피아 팀원(서로 아는 사이)은 진짜 직업 / 자기 자신은 표시 없음.
+# 변수: {-m::memo::보는사람::대상} = 직업 id (mReset 이 지운다)
+# 탭 목록은 mbody.sk 의 mBodyInfo 가 받는 사람마다 이 표시를 붙여 보낸다(이름이 다시 보내질 때). 메모를 바꾸면 탭을 다시 보낸다.
+# 미검증: PlayerCustomClickEvent, Dialog 버튼(custom click).
+# ==============================================================================
+
+import:
+	java.util.ArrayList
+	io.papermc.paper.event.player.PlayerCustomClickEvent
+
+# viewer 가 target 옆에 보는 표시(& 색 코드). "" = 표시 없음
+function mMemoTag(viewer: text, target: text) :: text:
+	if {_viewer} is {_target}:
+		return ""
+	if {-m::players::*} does not contain {_target}:
+		return ""
+	set {_pr} to {-m::pubrole::%{_target}%}
+	if {_pr} is set:
+		return "&8[%mTeamColor(mRolePool({_pr}))%%mRoleName({_pr})%&8]"
+	if {-m::team::%{_viewer}%} is "mafia":
+		if {-m::team::%{_target}%} is "mafia":
+			set {_tr} to {-m::role::%{_target}%}
+			return "&8[%mTeamColor(mRolePool({_tr}))%%mRoleName({_tr})%&8]"
+	set {_m} to {-m::memo::%{_viewer}%::%{_target}%}
+	if {_m} is set:
+		return "&7(%mTeamColor(mRolePool({_m}))%%mRoleName({_m})%&7?)"
+	return "&8???"
+
+# 메모를 바꾼 뒤 탭 목록을 다시 보낸다(봇 항목은 mtest.sk 가 다음 초에 다시 보낸다)
+function mMemoRefresh():
+	mTabUpdateAll()
+	delete {-mtab::st::*}
+
+# 대화창 1: 참가자 고르기
+function mMemoOpen(p: player):
+	if mRunning() is not true:
+		send "&c게임 중에만 쓸 수 있습니다." to {_p}
+		stop
+	set {_me} to "%uuid of {_p}%"
+	set {_bs} to new ArrayList()
+	loop {-m::players::*}:
+		set {_t} to loop-value
+		if {_t} is not {_me}:
+			set {_st} to ""
+			if {-m::alive::%{_t}%} is not true:
+				set {_st} to " &8(사망)"
+			{_bs}.add(mDlgButton("%mNumName({_t})% %mMemoTag({_me}, {_t})%%{_st}%", "memo/t/%{_t}%", 150))
+	mDlgShow({_p}, "&6&l메모", "&7추리한 직업을 적어 두면 내 화면에서 닉네임 옆에 표시됩니다(다른 사람에게는 안 보입니다).", {_bs}, 2)
+
+# 대화창 2: 그 사람의 직업 고르기
+function mMemoPick(p: player, t: text):
+	set {_bs} to new ArrayList()
+	loop mRoleIds():
+		set {_r} to loop-value
+		{_bs}.add(mDlgButton("%mTeamColor(mRolePool({_r}))%%mRoleName({_r})%", "memo/r/%{_t}%/%{_r}%", 90))
+	{_bs}.add(mDlgButton("&7지우기(???)", "memo/r/%{_t}%/clear", 90))
+	mDlgShow({_p}, "&6&l메모: %mNumName({_t})%", "&7이 사람의 직업을 무엇으로 추리하나요?", {_bs}, 4)
+
+# 대화창 버튼 누름
+on PlayerCustomClickEvent:
+	set {_k} to event.getIdentifier()
+	if {_k}.namespace() is not "mafia":
+		stop
+	set {_v} to {_k}.value()
+	if {_v} does not start with "memo/":
+		stop
+	set {_p} to event.getCommonConnection().getPlayer()
+	if {_p} is not set:
+		stop
+	if mRunning() is not true:
+		stop
+	set {_f::*} to split {_v} at "/"
+	set {_me} to "%uuid of {_p}%"
+	if {_f::2} is "t":
+		if {-m::players::*} contains {_f::3}:
+			mMemoPick({_p}, {_f::3})
+		stop
+	if {_f::2} is "r":
+		set {_t} to {_f::3}
+		if {-m::players::*} does not contain {_t}:
+			stop
+		if {_f::4} is "clear":
+			delete {-m::memo::%{_me}%::%{_t}%}
+			send action bar colored "&7메모 지움: %mNumName({_t})%" to {_p}
+		else if mRoleExists({_f::4}) is true:
+			set {-m::memo::%{_me}%::%{_t}%} to {_f::4}
+			send action bar colored "&7메모: %mNumName({_t})% &7= %mTeamColor(mRolePool({_f::4}))%%mRoleName({_f::4})%" to {_p}
+		mSound({_p}, "ui.button.click", 0.4, 1.6)
+		mMemoRefresh()
+		# 계속 메모할 수 있게 참가자 목록을 다시 연다
+		mMemoOpen({_p})
+
+command /mmemo:
+	aliases: /메모, /memo
+	description: 메모(추리한 직업을 닉네임 옆에 표시) - 낮에는 Shift
+	executable by: players
+	trigger:
+		mMemoOpen(player)

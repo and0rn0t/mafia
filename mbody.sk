@@ -24,6 +24,9 @@ import:
 	com.comphenix.protocol.events.ListenerPriority
 	com.comphenix.protocol.events.ListenerOptions
 	com.comphenix.protocol.wrappers.PlayerInfoData
+	com.comphenix.protocol.wrappers.WrappedChatComponent
+	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 	com.comphenix.protocol.wrappers.EnumWrappers$PlayerInfoAction as PIAction
 	com.comphenix.protocol.wrappers.EnumWrappers$NativeGameMode as PIGameMode
 
@@ -70,8 +73,11 @@ function mBodyInfo(e: object):
 	set {_acts} to {_pk}.getPlayerInfoActions().read(0)
 	if {_acts} is not set:
 		stop
-	if {_acts}.contains(PIAction.UPDATE_GAME_MODE) is false:
-		stop
+	set {_hasgm} to {_acts}.contains(PIAction.UPDATE_GAME_MODE)
+	set {_hasdn} to {_acts}.contains(PIAction.UPDATE_DISPLAY_NAME)
+	if {_hasgm} is false:
+		if {_hasdn} is false:
+			stop
 	set {_mods} to {_pk}.getPlayerInfoDataLists()
 	set {_idx} to 0
 	if {_mods}.size() >= 2:
@@ -80,23 +86,39 @@ function mBodyInfo(e: object):
 	if {_list} is not set:
 		stop
 	set {_v} to {_e}.getPlayer().getUniqueId()
+	set {_vs} to "%{_v}%"
 	set {_out} to new ArrayList()
 	set {_hit} to false
 	set {_n} to {_list}.size()
 	set {_i} to 0
 	while {_i} < {_n}:
 		set {_d} to {_list}.get({_i})
-		set {_keep} to true
+		set {_pid} to {_d}.getProfileId()
+		set {_ch} to false
 		set {_gm} to {_d}.getGameMode()
-		if {_gm} is set:
-			if {_gm}.equals(PIGameMode.SPECTATOR) is true:
-				if {_d}.getProfileId().equals({_v}) is false:
-					set {_keep} to false
-		if {_keep} is true:
-			{_out}.add({_d})
-		else:
+		set {_ngm} to {_gm}
+		# 다른 사람의 관전 모드는 모험으로(보통 플레이어처럼)
+		if {_hasgm} is true:
+			if {_gm} is set:
+				if {_gm}.equals(PIGameMode.SPECTATOR) is true:
+					if {_pid}.equals({_v}) is false:
+						set {_ngm} to PIGameMode.ADVENTURE
+						set {_ch} to true
+		# 이름 옆에 받는 사람의 메모 표시(mmemo.sk)
+		set {_dn} to {_d}.getDisplayName()
+		set {_ndn} to {_dn}
+		if {_hasdn} is true:
+			if {_dn} is set:
+				set {_tag} to mMemoTag({_vs}, "%{_pid}%")
+				if {_tag} is not "":
+					set {_tj} to GsonComponentSerializer.gson().serialize(LegacyComponentSerializer.legacyAmpersand().deserialize(" %{_tag}%"))
+					set {_ndn} to WrappedChatComponent.fromJson("[%{_dn}.getJson()%,%{_tj}%]")
+					set {_ch} to true
+		if {_ch} is true:
 			set {_hit} to true
-			{_out}.add(new PlayerInfoData({_d}.getProfileId(), {_d}.getLatency(), {_d}.isListed(), PIGameMode.ADVENTURE, {_d}.getProfile(), {_d}.getDisplayName(), {_d}.isShowHat(), {_d}.getListOrder(), {_d}.getRemoteChatSessionData()))
+			{_out}.add(new PlayerInfoData({_pid}, {_d}.getLatency(), {_d}.isListed(), {_ngm}, {_d}.getProfile(), {_ndn}, {_d}.isShowHat(), {_d}.getListOrder(), {_d}.getRemoteChatSessionData()))
+		else:
+			{_out}.add({_d})
 		add 1 to {_i}
 	if {_hit} is false:
 		stop

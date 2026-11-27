@@ -444,15 +444,23 @@ function mFxLen(spec: text) :: number:
 		return 50
 	return 20
 
+# 장면 목록: 죽음이 걸린 장면(킬·방화와 그 이동)은 따로 모아 맨 뒤에 본다(확정: 다른 능력 연출을 먼저 보고 킬을 본다).
+#   행동한 사람 장면은 {-msq::lethal::uuid} 가 true 인 동안 넣은 것이 킬 쪽. 당한 사람 장면은 종류(kill/burn)로 가른다.
 function mFxAddA(vid: text, spec: text):
 	if mIsBot({_vid}) is true:
 		stop
-	add {_spec} to {-msq::a::%{_vid}%::*}
+	if {-msq::lethal::%{_vid}%} is true:
+		add {_spec} to {-msq::al::%{_vid}%::*}
+	else:
+		add {_spec} to {-msq::a::%{_vid}%::*}
 
 function mFxAddV(vid: text, spec: text):
 	if mIsBot({_vid}) is true:
 		stop
-	add {_spec} to {-msq::v::%{_vid}%::*}
+	if {_spec} starts with "kill|" or "burn|":
+		add {_spec} to {-msq::vl::%{_vid}%::*}
+	else:
+		add {_spec} to {-msq::v::%{_vid}%::*}
 
 # x 가 t 의 집을 다녀오는 장면들(이동 → 대상 집 장면 → 귀가). 같은 집이면 이동 없이 장면만.
 function mFxTrip(x: text, t: text, main: text, item: text, home: boolean):
@@ -568,7 +576,6 @@ function mSceneResolve() :: number:
 			# 자기 자신에게 쓴 능력(의사 자가 치료): 집을 나서지 않고 자기 집 의자에서 치료한다
 			mFxAddA({_id}, "selfheal|%{_id}%|%{_id}%|-|selfheal|-")
 		else if {_t} is set:
-			mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
 			if {_t} is not {_id}:
 				set {_m} to {_main::%{_id}%}
 				if {_m} is not set:
@@ -579,6 +586,10 @@ function mSceneResolve() :: number:
 					if {_r} is "witch" or "thug":
 						mFxAddV({_t}, {_m})
 				set {_mf::*} to split {_m} at "|"
+				# 킬이면 집 나서기부터 킬 쪽 목록에
+				if {_mf::1} is "kill" or "burn":
+					set {-msq::lethal::%{_id}%} to true
+				mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
 				set {_home} to true
 				if {_mf::5} is "guarddie":
 					if {_mf::4} is {_id}:
@@ -587,18 +598,23 @@ function mSceneResolve() :: number:
 				if {_mf::7} is "vig":
 					set {_home} to false
 				mFxTrip({_id}, {_mf::3}, {_m}, {_mf::6}, {_home})
+				delete {-msq::lethal::%{_id}%}
 		else if {-m::actmode::%{_id}%} is "ignite":
+			set {-msq::lethal::%{_id}%} to true
 			mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
 			loop {_burn::%{_id}%::*}:
 				set {_bf::*} to split loop-value-2 at "|"
 				mFxTrip({_id}, {_bf::3}, loop-value-2, "flint", true)
-	# 사람마다 재생(행동한 장면 → 당한 장면)
+			delete {-msq::lethal::%{_id}%}
+	# 사람마다 재생: 당한 능력 장면 → 행동한 능력 장면 → 행동한 킬 장면 → 당한 킬 장면(죽음은 맨 뒤)
 	set {_max} to 0
 	loop {-m::players::*}:
 		set {_id} to loop-value
 		delete {_q::*}
-		add {-msq::a::%{_id}%::*} to {_q::*}
 		add {-msq::v::%{_id}%::*} to {_q::*}
+		add {-msq::a::%{_id}%::*} to {_q::*}
+		add {-msq::al::%{_id}%::*} to {_q::*}
+		add {-msq::vl::%{_id}%::*} to {_q::*}
 		set {_p} to mPlayerOf({_id})
 		if {_p} is set:
 			if size of {_q::*} is 0:

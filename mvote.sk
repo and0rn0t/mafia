@@ -82,7 +82,10 @@ function mTally():
 	set {_x} to {_top::1}
 	set {_xn} to mNameOf({_x})
 	if {-m::role::%{_x}%} is "politician":
-		mBc("&f%{_xn}%&7 님이 최다 득표했지만 처형되지 않았습니다.")
+		# 정치인은 처형되지 않고 직업이 모두에게 공개된다(확정)
+		set {-m::pubrole::%{_x}%} to "politician"
+		mBc("&f%{_xn}%&7 님이 최다 득표했지만 &a정치인&7이라 처형되지 않았습니다.")
+		mTabUpdateAll()
 		stop
 	# 광대: 화형 대신 "어라...?" → 암전 → 팡파르와 광대 승리(mstage.sk mStgJester), 그 뒤 게임 종료 화면
 	if {-m::role::%{_x}%} is "jester":

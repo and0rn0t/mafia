@@ -90,7 +90,9 @@ function mStgMorningLen() :: number:
 	set {_r} to {_r} * 2
 	set {_q} to size of {-m::rep::*}
 	set {_q} to {_q} * 4
-	return 2 + {_r} + {_q}
+	set {_s} to size of {-m::solrev::*}
+	set {_s} to {_s} * 2
+	return 2 + {_r} + {_q} + {_s}
 
 function mStgMorning():
 	if mSceneOn() is not true:
@@ -98,6 +100,7 @@ function mStgMorning():
 	set {-ms::stage} to true
 	set {_dead::*} to {-m::dead::*}
 	set {_rep::*} to {-m::rep::*}
+	set {_sol::*} to {-m::solrev::*}
 	set {_sub} to "&7지난 밤에는 아무도 사망하지 않았습니다"
 	if size of {_dead::*} > 0:
 		set {_sub} to ""
@@ -115,6 +118,20 @@ function mStgMorning():
 		mStgSoundAll("block.bell.resonate", 0.4, 0.8)
 		mStgSeatPart({_d}, "SOUL", 20, 1)
 		mStgSeatPart({_d}, "SMOKE", 10, 1)
+		wait 40 ticks
+		if mSceneOn() is not true:
+			stop
+	# 공격을 버텨낸 군인: 얼굴을 비추고 직업 공개(확정)
+	loop {_sol::*}:
+		set {_sd} to loop-value
+		set {_sn} to mNumName({_sd})
+		loop mStgViewers():
+			mCamFace(loop-value-2, {_sd})
+			mStgTitle(loop-value-2, "&a군인", "%{_sn}%&7 님이 공격을 버텨냈습니다", 35)
+		mStgSoundAll("item.shield.block", 1, 1)
+		mStgSoundAll("block.anvil.place", 0.6, 1.8)
+		mStgSeatPart({_sd}, "ELECTRIC_SPARK", 20, 1.2)
+		mBc("%{_sn}%&7 님은 &a군인&7이었습니다! 공격을 버텨냈습니다.")
 		wait 40 ticks
 		if mSceneOn() is not true:
 			stop
@@ -145,6 +162,7 @@ function mStgMorning():
 	# 사망자·특종 화면으로 옮겼을 때만 원래 화면으로 돌린다(아무 일 없던 아침에는 카메라를 다시 움직이지 않는다)
 	set {_moved} to size of {_dead::*}
 	add size of {_rep::*} to {_moved}
+	add size of {_sol::*} to {_moved}
 	if {_moved} > 0:
 		loop mStgViewers():
 			mViewAuto(loop-value)
