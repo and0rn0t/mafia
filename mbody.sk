@@ -2,7 +2,7 @@
 # [mbody.sk] 연출(카메라) 중에는 플레이어 본체를 서로에게 보내지 않는다 (ProtocolLib 필요). 구조는 DESIGN.md.
 # 왜: 참가자 본체는 관전 모드로 카메라 근처에 있고, 밤 장면 동안 행동한 사람만 본체가 다른 곳으로 순간이동한다.
 #     미니맵·엔티티 레이더 모드가 본체 위치를 보여 주면 "누가 밤에 움직였는지"가 드러난다.
-# 방법: 플레이어 엔티티 생성 패킷(SPAWN_ENTITY, 종류 PLAYER)을 막는다. 탭 목록(PLAYER_INFO)은 건드리지 않아 탭에는 그대로 나온다.
+# 방법: 플레이어 엔티티 생성 패킷(SPAWN_ENTITY, 종류 PLAYER)을 막는다. 탭 목록(PLAYER_INFO)은 항목을 지우지 않고, 다른 사람 항목의 관전 모드만 모험으로 바꿔 보통 플레이어처럼 보이게 한다(mBodyInfo).
 #   이미 서로 보이던 본체는 mBodyRefresh(숨겼다 다시 보여 주기)로 다시 보내게 해서 막히게 한다. 게임이 끝나면 같은 함수로 다시 보이게 한다.
 #   막는 조건은 {-ms::on}(연출 켜짐)뿐이다. 연출 없이 하는 게임은 본체가 곧 플레이어라 막지 않는다.
 # 리스너 주인 플러그인: uuidmask.sk 가 다시 불러올 때 Skript 플러그인 이름으로 등록된 리스너를 모두 지우므로, 가능하면 skript-reflect 이름으로 등록한다.
@@ -23,6 +23,9 @@ import:
 	com.comphenix.protocol.events.ListeningWhitelist
 	com.comphenix.protocol.events.ListenerPriority
 	com.comphenix.protocol.events.ListenerOptions
+	com.comphenix.protocol.wrappers.PlayerInfoData
+	com.comphenix.protocol.wrappers.EnumWrappers$PlayerInfoAction as PIAction
+	com.comphenix.protocol.wrappers.EnumWrappers$NativeGameMode as PIGameMode
 
 function mBodyPlugin() :: object:
 	set {_pl} to Bukkit.getPluginManager().getPlugin("skript-reflect")
@@ -33,6 +36,7 @@ function mBodyPlugin() :: object:
 function mBodySendWl() :: object:
 	set {_t} to new ArrayList()
 	{_t}.add(PTServer.SPAWN_ENTITY)
+	{_t}.add(PTServer.PLAYER_INFO)
 	set {_o} to new HashSet()
 	{_o}.add(ListenerOptions.SKIP_PLUGIN_VERIFIER)
 	set {_b} to ListeningWhitelist.newBuilder()
@@ -50,11 +54,55 @@ function mBodyOnSend(px: object, e: object):
 		stop
 	if {_e}.isPlayerTemporary() is true:
 		stop
+	if {_e}.getPacketType().equals(PTServer.PLAYER_INFO) is true:
+		mBodyInfo({_e})
+		stop
 	set {_ty} to {_e}.getPacket().getEntityTypeModifier().read(0)
 	if {_ty} is not set:
 		stop
 	if {_ty}.equals(EntityType.PLAYER) is true:
 		{_e}.setCancelled(true)
+
+# 탭 목록: 게임 중 참가자·관전자는 연출 카메라 때문에 관전 모드라 탭에 회색 기울임(관전)으로 뜬다.
+# 다른 사람에게 보내는 탭 항목의 게임 모드만 모험으로 바꿔 보통 플레이어처럼 보이게 한다(받는 사람 자신의 항목은 그대로: 자기 게임 모드에 영향이 없게).
+function mBodyInfo(e: object):
+	set {_pk} to {_e}.getPacket()
+	set {_acts} to {_pk}.getPlayerInfoActions().read(0)
+	if {_acts} is not set:
+		stop
+	if {_acts}.contains(PIAction.UPDATE_GAME_MODE) is false:
+		stop
+	set {_mods} to {_pk}.getPlayerInfoDataLists()
+	set {_idx} to 0
+	if {_mods}.size() >= 2:
+		set {_idx} to 1
+	set {_list} to {_mods}.read({_idx})
+	if {_list} is not set:
+		stop
+	set {_v} to {_e}.getPlayer().getUniqueId()
+	set {_out} to new ArrayList()
+	set {_hit} to false
+	set {_n} to {_list}.size()
+	set {_i} to 0
+	while {_i} < {_n}:
+		set {_d} to {_list}.get({_i})
+		set {_keep} to true
+		set {_gm} to {_d}.getGameMode()
+		if {_gm} is set:
+			if {_gm}.equals(PIGameMode.SPECTATOR) is true:
+				if {_d}.getProfileId().equals({_v}) is false:
+					set {_keep} to false
+		if {_keep} is true:
+			{_out}.add({_d})
+		else:
+			set {_hit} to true
+			{_out}.add(new PlayerInfoData({_d}.getProfileId(), {_d}.getLatency(), {_d}.isListed(), PIGameMode.ADVENTURE, {_d}.getProfile(), {_d}.getDisplayName(), {_d}.isShowHat(), {_d}.getListOrder(), {_d}.getRemoteChatSessionData()))
+		add 1 to {_i}
+	if {_hit} is false:
+		stop
+	set {_cl} to {_pk}.shallowClone()
+	{_cl}.getPlayerInfoDataLists().write({_idx}, {_out})
+	{_e}.setPacket({_cl})
 
 function mBodyOnRecv(px: object, e: object):
 	stop

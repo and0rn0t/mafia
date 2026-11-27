@@ -23,6 +23,15 @@
 
 import:
 	java.util.UUID
+	java.util.ArrayList
+	java.util.EnumSet
+	com.comphenix.protocol.ProtocolLibrary
+	com.comphenix.protocol.PacketType$Play$Server as MtPT
+	com.comphenix.protocol.wrappers.PlayerInfoData
+	com.comphenix.protocol.wrappers.WrappedGameProfile
+	com.comphenix.protocol.wrappers.WrappedChatComponent
+	com.comphenix.protocol.wrappers.EnumWrappers$PlayerInfoAction as MtPIA
+	com.comphenix.protocol.wrappers.EnumWrappers$NativeGameMode as MtGM
 
 # mTestBots, mTestName, mIsBot(게임 코드가 부르는 것)은 mcore.sk 에 있다(이 파일을 빼도 게임이 돌게).
 
@@ -778,6 +787,78 @@ every second:
 					if chance of 40%:
 						mBotTalk({_id})
 
+# ------------------------------------------------------------------ 봇 탭 목록(가짜 항목, ProtocolLib)
+# 게임 중에는 봇도 탭 목록에 번호·이름·생존 상태로 뜬다(mjoin.sk mTabJson 과 같은 모양). 머리는 UUID 로 정해지는 기본 스킨 = 더미 스킨과 같다.
+# 접속한 사람마다 한 번 추가하고, 봇의 상태가 바뀌면 이름만 고쳐 보낸다. 로비로 돌아가면 지운다.
+# 변수: {-mtab::bots::*}(탭에 올린 봇 uuid), {-mtab::sent::사람}(그 사람에게 추가했는지), {-mtab::st::봇}(마지막으로 보낸 이름)
+function mBotTabData(b: text, i: number) :: object:
+	set {_u} to UUID.fromString({_b})
+	set {_gp} to new WrappedGameProfile({_u}, "bot%{_i}%")
+	set {_dn} to WrappedChatComponent.fromJson(mTabJson({_b}, mNameOf({_b})))
+	set {_ord} to 100
+	if {-m::num::%{_b}%} is set:
+		set {_ord} to 100 - {-m::num::%{_b}%}
+	return new PlayerInfoData({_u}, 0, true, MtGM.ADVENTURE, {_gp}, {_dn}, true, {_ord}, null)
+
+function mBotTabSend(p: player, full: boolean):
+	set {_pm} to ProtocolLibrary.getProtocolManager()
+	set {_pk} to {_pm}.createPacket(MtPT.PLAYER_INFO)
+	if {_full} is true:
+		set {_acts} to EnumSet.of(MtPIA.ADD_PLAYER, MtPIA.UPDATE_LISTED, MtPIA.UPDATE_DISPLAY_NAME, MtPIA.UPDATE_GAME_MODE, MtPIA.UPDATE_LIST_ORDER)
+	else:
+		set {_acts} to EnumSet.of(MtPIA.UPDATE_DISPLAY_NAME, MtPIA.UPDATE_LIST_ORDER)
+	{_pk}.getPlayerInfoActions().write(0, {_acts})
+	set {_list} to new ArrayList()
+	set {_i} to 0
+	loop {-mtab::bots::*}:
+		add 1 to {_i}
+		{_list}.add(mBotTabData(loop-value, {_i}))
+	set {_mods} to {_pk}.getPlayerInfoDataLists()
+	set {_idx} to 0
+	if {_mods}.size() >= 2:
+		set {_idx} to 1
+	{_mods}.write({_idx}, {_list})
+	{_pm}.sendServerPacket({_p}, {_pk})
+
+function mBotTabRemove(p: player):
+	set {_pm} to ProtocolLibrary.getProtocolManager()
+	set {_pk} to {_pm}.createPacket(MtPT.PLAYER_INFO_REMOVE)
+	set {_list} to new ArrayList()
+	loop {-mtab::bots::*}:
+		{_list}.add(UUID.fromString(loop-value))
+	{_pk}.getUUIDLists().write(0, {_list})
+	{_pm}.sendServerPacket({_p}, {_pk})
+
+every second:
+	if mState() is "lobby":
+		if size of {-mtab::bots::*} > 0:
+			loop all players:
+				mBotTabRemove(loop-player)
+			delete {-mtab::*}
+		stop
+	if size of {-mt::bots::*} is 0:
+		stop
+	if size of {-mtab::bots::*} is 0:
+		set {-mtab::bots::*} to {-mt::bots::*}
+	# 새로 접속한 사람에게 봇 항목 추가
+	loop all players:
+		if {-mtab::sent::%uuid of loop-player%} is not set:
+			mBotTabSend(loop-player, true)
+			set {-mtab::sent::%uuid of loop-player%} to true
+	# 봇 상태(생존/사망, 번호)가 바뀌었으면 이름만 고쳐 보낸다
+	set {_ch} to false
+	loop {-mtab::bots::*}:
+		set {_j} to mTabJson(loop-value, mNameOf(loop-value))
+		if {-mtab::st::%loop-value%} is not {_j}:
+			set {-mtab::st::%loop-value%} to {_j}
+			set {_ch} to true
+	if {_ch} is true:
+		loop all players:
+			mBotTabSend(loop-player, false)
+
+on quit:
+	delete {-mtab::sent::%uuid of player%}
+
 function mTestTeamName(t: text) :: text:
 	if {_t} is "mafia":
 		return "&c마피아 팀"
@@ -817,10 +898,22 @@ command /mtest [<text>] [<text>] [<text>]:
 				set {_n} to 11
 			delete {-mt::*}
 			loop {_n} times:
-				set {_u} to UUID.randomUUID()
+				# 봇마다 다른 기본 스킨: UUID 를 골라서 클라이언트가 탭 머리에 그리는 기본 스킨(UUID 해시 % 18)과 더미 스킨을 맞춘다
+				set {_k} to -1
+				set {_try} to 0
+				while {_k} < 0:
+					set {_u} to UUID.randomUUID()
+					set {_kk} to mod({_u}.hashCode(), 18)
+					add 1 to {_try}
+					if {_used::%{_kk}%} is not set:
+						set {_k} to {_kk}
+					else if {_try} > 200:
+						set {_k} to {_kk}
+				set {_used::%{_k}%} to true
 				set {_id} to "%{_u}%"
 				add {_id} to {-mt::bots::*}
 				set {-mt::name::%{_id}%} to "봇%loop-value%"
+				set {-mt::skin::%{_id}%} to {_k}
 			if mStart(player) is not true:
 				delete {-mt::*}
 				send "&c시작하지 못했습니다. (위의 이유를 확인해 주세요)"

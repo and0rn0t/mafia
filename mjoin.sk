@@ -131,13 +131,28 @@ function mTabUpdate(p: player):
 	set {_no} to mNum("%uuid of {_p}%")
 	if {_no} is "":
 		set {_json} to "{""text"":""%{_nm}%"",""color"":""%{_c}%""}"
+		# 게임 중 참가자가 아닌 사람은 (관전) 표시
+		if mState() is not "lobby":
+			set {_json} to "[{""text"":""%{_nm}%"",""color"":""#aaaaaa""},{""text"":"" (관전)"",""color"":""#555555""}]"
+		{_p}.setPlayerListOrder(0)
 		{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
 		{_p}.displayName(null)
 		stop
-	set {_json} to "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%"",""color"":""%{_c}%""}]"
-	{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
+	{_p}.playerListName(GsonComponentSerializer.gson().deserialize(mTabJson("%uuid of {_p}%", {_nm})))
+	# 탭 순서: 번호 순(높은 값이 위)
+	set {_ord} to 100 - ({_no} parsed as integer)
+	{_p}.setPlayerListOrder({_ord})
 	set {_dj} to "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%""}]"
 	{_p}.displayName(GsonComponentSerializer.gson().deserialize({_dj}))
+
+# 게임 중 참가자의 탭 이름(JSON): 번호 + 닉네임 + 생존 상태. 생존 = 흰색, 사망 = 어두운 회색 취소선 + "사망", 자리비움 = 회색 + "자리비움". 봇 탭 항목도 쓴다(mtest.sk)
+function mTabJson(id: text, nm: text) :: text:
+	set {_no} to mNum({_id})
+	if {-m::alive::%{_id}%} is not true:
+		return "[{""text"":""%{_no}% "",""color"":""#555555""},{""text"":""%{_nm}%"",""color"":""#555555"",""strikethrough"":true},{""text"":"" 사망"",""color"":""#aa0000""}]"
+	if {-m::away::%{_id}%} is true:
+		return "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%"",""color"":""#aaaaaa""},{""text"":"" 자리비움"",""color"":""#777777""}]"
+	return "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%"",""color"":""#ffffff""},{""text"":"" 생존"",""color"":""#55ff55""}]"
 
 # 번호 + 닉네임(대상 고르기 화면 등). 번호가 없으면 닉네임만
 function mNumName(id: text) :: text:

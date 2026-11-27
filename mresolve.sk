@@ -52,6 +52,8 @@ function mDie(id: text):
 	set {-m::diedsince} to true
 	add {_id} to {-m::dead::*}
 	mSceneDead({_id})
+	# 탭 목록의 생존/사망 표시
+	mTabUpdateAll()
 
 function mAddInfo(id: text, msg: text):
 	add {_msg} to {-m::info::%{_id}%::*}

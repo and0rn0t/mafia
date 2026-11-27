@@ -59,6 +59,9 @@ import:
 	org.bukkit.event.player.PlayerInputEvent
 	com.destroystokyo.paper.event.player.PlayerStopSpectatingEntityEvent
 	io.papermc.paper.datacomponent.item.ResolvableProfile
+	io.papermc.paper.datacomponent.item.ResolvableProfile$SkinPatch as RPSkinPatch
+	org.bukkit.profile.PlayerTextures$SkinModel as RPSkinModel
+	net.kyori.adventure.key.Key
 	net.kyori.adventure.text.Component
 
 # ------------------------------------------------------------------ 설정 값
@@ -168,11 +171,28 @@ function mScSkin(m: object, owner: text):
 		set {_p} to mPlayerOf({_owner})
 		if {_p} is set:
 			set {_rp} to mScProfOf({_p})
+	# 시험용 봇: 봇마다 다른 기본 스킨({-mt::skin::봇} 0~17, mtest.sk 가 정함)
+	if {_rp} is not set:
+		if {-mt::skin::%{_owner}%} is set:
+			set {_rp} to mScDefaultSkin({-mt::skin::%{_owner}%})
 	if {_rp} is set:
 		{_m}.setProfile({_rp})
 	else:
 		{_m}.setProfile(Mannequin.defaultProfile())
 	{_m}.setCustomNameVisible(false)
+
+# 마인크래프트 기본 스킨 18개(0~8 얇은 팔, 9~17 보통 팔; 알렉스, 아리, 에페, 카이, 마케나, 누르, 스티브, 써니, 주리). 클라이언트의 기본 스킨 순서와 같다
+function mScDefaultSkin(k: number) :: object:
+	set {_names::*} to "alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny" and "zuri"
+	set {_i} to mod({_k}, 9) + 1
+	set {_n} to {_names::%{_i}%}
+	set {_kind} to "wide"
+	set {_model} to RPSkinModel.CLASSIC
+	if {_k} < 9:
+		set {_kind} to "slim"
+		set {_model} to RPSkinModel.SLIM
+	set {_sp} to RPSkinPatch.skinPatch().body(Key.key("minecraft:entity/player/%{_kind}%/%{_n}%")).model({_model}).build()
+	return ResolvableProfile.resolvableProfile().skinPatch({_sp}).build()
 
 # 이 엔티티를 viewer 한 사람에게만 보이게 한다
 function mScOnlyFor(e: object, viewer: text):
