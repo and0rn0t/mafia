@@ -719,42 +719,58 @@ function mFxCleanup(vid: text):
 		mFxDoorReset({_vid}, 0)
 	delete {-msc::%{_vid}%::*}
 
-# 바깥 이동 장면(out/arrive/back/home). 걷는 거리 7칸, 방향은 두 집의 문 바깥 자리를 잇는 쪽.
+# 집 h 의 문간(문 블록 가운데)
+function mFxDoorway(h: number) :: location:
+	set {_d} to mFxL({_h}, "door")
+	if {_d} is not set:
+		return mFxL({_h}, "out")
+	set {_x} to {_d}.getBlockX()
+	add 0.5 to {_x}
+	set {_z} to {_d}.getBlockZ()
+	add 0.5 to {_z}
+	return new Location({_d}.getWorld(), {_x}, 65, {_z})
+
+# 집 h 의 문 앞 마당: 문 바깥 한 칸(out)에서 바깥 방향으로 2칸 더(문에서 똑바로 3칸)
+function mFxYard(h: number) :: location:
+	set {_o} to mFxL({_h}, "out")
+	set {_ox} to {mcfg::house::%{_h}%::ox}
+	set {_oz} to {mcfg::house::%{_h}%::oz}
+	if {_ox} is not set:
+		return {_o}
+	set {_dx} to {_ox} * 2
+	set {_dz} to {_oz} * 2
+	return mFxOff({_o}, {_dx}, {_dz})
+
+# 바깥 이동 장면(out/arrive/back/home). 문으로 드나드는 길: 문간 → (문에서 똑바로) 문 앞 마당 → 상대 집 쪽으로 4칸.
+#   나갈 때(out: 자기 집, back: 대상 집): 문이 열리고 문간에서 나와 마당까지 똑바로 걸은 뒤 상대 집 쪽으로 걸어간다.
+#   들어갈 때(arrive: 대상 집, home: 자기 집): 상대 집 쪽에서 걸어와 마당에서 문을 향해 돌고, 문이 열리면 문간으로 들어가 사라진다.
 function mFxTickTravel(vid: text, k: text, t: number):
 	set {_ha} to {-msc::%{_vid}%::ha}
 	set {_ht} to {-msc::%{_vid}%::ht}
-	set {_oa} to mFxL({_ha}, "out")
-	set {_ot} to mFxL({_ht}, "out")
-	set {_dx} to {_ot}.getX() - {_oa}.getX()
-	set {_dz} to {_ot}.getZ() - {_oa}.getZ()
+	set {_h} to {_ht}
+	set {_other} to {_ha}
+	if {_k} is "out" or "home":
+		set {_h} to {_ha}
+		set {_other} to {_ht}
+	set {_door} to mFxDoorway({_h})
+	set {_yard} to mFxYard({_h})
+	# 상대 집 마당 쪽으로 4칸
+	set {_oy} to mFxYard({_other})
+	set {_dx} to {_oy}.getX() - {_yard}.getX()
+	set {_dz} to {_oy}.getZ() - {_yard}.getZ()
 	set {_len} to {_dx} * {_dx}
 	add {_dz} * {_dz} to {_len}
 	set {_len} to sqrt({_len})
 	if {_len} < 0.01:
 		set {_len} to 1
-	set {_dx} to {_dx} / {_len} * 7
-	set {_dz} to {_dz} / {_len} * 7
-	set {_ndx} to 0 - {_dx}
-	set {_ndz} to 0 - {_dz}
-	# 출발 장면(out: 자기 집, back: 대상 집) / 도착 장면(arrive: 대상 집, home: 자기 집)
-	if {_k} is "out":
-		set {_h} to {_ha}
-		set {_from} to {_oa}
-		set {_to} to mFxOff({_oa}, {_dx}, {_dz})
-	else if {_k} is "back":
-		set {_h} to {_ht}
-		set {_from} to {_ot}
-		set {_to} to mFxOff({_ot}, {_ndx}, {_ndz})
-	else if {_k} is "arrive":
-		set {_h} to {_ht}
-		set {_from} to mFxOff({_ot}, {_ndx}, {_ndz})
-		set {_to} to {_ot}
-	else:
-		set {_h} to {_ha}
-		set {_from} to mFxOff({_oa}, {_dx}, {_dz})
-		set {_to} to {_oa}
+	set {_dx} to {_dx} / {_len} * 4
+	set {_dz} to {_dz} / {_len} * 4
+	set {_far} to mFxOff({_yard}, {_dx}, {_dz})
 	set {_a} to {-msc::%{_vid}%::a}
 	if {_t} is 1:
+		set {_from} to {_far}
+		if {_k} is "out" or "back":
+			set {_from} to {_door}
 		set {_m} to mFxDummy({_vid}, {_from}, mFxSkinFor({_vid}, {_a}))
 		set {_it} to mFxItem({-msc::%{_vid}%::item})
 		if {_it} is set:
@@ -764,24 +780,25 @@ function mFxTickTravel(vid: text, k: text, t: number):
 			mFxDoor({_vid}, {_h}, true)
 	set {_vis} to {-msc::%{_vid}%::vis}
 	if {_k} is "out" or "back":
-		if {_t} is 10:
-			mFxDoor({_vid}, {_h}, false)
+		# 3~40틱: 문간 → 마당(앞 절반) → 상대 집 쪽(뒤 절반)
 		if {_t} >= 3:
-			mFxWalk({_vis}, {_from}, {_to}, ({_t} - 3) / 37)
 			if {_t} <= 40:
+				mFxWalk2({_vis}, {_door}, {_yard}, {_far}, ({_t} - 3) / 37)
 				mFxStep({_vid}, {_t}, true)
+		if {_t} is 12:
+			mFxDoor({_vid}, {_h}, false)
 	else:
-		mFxWalk({_vis}, {_from}, {_to}, {_t} / 35)
-		if {_t} <= 35:
+		# 1~36틱: 상대 집 쪽 → 마당(앞 절반) → 문간(뒤 절반), 문은 문 앞에 왔을 때 열린다
+		if {_t} <= 36:
+			mFxWalk2({_vis}, {_far}, {_yard}, {_door}, {_t} / 36)
 			mFxStep({_vid}, {_t}, true)
-		# 도착: 문 앞에서 잠깐 멈칫(문고리 소리)
-		if {_t} is 30:
+		if {_t} is 22:
 			mFxSound({_vid}, "block.wooden_trapdoor.open", 0.5, 1.6)
-		if {_t} is 33:
+		if {_t} is 26:
 			mFxDoor({_vid}, {_h}, true)
-		if {_t} is 40:
+		if {_t} is 38:
 			{_vis}.remove()
-		if {_t} is 46:
+		if {_t} is 44:
 			mFxDoor({_vid}, {_h}, false)
 
 # 1틱마다(t 는 1부터). 대상 집 안 장면의 시간표(u = 수호자 입장을 뺀 시간):

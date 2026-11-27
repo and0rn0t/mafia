@@ -363,24 +363,26 @@ function mStgLineup(w: text):
 		set {_m} to {_l}.getWorld().spawnEntity({_l}, EntityType.MANNEQUIN)
 		mScDummySetup({_m}, loop-value)
 		mScNameTag({_m}, loop-value)
+		# 다음 게임이 시작될 때까지 남겨 둔다(mscene.sk 의 mSceneClear 가 지우지 않음)
+		{_m}.addScoreboardTag("mafia_keep")
 		{_m}.setRotation({_yaw}, 0)
 	# 결과창: 줄 가운데 조금 위(머리 위 이름표보다 위)에 텍스트 디스플레이
 	mStgBoard({_w}, {_win::*}, {_c})
 	# 카메라: 줄 앞(결과창까지 들어오게 조금 멀리), 줄과 결과창 사이 높이를 본다
-	set {_d} to 7 + {_n} * 0.3
+	set {_d} to 4.5 + {_n} * 0.25
 	set {_cx} to {_fx} * {_d}
 	add {_c}.getX() to {_cx}
 	set {_cz} to {_fz} * {_d}
 	add {_c}.getZ() to {_cz}
 	set {_cy} to {_c}.getY()
-	add 2 to {_cy}
+	add 2.2 to {_cy}
 	set {_cw} to {_c}.getWorld()
 	set {_cam} to new Location({_cw}, {_cx}, {_cy}, {_cz})
 	set {_nfx} to 0 - {_fx}
 	set {_nfz} to 0 - {_fz}
 	set {_vx} to {_nfx} * {_d}
 	set {_vz} to {_nfz} * {_d}
-	{_cam}.setDirection(new Vector({_vx}, 0.4, {_vz}))
+	{_cam}.setDirection(new Vector({_vx}, 0.7, {_vz}))
 	loop mStgViewers():
 		mCamCut(loop-value, {_cam})
 
@@ -448,7 +450,7 @@ function mStgBoard(w: text, win: texts, c: location):
 	set {_l} to new Location({_c}.getWorld(), {_c}.getX(), {_y}, {_c}.getZ())
 	set {_e} to {_l}.getWorld().spawnEntity({_l}, EntityType.TEXT_DISPLAY)
 	{_e}.setPersistent(false)
-	{_e}.addScoreboardTag("mafia_tmp")
+	{_e}.addScoreboardTag("mafia_keep")
 	mScTrack({_e})
 	{_e}.text(LegacyComponentSerializer.legacySection().deserialize({_t}))
 	{_e}.setBillboard(StgBillboard.VERTICAL)

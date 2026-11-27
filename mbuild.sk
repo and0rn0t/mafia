@@ -185,18 +185,49 @@ function mBHomeDoor(i: number) :: text:
 		return "0|5|east|-1|0"
 	return "6|1|west|1|0"
 
+# 집(기준 x, z)의 벽에서 문 블록을 찾는다. 찾으면 "문 x|문 z|문 방향|바깥 x|바깥 z"(mBHomeDoor 와 같은 꼴), 없으면 ""
+function mBHomeDoorScan(w: world, x: number, z: number) :: text:
+	loop integers between 0 and 6:
+		set {_rx} to loop-value-1
+		loop integers between 0 and 6:
+			set {_rz} to loop-value-2
+			set {_edge} to false
+			if {_rx} is 0 or 6:
+				set {_edge} to true
+			if {_rz} is 0 or 6:
+				set {_edge} to true
+			if {_edge} is true:
+				set {_bx} to {_x} + {_rx}
+				set {_bz} to {_z} + {_rz}
+				set {_n} to {_w}.getBlockAt({_bx}, 65, {_bz}).getType().name()
+				if {_n} ends with "_DOOR":
+					if {_rz} is 0:
+						return "%{_rx}%|0|south|0|-1"
+					if {_rz} is 6:
+						return "%{_rx}%|6|north|0|1"
+					if {_rx} is 0:
+						return "0|%{_rz}%|east|-1|0"
+					return "6|%{_rz}%|west|1|0"
+	return ""
+
 # 집 i 의 바깥 연출 자리를 저장한다(블록은 건드리지 않음). 키: h<i>door(문 아래 블록), out(문 바깥 한 칸, 바깥을 봄), ext(바깥 카메라, 문을 봄)
 function mBHomeSpots(w: world, i: number):
 	set {_d::*} to split mBHomeDef({_i}) at "|"
 	set {_x} to ({_d::1} parsed as number)
 	set {_z} to ({_d::2} parsed as number)
 	set {_dl::*} to split mBHomeDoor({_i}) at "|"
+	# 실제로 지어진 문 블록을 찾으면 그 자리를 쓴다(코드와 지어진 맵이 달라도 연출이 진짜 문으로 드나들게)
+	set {_scan} to mBHomeDoorScan({_w}, {_x}, {_z})
+	if {_scan} is not "":
+		set {_dl::*} to split {_scan} at "|"
 	set {_rx} to ({_dl::1} parsed as number)
 	set {_rz} to ({_dl::2} parsed as number)
 	set {_ox} to ({_dl::4} parsed as number)
 	set {_oz} to ({_dl::5} parsed as number)
 	if {mcfg::house::%{_i}%::face} is not {_dl::3}:
 		set {mcfg::house::%{_i}%::face} to {_dl::3}
+	set {mcfg::house::%{_i}%::ox} to {_ox}
+	set {mcfg::house::%{_i}%::oz} to {_oz}
 	set {_k} to "h%{_i}%"
 	mBSaveYawR("%{_k}%door", {_w}, {_x}, {_z}, {_rx}, 65, {_rz}, 0)
 	# 문 바깥 한 칸: 문 블록 가운데 + 바깥 방향 1칸
