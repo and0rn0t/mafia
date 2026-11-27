@@ -11,6 +11,7 @@
 # 당한 사람(대상)은 자기 집 안에서 장면만 본다(행동한 사람 장면을 먼저 보고 나서). 자기에게 온 kill/burn 은 첫 번째만 본다.
 # 대상 집 안 장면(spec = "종류|행동한 사람|대상|수호자|결과|소지품", 없는 칸은 "-"):
 #   kill   결과 die: 대상이 해골(앉은 스켈레톤) / guarddie: 대상은 살고 수호자 자리에 스켈레톤 / live(의사): 아무 일 없음 / soldier: 팅! 후 아무 일 없음
+#          자경단이 시민 팀을 죽여 자신도 죽으면(7번째 칸 vig): 결과 뒤 고개를 떨구고 울다가 칼로 자기를 두 번 찌르고 쓰러져 해골(88~142틱), 집으로 돌아가지 않는다.
 #          수호자가 있으면 먼저 방패를 든 수호자 더미가 들어와 대상 옆에 선다.
 #   burn   방화(점화): 부싯돌과 부시, 결과는 위더 스켈레톤이 불타고 방 바닥이 불탄다
 #   oil    기름 뿌리기: 도약의 물약, 마녀 웃음 → 물 뿌리는 소리 → 대상 더미에 노란 발광
@@ -419,6 +420,9 @@ function mFxLen(spec: text) :: number:
 	if {_f::4} is not "-":
 		set {_g} to 40
 	if {_k} is "kill":
+		# 자경단 자책 연출이 붙으면 더 길다
+		if {_f::7} is "vig":
+			return {_g} + 190
 		return {_g} + 150
 	if {_k} is "burn":
 		return 150
@@ -504,6 +508,11 @@ function mSceneResolve() :: number:
 				set {_spec} to "kill|%{_a}%|%{_t}%|%{_g}%|guarddie|%{_item}%"
 			else:
 				set {_spec} to "kill|%{_a}%|%{_t}%|-|die|%{_item}%"
+			# 자경단이 시민 팀을 죽여(수호자가 대신 죽은 경우 포함) 자신도 죽었으면 자책 연출(spec 7번째 칸 vig)
+			if {-m::role::%{_a}%} is "vigilante":
+				if {-m::alive::%{_a}%} is not true:
+					if {-m::team::%{_x}%} is "citizen":
+						set {_spec} to "%{_spec}%|vig"
 		else if {_ty} is "healed" or "blocked":
 			set {_t} to {_x}
 			if {_gof::%{_t}%} is set:
@@ -574,6 +583,9 @@ function mSceneResolve() :: number:
 				if {_mf::5} is "guarddie":
 					if {_mf::4} is {_id}:
 						set {_home} to false
+				# 자책해 죽은 자경단은 집으로 돌아가지 않는다
+				if {_mf::7} is "vig":
+					set {_home} to false
 				mFxTrip({_id}, {_mf::3}, {_m}, {_mf::6}, {_home})
 		else if {-m::actmode::%{_id}%} is "ignite":
 			mFxAddA({_id}, "leave|%{_id}%|%{_id}%|-|leave|-")
@@ -658,6 +670,7 @@ function mFxSetup(vid: text, spec: text):
 	set {-msc::%{_vid}%::g} to {_f::4}
 	set {-msc::%{_vid}%::res} to {_f::5}
 	set {-msc::%{_vid}%::item} to {_f::6}
+	set {-msc::%{_vid}%::vig} to {_f::7}
 	set {-msc::%{_vid}%::len} to mFxLen({_spec})
 	set {_ha} to mScHouse({_f::2})
 	set {_ht} to mScHouse({_f::3})
@@ -736,7 +749,7 @@ function mFxFire(vid: text):
 		add {_l} to {-msc::%{_vid}%::fire::*}
 
 function mFxCleanup(vid: text):
-	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
+	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon", "vskel":
 		set {_e} to {-msc::%{_vid}%::%loop-value%}
 		if {_e} is set:
 			{_e}.remove()
@@ -963,6 +976,9 @@ function mFxTick(vid: text, t: number):
 	# ---- 능력, 퇴장 시각 (소리·동작·파티클·흔들림을 같은 틱에 맞춘다)
 	set {_vic} to {-msc::%{_vid}%::vic}
 	set {_out} to 115
+	# 자책해 죽는 자경단은 나가지 않는다
+	if {-msc::%{_vid}%::vig} is "vig":
+		set {_out} to 9999
 	if {_k} is "kill" or "burn":
 		if {_u} is 40:
 			mFxFace({_vis}, {_room})
@@ -1031,6 +1047,46 @@ function mFxTick(vid: text, t: number):
 					set {_sl} to {_gpos}
 				mFxP({_vid}, "SOUL", {_sl}, 20, 1, 0.3, 0.03)
 				mFxP({_vid}, "SMOKE", {_sl}, 15, 1, 0.3, 0.02)
+		# 자경단 자책(시민 팀을 죽였을 때): 고개를 떨구고 울다가 칼로 자기를 두 번 찌르고 쓰러져 해골이 된다
+		if {-msc::%{_vid}%::vig} is "vig":
+			if {_u} is 88:
+				mFxFace({_vis}, {_mid})
+				set {_vl} to {_vis}.getLocation()
+				{_vis}.setRotation({_vl}.getYaw(), 60)
+				mFxSound({_vid}, "block.note_block.didgeridoo", 0.7, 0.6)
+			if {_u} is 100:
+				mFxSound({_vid}, "entity.villager.no", 0.6, 0.6)
+				mFxPE({_vid}, "FALLING_WATER", {_vis}, 8, 1.7, 0.15, 0)
+			if {_u} is 108:
+				mFxPE({_vid}, "FALLING_WATER", {_vis}, 8, 1.7, 0.15, 0)
+			if {_u} is 114 or 122:
+				mFxSwing({_vis})
+				mFxHurt({_vis})
+				mFxSound({_vid}, "entity.player.attack.strong", 1, 0.9)
+				mFxSound({_vid}, "entity.player.hurt", 1, 0.8)
+				mFxPE({_vid}, "DAMAGE_INDICATOR", {_vis}, 8, 1.2, 0.3, 0.1)
+				mFxPE({_vid}, "CRIT", {_vis}, 12, 1.2, 0.3, 0.2)
+				mCamShake({_vid}, 6, 0.07)
+			if {_u} is 128:
+				mFxBlind({_vid}, 20)
+				mFxSound({_vid}, "entity.player.death", 0.9, 0.9)
+			if {_u} is 136:
+				set {_vl} to {_vis}.getLocation()
+				{_vis}.remove()
+				delete {-msc::%{_vid}%::vis}
+				set {_vk} to {_vl}.getWorld().spawnEntity({_vl}, EntityType.SKELETON)
+				{_vk}.setAI(false)
+				{_vk}.setSilent(true)
+				{_vk}.setInvulnerable(true)
+				{_vk}.setGravity(false)
+				{_vk}.getEquipment().clear()
+				mFxOnly({_vk}, {_vid})
+				set {-msc::%{_vid}%::vskel} to {_vk}
+			if {_u} is 142:
+				mFxSound({_vid}, "block.bell.use", 0.7, 0.4)
+				set {_vsk} to {-msc::%{_vid}%::vskel}
+				mFxPE({_vid}, "SOUL", {_vsk}, 20, 1, 0.3, 0.03)
+				mFxPE({_vid}, "SMOKE", {_vsk}, 12, 1, 0.3, 0.02)
 		# 의사가 살림: 회복 소리와 하트
 		if {_res} is "live":
 			if {_u} is 66:
@@ -1315,14 +1371,14 @@ function mFxWatchSwitch(w: text, od: text, nw: text):
 		stop
 	if {_od} is set:
 		if {_od} is not {_nw}:
-			loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
+			loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon", "vskel":
 				set {_e} to {-msc::%{_od}%::%loop-value%}
 				if {_e} is set:
 					{_p}.hideEntity(mScPlugin(), {_e})
 			mFxRestoreFor({_p}, {_od})
 	if {-msc::%{_nw}%::kind} is not set:
 		stop
-	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
+	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon", "vskel":
 		set {_e} to {-msc::%{_nw}%::%loop-value%}
 		if {_e} is set:
 			{_p}.showEntity(mScPlugin(), {_e})
