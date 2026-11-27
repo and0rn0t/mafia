@@ -308,6 +308,7 @@ on join:
 			set {_p}'s gamemode to adventure
 		mTp({_p}, mLobbyLoc())
 		mLobbyEnsure({_p})
+		mLobbyTick(false)
 	else:
 		if mIsPlayer({_p}) is true:
 			delete {-m::away::%{_id}%}
@@ -367,6 +368,8 @@ on right click:
 	delete {-m::cd}
 	mLobbyEnsure(player)
 	mTabUpdate(player)
+	# 액션바(인원, 준비 상태, 카운트다운)를 다음 초를 기다리지 않고 바로 바꾼다
+	mLobbyTick(false)
 
 # 준비/관전 블록은 버리거나 인벤토리에서 옮길 수 없다
 on drop:
@@ -392,6 +395,10 @@ on inventory click:
 
 # 1초마다: 로비에서 블록 고정, 액션바, 전원 준비 시 자동 시작 카운트다운
 every second:
+	mLobbyTick(true)
+
+# 로비 상태를 모두의 액션바에 보여 준다. step 이 true 면 1초가 지난 것(카운트다운을 줄이고 0이면 시작), false 면 보여 주기만(준비/관전을 바꾼 순간 등)
+function mLobbyTick(step: boolean):
 	if mLobbyActive() is not true:
 		delete {-m::cd}
 		stop
@@ -424,7 +431,7 @@ every second:
 		stop
 	if {-m::cd} is not set:
 		set {-m::cd} to 5
-	else:
+	else if {_step} is true:
 		subtract 1 from {-m::cd}
 	if {-m::cd} <= 0:
 		delete {-m::cd}
@@ -433,7 +440,8 @@ every second:
 	set {_c} to {-m::cd}
 	loop all players:
 		send action bar colored "&b게임 시작까지 %{_c}%초 &8| %mLobbyBar(loop-player)%" to loop-player
-		mSound(loop-player, "block.comparator.click", 1, 1.5)
+		if {_step} is true:
+			mSound(loop-player, "block.comparator.click", 1, 1.5)
 
 command /mstart:
 	permission: minecraft.command.op
