@@ -107,7 +107,7 @@ function mStartNight():
 	add 1 to {-m::day}
 	set {-m::state} to "night"
 	mNightStart()
-	broadcast "&6[마피아] &7%{-m::day}%일차 밤이 시작됩니다. (%{-m::left}%초)"
+	mBc("&7%{-m::day}%일차 밤이 시작됩니다. (%{-m::left}%초)")
 	mSceneNight()
 
 function mStartDay():
@@ -115,7 +115,7 @@ function mStartDay():
 	# 아침 발표(사망자, 기자 특종) 연출 시간만큼 토론 시간을 늘려 둔다(발표가 토론 시간을 잡아먹지 않게)
 	set {-m::left} to mTimeDiscuss() + mStgMorningLen()
 	delete {-m::tadj::*}
-	broadcast "&6[마피아] &7%{-m::day}%일차 낮입니다. 토론하세요. (%{-m::left}%초)"
+	mBc("&7%{-m::day}%일차 낮입니다. 토론하세요. (%{-m::left}%초)")
 	mSceneDay()
 
 # 승패가 났으면 종료 처리하고 true
@@ -138,7 +138,7 @@ every second:
 			subtract 1 from {-m::left}
 			if {-m::left} <= 0:
 				mToLobby()
-				broadcast "&6[마피아] &7게임이 종료되어 로비로 돌아왔습니다."
+				mBc("&7게임이 종료되어 로비로 돌아왔습니다.")
 		stop
 	subtract 1 from {-m::left}
 	if {-m::left} > 0:
@@ -199,12 +199,12 @@ command /mdisc <text>:
 			stop
 		if arg-1 is "up":
 			add 15 to {-m::left}
-			broadcast "&6[마피아] &f%name of player%&7 님이 토론 시간을 15초 늘렸습니다."
+			mBc("&f%name of player%&7 님이 토론 시간을 15초 늘렸습니다.")
 		else if arg-1 is "down":
 			subtract 15 from {-m::left}
 			if {-m::left} < 0:
 				set {-m::left} to 0
-			broadcast "&6[마피아] &f%name of player%&7 님이 토론 시간을 15초 줄였습니다."
+			mBc("&f%name of player%&7 님이 토론 시간을 15초 줄였습니다.")
 		else:
 			send "&7사용법: /mdisc up|down"
 			stop

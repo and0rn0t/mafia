@@ -396,7 +396,7 @@ function mBVerWarn():
 		stop
 	loop all players:
 		if loop-player is op:
-			send "&6[마피아] &e맵 구조가 바뀌었습니다. /mbuild 를 다시 실행해 주세요." to loop-player
+			send "&e맵 구조가 바뀌었습니다. /mbuild 를 다시 실행해 주세요." to loop-player
 
 on join:
 	if player is op:

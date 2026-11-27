@@ -71,10 +71,12 @@ function mContactNotify(id: text, now: boolean):
 		set {_p} to mPlayerOf({_id})
 		if {_p} is set:
 			send {_m1} to {_p}
+		mLogP({_id}, {_m1})
 		loop {_mids::*}:
 			set {_p} to mPlayerOf(loop-value)
 			if {_p} is set:
 				send {_m2} to {_p}
+			mLogP(loop-value, {_m2})
 	else:
 		mAddInfo({_id}, {_m1})
 		loop {_mids::*}:
@@ -92,6 +94,7 @@ function mLooksMafia(id: text) :: boolean:
 function mResolve():
 	delete {-m::ev::*}
 	delete {-m::info::*}
+	delete {-m::inv::*}
 	delete {-m::pub::*}
 	delete {-m::rep::*}
 	delete {-m::dead::*}
@@ -236,11 +239,14 @@ function mResolve():
 		if {_ro} is "police":
 			if mLooksMafia({_t}) is true:
 				mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님은 &c마피아&b입니다.")
+				set {-m::inv::%{_id}%} to "mafia"
 			else:
 				mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님은 &a마피아가 아닙니다.")
+				set {-m::inv::%{_id}%} to "town"
 		else if {_ro} is "spy":
 			set {_rn} to mRoleName({-m::role::%{_t}%})
 			mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님의 직업은 &f%{_rn}%&b입니다.")
+			set {-m::inv::%{_id}%} to "role:%{-m::role::%{_t}%}%"
 		else if {_ro} is "reporter":
 			set {_rn} to mRoleName({-m::role::%{_t}%})
 			add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
@@ -259,10 +265,13 @@ function mResolve():
 			if {_tt} is set:
 				set {_ttn} to mNameOf({_tt})
 				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 &f%{_ttn}%&b 님을 대상으로 능력을 사용했습니다.")
+				set {-m::inv::%loop-value%} to "tgt:%{_tt}%"
 			else if {_ign::%{_t}%} is true:
 				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 대상 없이 능력을 사용했습니다.")
+				set {-m::inv::%loop-value%} to "ign"
 			else:
 				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 아무에게도 능력을 사용하지 않았습니다.")
+				set {-m::inv::%loop-value%} to "none"
 	# ---- 7. 반영
 	loop indices of {_cont::*}:
 		set {-m::contact::%loop-value%} to true
@@ -324,13 +333,14 @@ function mResolveShow():
 	if mSceneOn() is not true:
 		loop {-m::dead::*}:
 			set {_n} to mNameOf(loop-value)
-			broadcast "&6[마피아] &f%{_n}%&7 님이 사망했습니다."
+			mBc("&f%{_n}%&7 님이 사망했습니다.")
 		if size of {-m::dead::*} is 0:
-			broadcast "&6[마피아] &7지난 밤에는 아무도 사망하지 않았습니다."
+			mBc("&7지난 밤에는 아무도 사망하지 않았습니다.")
 		loop {-m::pub::*}:
-			broadcast loop-value
+			mBc(loop-value)
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:
 			loop {-m::info::%loop-value-1%::*}:
 				send loop-value-2 to {_p}
+				mLogP(loop-value-1, loop-value-2)

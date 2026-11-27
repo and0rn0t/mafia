@@ -256,7 +256,7 @@ on inventory click:
 				mStart(player)
 			else:
 				mToLobby()
-				broadcast "&6[마피아] &7관리자가 게임을 종료해 로비로 돌아왔습니다."
+				mBc("&7관리자가 게임을 종료해 로비로 돌아왔습니다.")
 			stop
 		else:
 			stop
@@ -309,7 +309,7 @@ on inventory click:
 				stop
 		if {_s} is 33:
 			close player's inventory
-			send "&6[마피아] &7맵을 새로 지으려면 &f/mbuild &7를 입력하세요. (월드 mafia_map 을 다시 만듭니다)" to player
+			send "&7맵을 새로 지으려면 &f/mbuild &7를 입력하세요. (월드 mafia_map 을 다시 만듭니다)" to player
 			stop
 		if {_s} is 9:
 			mAdmNum("radius", 0.25 * {_sign}, 3.2)

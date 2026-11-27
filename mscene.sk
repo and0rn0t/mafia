@@ -624,11 +624,13 @@ on PlayerMoveEvent:
 function mSceneStart():
 	delete {-ms::on}
 	if mSceneMissing() is not "":
-		broadcast "&6[마피아] &7연출 장소가 정해지지 않아 연출 없이 진행합니다. (&f%mSceneMissing()%&7)"
+		mBc("&7연출 장소가 정해지지 않아 연출 없이 진행합니다. (&f%mSceneMissing()%&7)")
 		stop
 	set {-ms::on} to true
 	# 본체를 서로에게 다시 보내게 해서 생성 패킷이 막히게 한다(mbody.sk, 레이더에 본체 위치가 안 잡히게)
 	mBodyRefresh()
+	# 연출 장소 둘레 청크를 붙잡아 둔다(저장되지 않는 더미가 청크와 같이 지워지지 않게)
+	mScChunks(true)
 	set {-ms::seatn} to size of {-m::players::*}
 	# 스킨을 시작할 때 저장해 둔다(중간에 나가도 같은 가짜 스킨, 진짜 프로필은 쓰지 않음)
 	loop {-m::players::*}:
@@ -765,6 +767,7 @@ function mSceneSpecJoin(p: player):
 # 연출 엔티티를 전부 지우고 관전 대상을 푼다(mToLobby 가 부른다. 게임 모드는 mToLobby 가 되돌린다)
 function mSceneClear():
 	mFxClear()
+	mScChunks(false)
 	set {-ms::force} to true
 	loop all players:
 		set {_p} to loop-player
@@ -1120,4 +1123,88 @@ on load:
 			mFxSelf({_id}, true)
 			mCamMount({_id})
 			mViewAuto({_id})
-	broadcast "&6[마피아] &7스크립트를 다시 불러와 연출을 정리했습니다. 게임은 이어서 진행됩니다."
+	mBc("&7스크립트를 다시 불러와 연출을 정리했습니다. 게임은 이어서 진행됩니다.")
+
+# ------------------------------------------------------------------ 맵 청크 유지와 더미 복구
+# 연출 엔티티는 저장되지 않는 엔티티라, 그 청크가 내려가면(모두가 멀리 있는 동안) 서버가 지워 버린다(시험 때 낮에 더미 일부가 안 보이던 원인으로 보임).
+# 게임 동안 맵의 연출 장소 둘레 청크를 붙잡아 두고(mScChunks), 2초마다 원탁 더미와 집 더미가 사라졌는지 보고 다시 만든다(mScHeal).
+function mScChunks(on: boolean):
+	set {_t} to mLocLoad("table")
+	if {_t} is not set:
+		stop
+	set {_w} to {_t}.getWorld()
+	if {_on} is false:
+		{_w}.removePluginChunkTickets(mScPlugin())
+		stop
+	loop "table", "daycam", "room", "nightcam", "bed", "bedcam", "lineup":
+		add loop-value to {_keys::*}
+	set {_h} to 1
+	while {_h} <= 12:
+		add "h%{_h}%out" to {_keys::*}
+		add "h%{_h}%ext" to {_keys::*}
+		add 1 to {_h}
+	loop {_keys::*}:
+		set {_l} to mLocLoad(loop-value)
+		if {_l} is set:
+			if {_l}.getWorld() is {_w}:
+				set {_cx} to floor({_l}.getX() / 16)
+				set {_cz} to floor({_l}.getZ() / 16)
+				loop -1, 0 and 1:
+					loop -1, 0 and 1:
+						set {_ax} to {_cx} + loop-value-2
+						set {_az} to {_cz} + loop-value-3
+						{_w}.addPluginChunkTicket({_ax}, {_az}, mScPlugin())
+
+function mScHealLog(s: text):
+	Bukkit.getConsoleSender().sendMessage("[mafia] %{_s}%")
+
+function mScHeal():
+	if mSceneOn() is not true:
+		stop
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		set {_i} to {-ms::seat::%{_id}%}
+		if {_i} is set:
+			set {_d} to {-ms::dummy::%{_id}%}
+			set {_bad} to false
+			if {_d} is not set:
+				set {_bad} to true
+			else if {_d}.isValid() is false:
+				set {_bad} to true
+			if {_bad} is true:
+				if {-ms::hold::%{_id}%} is not true:
+					if {-m::alive::%{_id}%} is true:
+						set {-ms::dummy::%{_id}%} to mScSeated(mScSeatLoc({_i}), {_id})
+						{-ms::dummy::%{_id}%}.setCustomNameVisible(false)
+					else:
+						delete {-ms::dummy::%{_id}%}
+						mSceneDead({_id})
+					mScHealLog("원탁 더미 다시 만듦: %mNameOf({_id})%")
+			# 집 안(밤 방) 자기 더미
+			set {_s} to {-ms::self::%{_id}%}
+			set {_bad} to false
+			if {_s} is not set:
+				set {_bad} to true
+			else if {_s}.isValid() is false:
+				set {_bad} to true
+			if {_bad} is true:
+				set {_self} to mScSeated(mLocLoad("room"), {_id})
+				{_self}.setCustomNameVisible(false)
+				set {_seat} to {_self}.getVehicle()
+				if {_seat} is set:
+					mScOnlyFor({_seat}, {_id})
+					set {-ms::selfseat::%{_id}%} to {_seat}
+				mScOnlyFor({_self}, {_id})
+				set {-ms::self::%{_id}%} to {_self}
+				# 살아 있고 밤 장면 중이 아닐 때만 보인다(죽었거나 장면 중이면 숨김)
+				set {_show} to true
+				if {-m::alive::%{_id}%} is not true:
+					set {_show} to false
+				if {-msc::%{_id}%::kind} is set:
+					set {_show} to false
+				if {_show} is false:
+					mFxSelf({_id}, false)
+				mScHealLog("집 더미 다시 만듦: %mNameOf({_id})%")
+
+every 2 seconds:
+	mScHeal()

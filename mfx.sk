@@ -43,6 +43,8 @@ import:
 	org.bukkit.potion.PotionEffectType
 	org.bukkit.potion.PotionType
 	org.bukkit.util.Vector
+	org.bukkit.entity.Display$Billboard as FxBillboard
+	io.papermc.paper.datacomponent.DataComponentTypes
 	com.destroystokyo.paper.profile.ProfileProperty
 	io.papermc.paper.datacomponent.item.ResolvableProfile
 	net.kyori.adventure.text.Component
@@ -364,6 +366,10 @@ function mFxOilGlow():
 
 function mFxClear():
 	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	loop "mafia_inv_red", "mafia_inv_green":
+		set {_it} to {_sb}.getTeam(loop-value)
+		if {_it} is set:
+			{_it}.unregister()
 	set {_tm} to {_sb}.getTeam("mafia_oil")
 	if {_tm} is set:
 		{_tm}.unregister()
@@ -688,7 +694,7 @@ function mFxFire(vid: text):
 		add {_l} to {-msc::%{_vid}%::fire::*}
 
 function mFxCleanup(vid: text):
-	loop "vis", "vic", "vseat", "grd", "skel", "gskel":
+	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
 		set {_e} to {-msc::%{_vid}%::%loop-value%}
 		if {_e} is set:
 			{_e}.remove()
@@ -1036,6 +1042,7 @@ function mFxTick(vid: text, t: number):
 			if {_u} is 62:
 				{_vis}.clearActiveItem()
 				mFxSound({_vid}, "item.spyglass.stop_using", 1, 1)
+				mFxReveal({_vid})
 				mFxSound({_vid}, "block.note_block.bell", 0.8, 1.2)
 				mFxPE({_vid}, "END_ROD", {_vic}, 12, 1.2, 0.4, 0.02)
 		else if {_res} is "spy":
@@ -1046,6 +1053,7 @@ function mFxTick(vid: text, t: number):
 				mFxSound({_vid}, "item.book.page_turn", 1, 1.3)
 			if {_u} is 62:
 				mFxSound({_vid}, "entity.villager.work_cartographer", 1, 1)
+				mFxReveal({_vid})
 				mFxSound({_vid}, "entity.experience_orb.pickup", 0.6, 1.4)
 				mFxPE({_vid}, "ENCHANT", {_vic}, 25, 1.4, 0.4, 0.5)
 		else if {_res} is "doctor":
@@ -1068,6 +1076,7 @@ function mFxTick(vid: text, t: number):
 				mFxSound({_vid}, "item.book.page_turn", 1, 1.1)
 			if {_u} is 62:
 				mFxSound({_vid}, "entity.villager.work_librarian", 1, 1)
+				mFxReveal({_vid})
 				mFxSound({_vid}, "block.enchantment_table.use", 0.6, 1.2)
 				mFxPE({_vid}, "ENCHANT", {_vic}, 30, 1.4, 0.4, 0.5)
 		else if {_res} is "reporter":
@@ -1128,3 +1137,105 @@ function mFxTick(vid: text, t: number):
 		if {_gd} is set:
 			{_gd}.remove()
 		mFxDoor({_vid}, {_h}, false)
+
+# ------------------------------------------------------------------ 조사 결과 연출(경찰·스파이·탐정)
+# 조사한 순간 결과를 보여 준다(글자 자막 없이): 경찰 = 대상이 빨강(마피아)/초록(아님)으로 빛남, 스파이 = 대상 머리 위에 그 직업 물건,
+# 탐정 = 대상 머리 위에 대상이 능력을 쓴 사람의 머리(아무에게도 안 썼으면 방벽, 대상 없이 썼으면 불쏘시개). 결과 문장은 같은 순간 채팅으로 간다.
+
+# 직업을 나타내는 물건(스파이 결과)
+function mFxRoleIcon(role: text) :: object:
+	set {_w} to mFxWeapon({_role})
+	if {_w} is set:
+		return {_w}
+	set {_c} to mFxRoleItem({_role})
+	if {_c} is not "-":
+		return mFxItem({_c})
+	if {_role} is "soldier":
+		return new ItemStack(Material.IRON_CHESTPLATE)
+	if {_role} is "guardian":
+		return new ItemStack(Material.SHIELD)
+	if {_role} is "terrorist":
+		return new ItemStack(Material.TNT)
+	if {_role} is "politician":
+		return new ItemStack(Material.GOLD_INGOT)
+	if {_role} is "madam":
+		return new ItemStack(Material.POPPY)
+	if {_role} is "madman":
+		return new ItemStack(Material.PUFFERFISH)
+	return new ItemStack(Material.BARRIER)
+
+# 대상 머리 위에 떠 있는 물건(보는 사람에게만)
+function mFxIcon(vid: text, it: object):
+	set {_v} to {-msc::%{_vid}%::vic}
+	if {_v} is not set:
+		stop
+	set {_l} to {_v}.getLocation()
+	set {_y} to {_l}.getY()
+	add 2.2 to {_y}
+	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_y}, {_l}.getZ())
+	set {_e} to {_l}.getWorld().spawnEntity({_at}, EntityType.ITEM_DISPLAY)
+	{_e}.setItemStack({_it})
+	{_e}.setBillboard(FxBillboard.CENTER)
+	mFxOnly({_e}, {_vid})
+	set {-msc::%{_vid}%::icon} to {_e}
+
+# 색 발광 팀(경찰 결과)
+function mFxTeamC(name: text, c: object) :: object:
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_tm} to {_sb}.getTeam({_name})
+	if {_tm} is not set:
+		set {_tm} to {_sb}.registerNewTeam({_name})
+		{_tm}.color({_c})
+	return {_tm}
+
+# 본인에게만 가는 결과 문장을 지금 보낸다(아침에는 다시 보내지 않는다)
+function mFxInfoNow(vid: text):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	loop {-m::info::%{_vid}%::*}:
+		send loop-value to {_p}
+		mLogP({_vid}, loop-value)
+	delete {-m::info::%{_vid}%::*}
+
+function mFxReveal(vid: text):
+	set {_r} to {-m::inv::%{_vid}%}
+	if {_r} is not set:
+		stop
+	set {_v} to {-msc::%{_vid}%::vic}
+	if {_r} is "mafia":
+		set {_tm} to mFxTeamC("mafia_inv_red", NamedTextColor.RED)
+		if {_v} is set:
+			{_tm}.addEntity({_v})
+			{_v}.setGlowing(true)
+		mFxSound({_vid}, "entity.elder_guardian.curse", 0.4, 1.4)
+		mFxPE({_vid}, "ANGRY_VILLAGER", {_v}, 6, 1.4, 0.4, 0)
+	else if {_r} is "town":
+		set {_tm} to mFxTeamC("mafia_inv_green", NamedTextColor.GREEN)
+		if {_v} is set:
+			{_tm}.addEntity({_v})
+			{_v}.setGlowing(true)
+		mFxSound({_vid}, "entity.villager.yes", 0.8, 1.2)
+		mFxPE({_vid}, "HAPPY_VILLAGER", {_v}, 12, 1.2, 0.4, 0)
+	else if {_r} starts with "role:":
+		set {_ro} to {_r}
+		replace all "role:" in {_ro} with ""
+		mFxIcon({_vid}, mFxRoleIcon({_ro}))
+		mFxSound({_vid}, "entity.experience_orb.pickup", 0.7, 1.2)
+		mFxPE({_vid}, "END_ROD", {_v}, 10, 2.2, 0.2, 0.02)
+	else if {_r} starts with "tgt:":
+		set {_tt} to {_r}
+		replace all "tgt:" in {_tt} with ""
+		set {_hd} to new ItemStack(Material.PLAYER_HEAD)
+		if {-ms::prof::%{_tt}%} is set:
+			{_hd}.setData(DataComponentTypes.PROFILE, {-ms::prof::%{_tt}%})
+		mFxIcon({_vid}, {_hd})
+		mFxSound({_vid}, "block.note_block.chime", 0.8, 1.4)
+		mFxPE({_vid}, "END_ROD", {_v}, 10, 2.2, 0.2, 0.02)
+	else if {_r} is "ign":
+		mFxIcon({_vid}, new ItemStack(Material.FLINT_AND_STEEL))
+		mFxSound({_vid}, "block.note_block.chime", 0.8, 1.4)
+	else:
+		mFxIcon({_vid}, new ItemStack(Material.BARRIER))
+		mFxSound({_vid}, "block.note_block.bass", 0.8, 0.8)
+	mFxInfoNow({_vid})

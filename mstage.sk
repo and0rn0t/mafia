@@ -6,7 +6,7 @@
 #   길동무 TNT(mStgTnt): 원탁 전체 화면에서 테러리스트 자리에서 길동무 자리로 TNT 가 날아가 터지고(블록 피해 없음, 실제 폭발이 아니라 소리와 파티클) 길동무가 해골이 된 뒤 밤이 된다.
 #   승리 라인업(mStgLineup): 게임이 끝나면 관리자 메뉴에서 정한 위치({mcfg::loc::lineup::...}, mbuild 가 건드리지 않음)에 승리 팀 더미를 일렬로 세우고
 #     모두 그 앞 카메라로 본다(결과창은 나중에 그 뒤에 세울 예정). 위치가 없으면 하지 않는다. 무승부도 하지 않는다.
-#   시작 로딩: mBegin 이 3초 loading 단계를 만들고, 그동안 원탁 전체 화면 + 액션바 노란 "loading..."(이 파일의 every second).
+#   시작 로딩: mBegin 이 5초 loading 단계를 만들고, 그동안 원탁 전체 화면 + 액션바 노란 "loading..."(이 파일의 every second).
 #     끝나면 mStgReveal: 채팅창과 액션바를 비우고 직업 안내(mjoin.sk 의 mRoleReveal, 팀 색), 마피아끼리 알림.
 # 해골 바꾸기 미루기: 컷신이 있는 사망은 mStgHold 로 표시해 두고 mSceneDead 가 바로 해골로 바꾸지 않게 한 뒤, 컷신이 끝날 때 mStgRelease 가 바꾼다.
 # 변수: {-ms::hold::uuid}(해골 미루기) {-ms::stage}(컷신 중: 관전자 A/D 시점 바꾸기를 막음)
@@ -19,6 +19,9 @@ import:
 	org.bukkit.Particle
 	org.bukkit.entity.EntityType
 	org.bukkit.util.Vector
+	org.bukkit.Color
+	org.bukkit.entity.Display$Billboard as StgBillboard
+	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 
 # 카메라가 있는 모든 사람(참가자 + 관전자)
 function mStgViewers() :: texts:
@@ -126,7 +129,7 @@ function mStgMorning():
 		wait 20 ticks
 		if mSceneOn() is not true:
 			stop
-		broadcast "&6[특종] &f%{_rn}%&e 님의 직업은 &f%{_role}%&e입니다."
+		mBc("&6[특종] &f%{_rn}%&e 님의 직업은 &f%{_role}%&e입니다.")
 		loop mStgViewers():
 			set {_p} to mPlayerOf(loop-value-2)
 			if {_p} is set:
@@ -332,8 +335,6 @@ function mStgLineup(w: text):
 		stop
 	set {_win::*} to mStgWinners({_w})
 	set {_n} to size of {_win::*}
-	if {_n} is 0:
-		stop
 	set {_c} to mLocLoad("lineup")
 	set {_yaw} to {_c}.getYaw()
 	# 더미가 보는 방향(앞) f, 오른쪽 r
@@ -359,19 +360,23 @@ function mStgLineup(w: text):
 		mScDummySetup({_m}, loop-value)
 		mScNameTag({_m}, loop-value)
 		{_m}.setRotation({_yaw}, 0)
-	# 카메라: 줄 앞 5칸, 눈높이에서 줄 가운데를 본다
-	set {_d} to 5 + {_n} * 0.3
+	# 결과창: 줄 가운데 조금 위(머리 위 이름표보다 위)에 텍스트 디스플레이
+	mStgBoard({_w}, {_win::*}, {_c})
+	# 카메라: 줄 앞(결과창까지 들어오게 조금 멀리), 줄과 결과창 사이 높이를 본다
+	set {_d} to 7 + {_n} * 0.3
 	set {_cx} to {_fx} * {_d}
 	add {_c}.getX() to {_cx}
 	set {_cz} to {_fz} * {_d}
 	add {_c}.getZ() to {_cz}
 	set {_cy} to {_c}.getY()
-	add 1.6 to {_cy}
+	add 2 to {_cy}
 	set {_cw} to {_c}.getWorld()
 	set {_cam} to new Location({_cw}, {_cx}, {_cy}, {_cz})
 	set {_nfx} to 0 - {_fx}
 	set {_nfz} to 0 - {_fz}
-	{_cam}.setDirection(new Vector({_nfx}, -0.1, {_nfz}))
+	set {_vx} to {_nfx} * {_d}
+	set {_vz} to {_nfz} * {_d}
+	{_cam}.setDirection(new Vector({_vx}, 0.4, {_vz}))
 	loop mStgViewers():
 		mCamCut(loop-value, {_cam})
 
@@ -390,7 +395,7 @@ function mStgReveal():
 		if mIsPlayer({_p}) is true:
 			mRoleReveal({_p})
 		else:
-			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다. &8(A/D: 시점 바꾸기)" to {_p}
+			send "&7게임이 시작되었습니다. 관전 중입니다. &8(A/D: 시점 바꾸기)" to {_p}
 	mMafiaReveal()
 
 every second:
@@ -398,3 +403,50 @@ every second:
 		stop
 	loop all players:
 		send action bar colored "&eloading..." to loop-player
+
+# ------------------------------------------------------------------ 결과창
+
+# 승리 팀 라인업 자리 조금 위에 뜨는 결과창(텍스트 디스플레이, 모두에게). 승리 팀 / 무승부 이유, 참가자마다 번호·이름·직업(바뀌었으면 처음 → 마지막)·생사.
+function mStgBoard(w: text, win: texts, c: location):
+	if {_w} is "draw":
+		set {_why} to {-m::drawwhy}
+		if {_why} is not set:
+			set {_why} to ""
+		set {_t} to "&7&l무승부|&7%{_why}%"
+	else if {_w} is "mafia":
+		set {_t} to "&c&l마피아 팀 승리"
+	else if {_w} is "citizen":
+		set {_t} to "&a&l시민 팀 승리"
+	else:
+		set {_nid} to {_w}
+		replace all "neutral:" in {_nid} with ""
+		set {_t} to "&b&l중립 %mRoleName({-m::role::%{_nid}%})% 승리"
+	set {_t} to "%{_t}%| "
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		set {_o} to {-m::orig::%{_id}%}
+		set {_r} to {-m::role::%{_id}%}
+		set {_rc} to mTeamColor(mRolePool({_o}))
+		set {_rs} to "%{_rc}%%mRoleName({_o})%"
+		if {_r} is not {_o}:
+			set {_rs} to "%{_rs}% &7→ %mTeamColor(mRolePool({_r}))%%mRoleName({_r})%"
+		set {_nc} to "&f"
+		if {_win::*} contains {_id}:
+			set {_nc} to "&e"
+		set {_st} to ""
+		if {-m::alive::%{_id}%} is not true:
+			set {_st} to " &8(사망)"
+		set {_t} to "%{_t}%|&6%{-m::num::%{_id}%}% %{_nc}%%mNameOf({_id})% &7- %{_rs}%%{_st}%"
+	replace all "|" in {_t} with nl
+	replace all "&" in {_t} with "§"
+	set {_y} to {_c}.getY()
+	add 2.6 to {_y}
+	set {_l} to new Location({_c}.getWorld(), {_c}.getX(), {_y}, {_c}.getZ())
+	set {_e} to {_l}.getWorld().spawnEntity({_l}, EntityType.TEXT_DISPLAY)
+	{_e}.setPersistent(false)
+	{_e}.addScoreboardTag("mafia_tmp")
+	mScTrack({_e})
+	{_e}.text(LegacyComponentSerializer.legacySection().deserialize({_t}))
+	{_e}.setBillboard(StgBillboard.VERTICAL)
+	{_e}.setLineWidth(400)
+	{_e}.setBackgroundColor(Color.fromARGB(150, 0, 0, 0))

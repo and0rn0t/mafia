@@ -63,7 +63,9 @@ function mGuideBook() :: object:
 		set {_r} to loop-value
 		set {_po} to mRolePool({_r})
 		set {_c} to mTeamColor({_po})
-		set {_line} to "&l%{_c}%%mRoleName({_r})%&r||&8%mPoolName({_po})%|%mTimingName(mRoleTiming({_r}))%||&0%mRoleDesc({_r})%"
+		set {_line} to "&l%{_c}%%mRoleName({_r})%&r||&8%mPoolName({_po})%|%mTimingName(mRoleTiming({_r}))%|&0"
+		loop mRoleDescLines({_r}):
+			set {_line} to "%{_line}%|%loop-value-2%"
 		{_pg}.add(mGuideText({_line}))
 	{_m}.setPages({_pg})
 	{_it}.setItemMeta({_m})
@@ -95,8 +97,9 @@ function mMyRole(p: player):
 			set {_r} to {-m::fake::%{_id}%}
 	set {_po} to mRolePool({_r})
 	set {_c} to mTeamColor({_po})
-	send "&6[마피아] &7내 직업: %{_c}%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)" to {_p}
-	send "&7%mRoleDesc({_r})%" to {_p}
+	send "&7내 직업: %{_c}%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)" to {_p}
+	loop mRoleDescLines({_r}):
+		send "&7 %loop-value%" to {_p}
 	if {-m::alive::%{_id}%} is not true:
 		send "&8(사망)" to {_p}
 	if {-m::team::%{_id}%} is "mafia":
@@ -125,7 +128,7 @@ command /mhelp [<text>] [<text>]:
 			stop
 		if arg-1 is "직업" or "role":
 			if arg-2 is not set:
-				send "&6[마피아] &7직업 목록 &8(/mhelp 직업 <이름>)"
+				send "&7직업 목록 &8(/mhelp 직업 <이름>)"
 				loop "mafia", "support", "citizen", "neutral":
 					set {_po} to loop-value
 					delete {_ns::*}
@@ -139,10 +142,11 @@ command /mhelp [<text>] [<text>]:
 				send "&c그런 직업이 없습니다. /mhelp 직업 으로 목록을 보세요."
 				stop
 			set {_po} to mRolePool({_r})
-			send "&6[마피아] %mTeamColor({_po})%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)"
-			send "&7%mRoleDesc({_r})%"
+			send "%mTeamColor({_po})%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)"
+			loop mRoleDescLines({_r}):
+				send "&7 %loop-value%"
 			stop
-		send "&6&l[마피아 도움말]"
+		send "&6&l마피아 도움말"
 		send "&e조작 &7(게임 중에는 화면이 고정되고 이동 키로 조작합니다)"
 		send "&f W &7대상 고르기 화면 열기 (밤 능력, 낮 투표)"
 		send "&f A / D &7대상 바꾸기 &8| &7사망·관전 중에는 볼 사람 바꾸기"
@@ -151,6 +155,7 @@ command /mhelp [<text>] [<text>]:
 		send "&e더 보기"
 		send "&f /mhelp 책 &7안내서(규칙, 팀과 승리, 직업 설명) 열기"
 		send "&f /mhelp 직업 [이름] &7직업 목록 / 설명  &f/mhelp 내직업 &7게임 중 내 직업"
+		send "&f /mlog [쪽] &7이번 게임 메시지 기록 (/기록)"
 		send "&f /mvote <닉네임> &7투표  &f/mtake <닉네임> &7길동무  &f/mdisc up|down &7토론 시간"
 		if sender is a player:
 			if player is not op:

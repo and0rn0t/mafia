@@ -82,6 +82,19 @@ function mRoleTiming(id: text) :: text:
 function mRoleDesc(id: text) :: text:
 	return mRoleField({_id}, 4)
 
+# 설명을 문장마다 한 줄씩(채팅·안내서에서 읽기 쉽게)
+function mRoleDescLines(id: text) :: texts:
+	set {_p::*} to split mRoleDesc({_id}) at ". "
+	set {_n} to size of {_p::*}
+	set {_i} to 0
+	loop {_p::*}:
+		add 1 to {_i}
+		set {_s} to loop-value
+		if {_i} < {_n}:
+			set {_s} to "%{_s}%."
+		add {_s} to {_o::*}
+	return {_o::*}
+
 # 끌 수 없는 확정 직업(마피아, 경찰, 의사)
 function mRoleLocked(id: text) :: boolean:
 	if {_id} is "mafia":
@@ -259,7 +272,7 @@ command /mrole [<text>] [<text>]:
 			set {_r::*} to mDraw({_n})
 			loop {_r::*}:
 				add mRoleName(loop-value) to {_nm::*}
-			send "&6[마피아] &f%{_nm::*}%"
+			send "&f%{_nm::*}%"
 			stop
 		if mRoleExists({_a}) is false:
 			send "&c그런 직업 id 가 없습니다. /mrole list 로 확인해 주세요."

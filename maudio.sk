@@ -1,0 +1,119 @@
+# ==============================================================================
+# [maudio.sk] 단계별 배경음(리소스팩 mafia-pack.zip, tools/BuildPack.java 로 만든다). 구조는 DESIGN.md.
+# 단계 → 소리: 밤(밤 입력·밤 처리) = night(귀뚜라미) / 낮 = day1~ 중 무작위 하나(그 낮 동안 반복) / 투표 = vote / 그 밖(로딩, 처형, 종료, 로비) = 없음.
+# 단계가 바뀌면 이전 단계 소리를 모두에게서 멈추고 새 소리를 처음부터 튼다. 곡이 끝나면(길이는 maudio_data.sk) 다시 튼다. 중간에 들어온 사람도 다음 초에 듣는다.
+# 크기: 배경음 수준. 낮·투표 {mcfg::bgmvol}(기본 0.3, "주크박스/소리 블록" 소리 종류), 밤 귀뚜라미 {mcfg::ambvol}(기본 0.5, "주변 환경" 소리 종류).
+# 리소스팩: 접속할 때 보낸다(필수 아님). 주소 = 저장소의 mafia-pack.zip(raw), 확인값 = maudio_data.sk 의 mAuSha1(). 소리 키가 하나도 없으면 아무것도 하지 않는다.
+# 변수: {-mau::phase}(지금 단계 소리 종류) {-mau::trk}(지금 곡 키) {-mau::sec}(초 세기) {-mau::p::uuid}(그 사람이 지금 곡을 튼 초)
+# 미검증: Player#setResourcePack(String, byte[], String, boolean), HexFormat, 리소스팩 소리 재생/멈춤.
+# ==============================================================================
+
+import:
+	org.bukkit.SoundCategory
+	java.util.HexFormat
+
+function mAuUrl() :: text:
+	if {mcfg::packurl} is set:
+		return {mcfg::packurl}
+	return "https://raw.githubusercontent.com/and0rn0t/mafia/main/mafia-pack.zip"
+
+function mAuVol() :: number:
+	if {mcfg::bgmvol} is set:
+		return {mcfg::bgmvol}
+	return 0.3
+
+function mAuAmbVol() :: number:
+	if {mcfg::ambvol} is set:
+		return {mcfg::ambvol}
+	return 0.5
+
+function mAuHas(k: text) :: boolean:
+	if mAuKeys() contains {_k}:
+		return true
+	return false
+
+# 지금 단계에 맞는 소리 종류("" = 없음)
+function mAuWant() :: text:
+	set {_s} to mState()
+	if {_s} is "night" or "resolve":
+		return "night"
+	if {_s} is "day":
+		return "day"
+	if {_s} is "vote":
+		return "vote"
+	return ""
+
+function mAuCat(k: text) :: object:
+	if {_k} is "night":
+		return SoundCategory.AMBIENT
+	return SoundCategory.RECORDS
+
+function mAuStop(p: player):
+	loop mAuKeys():
+		{_p}.stopSound("mafia:bgm.%loop-value%", mAuCat(loop-value))
+
+function mAuStopAll():
+	loop all players:
+		mAuStop(loop-player)
+	delete {-mau::p::*}
+
+function mAuPlay(p: player, k: text):
+	set {_v} to mAuVol()
+	if {_k} is "night":
+		set {_v} to mAuAmbVol()
+	# 소리를 사람에게 붙여 튼다(카메라 컷으로 몸이 순간이동해도 따라온다)
+	{_p}.playSound({_p}, "mafia:bgm.%{_k}%", mAuCat({_k}), {_v}, 1)
+
+every second:
+	if size of mAuKeys() is 0:
+		stop
+	add 1 to {-mau::sec}
+	set {_w} to mAuWant()
+	if {-mau::phase} is not {_w}:
+		mAuStopAll()
+		set {-mau::phase} to {_w}
+		delete {-mau::trk}
+		if {_w} is "day":
+			loop mAuKeys():
+				if loop-value starts with "day":
+					add loop-value to {_days::*}
+			if size of {_days::*} > 0:
+				set {-mau::trk} to random element of {_days::*}
+		else if {_w} is not "":
+			if mAuHas({_w}) is true:
+				set {-mau::trk} to {_w}
+	set {_k} to {-mau::trk}
+	if {_k} is not set:
+		stop
+	set {_len} to mAuLen({_k})
+	loop all players:
+		set {_id} to "%uuid of loop-player%"
+		set {_at} to {-mau::p::%{_id}%}
+		set {_go} to false
+		if {_at} is not set:
+			set {_go} to true
+		else if {-mau::sec} - {_at} >= {_len}:
+			set {_go} to true
+		if {_go} is true:
+			mAuPlay(loop-player, {_k})
+			set {-mau::p::%{_id}%} to {-mau::sec}
+
+on quit:
+	delete {-mau::p::%uuid of player%}
+
+# 접속할 때 리소스팩 보내기(소리가 있을 때만, 받지 않아도 게임은 된다)
+on join:
+	if size of mAuKeys() is 0:
+		stop
+	set {_h} to mAuSha1()
+	if {_h} is "":
+		stop
+	wait 1 second
+	if player is not online:
+		stop
+	player.setResourcePack(mAuUrl(), HexFormat.of().parseHex({_h}), "마피아 게임 배경음 리소스팩입니다.", false)
+
+# 스크립트를 다시 불러오면 소리를 처음부터 다시 맞춘다
+on load:
+	delete {-mau::phase}
+	delete {-mau::p::*}

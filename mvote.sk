@@ -19,7 +19,7 @@ function mVoteStart():
 	delete {-m::votes::*}
 	set {-m::state} to "vote"
 	set {-m::left} to mTimeVote()
-	broadcast "&6[마피아] &7투표 시간입니다. 핫바의 대상 고르기(또는 /mvote <닉네임>)로 투표하세요. (%{-m::left}%초)"
+	mBc("&7투표 시간입니다. 핫바의 대상 고르기(또는 /mvote <닉네임>)로 투표하세요. (%{-m::left}%초)")
 	mSceneVote()
 
 function mVoteCast(v: text, t: text) :: text:
@@ -42,7 +42,7 @@ function mVoteCast(v: text, t: text) :: text:
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:
-			send "&6[마피아] &f%{_n}%&7 님 &e%{_c}%표" to {_p}
+			send "&f%{_n}%&7 님 &e%{_c}%표" to {_p}
 	return ""
 
 function mTally():
@@ -66,27 +66,27 @@ function mTally():
 		if {_v} is set:
 			if {_v} > 0:
 				set {_nm} to mNameOf(loop-value)
-				broadcast "&6[마피아] &f%{_nm}%&7 님 &e%{_v}%표"
+				mBc("&f%{_nm}%&7 님 &e%{_v}%표")
 			if {_v} > {_max}:
 				set {_max} to {_v}
 	if {_max} is 0:
-		broadcast "&6[마피아] &7투표한 사람이 없어 처형은 없습니다."
+		mBc("&7투표한 사람이 없어 처형은 없습니다.")
 		stop
 	loop {-m::players::*}:
 		if {-m::votes::%loop-value%} is {_max}:
 			add loop-value to {_top::*}
 	if size of {_top::*} > 1:
-		broadcast "&6[마피아] &7최다 득표자가 여럿이라 처형은 없습니다."
+		mBc("&7최다 득표자가 여럿이라 처형은 없습니다.")
 		stop
 	set {_x} to {_top::1}
 	set {_xn} to mNameOf({_x})
 	if {-m::role::%{_x}%} is "politician":
-		broadcast "&6[마피아] &f%{_xn}%&7 님이 최다 득표했지만 처형되지 않았습니다."
+		mBc("&f%{_xn}%&7 님이 최다 득표했지만 처형되지 않았습니다.")
 		stop
 	# 연출이 있으면 화형 컷신이 끝날 때 해골로 바꾼다(mstage.sk). 처형 단계(execute)에서 컷신 시간만큼 기다린다.
 	mStgHold({_x})
 	mDie({_x})
-	broadcast "&6[마피아] &f%{_xn}%&7 님이 투표로 처형되었습니다."
+	mBc("&f%{_xn}%&7 님이 투표로 처형되었습니다.")
 	set {-m::state} to "execute"
 	set {-m::left} to mStgBurnLen()
 	if {-m::role::%{_x}%} is "terrorist":
@@ -110,7 +110,7 @@ function mTakePick(t: text, v: text) :: text:
 	mStgHold({_v})
 	mDie({_v})
 	set {_n} to mNameOf({_v})
-	broadcast "&6[마피아] &f%{_n}%&7 님이 테러리스트의 길동무가 되어 사망했습니다."
+	mBc("&f%{_n}%&7 님이 테러리스트의 길동무가 되어 사망했습니다.")
 	delete {-m::exe}
 	# TNT 컷신(연출이 있으면 그동안 처형 단계를 유지한다)
 	if mSceneOn() is true:
@@ -234,22 +234,22 @@ function mEnd(w: text):
 		set {_why} to {-m::drawwhy}
 		if {_why} is not set:
 			set {_why} to "무승부입니다."
-		broadcast "&6[마피아] &7%{_why}%"
+		mBc("&7%{_why}%")
 	else if {_w} is "mafia":
-		broadcast "&6[마피아] &c마피아 팀&7이 승리했습니다."
+		mBc("&c마피아 팀&7이 승리했습니다.")
 	else if {_w} is "citizen":
-		broadcast "&6[마피아] &a시민 팀&7이 승리했습니다."
+		mBc("&a시민 팀&7이 승리했습니다.")
 	else:
 		set {_id} to {_w}
 		replace all "neutral:" in {_id} with ""
 		set {_n} to mNameOf({_id})
 		set {_rn} to mRoleName({-m::role::%{_id}%})
-		broadcast "&6[마피아] &e중립 %{_rn}% &f%{_n}%&7 님이 승리했습니다."
-	broadcast "&6[마피아] &7최초 직업 공개"
+		mBc("&e중립 %{_rn}% &f%{_n}%&7 님이 승리했습니다.")
+	mBc("&7최초 직업 공개")
 	loop {-m::players::*}:
 		set {_n} to mNameOf(loop-value)
 		set {_rn} to mRoleName({-m::orig::%loop-value%})
-		broadcast "&7- &f%{_n}% &7: &e%{_rn}%"
+		mBc("&7- &f%{_n}% &7: &e%{_rn}%")
 
 command /mvote <text>:
 	description: 투표 (마피아 게임)

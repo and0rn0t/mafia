@@ -124,11 +124,28 @@ function mTabColor(p: player) :: text:
 		return "#ffffff"
 	return "#555555"
 
+# 탭 이름과 채팅 이름: 게임 중 참가자는 앞에 번호를 붙인다(예: "3 닉네임"). 로비에서는 번호 없음.
 function mTabUpdate(p: player):
 	set {_nm} to name of {_p}
 	set {_c} to mTabColor({_p})
-	set {_json} to "{""text"":""%{_nm}%"",""color"":""%{_c}%""}"
+	set {_no} to mNum("%uuid of {_p}%")
+	if {_no} is "":
+		set {_json} to "{""text"":""%{_nm}%"",""color"":""%{_c}%""}"
+		{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
+		{_p}.displayName(null)
+		stop
+	set {_json} to "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%"",""color"":""%{_c}%""}]"
 	{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
+	set {_dj} to "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%""}]"
+	{_p}.displayName(GsonComponentSerializer.gson().deserialize({_dj}))
+
+# 게임 중 플레이어 번호(참가자가 아니거나 로비면 "")
+function mNum(id: text) :: text:
+	if mState() is "lobby":
+		return ""
+	if {-m::num::%{_id}%} is not set:
+		return ""
+	return "%{-m::num::%{_id}%}%"
 
 function mTabUpdateAll():
 	loop all players:
@@ -180,8 +197,10 @@ function mRoleReveal(p: player):
 	set {_pool} to mRolePool({_shown})
 	set {_c} to mTeamColor({_pool})
 	send title "&e당신의 직업" with subtitle "%{_c}%%{_nm}%" to {_p} for 4 seconds with fadein 5 ticks and fade out 10 ticks
-	send "&6[마피아] &7당신의 직업은 %{_c}%%{_nm}%&7입니다." to {_p}
-	send "&7%{_ds}%" to {_p}
+	send "&7당신의 직업은 %{_c}%%{_nm}%&7입니다." to {_p}
+	mLogP({_id}, "&7당신의 직업은 %{_c}%%{_nm}%&7입니다.")
+	loop mRoleDescLines({_shown}):
+		send "&7 %loop-value%" to {_p}
 	if {_pool} is "support":
 		send "&7마피아와 접선하기 전에는 어느 팀도 아니지만, 승패는 마피아 팀을 따릅니다." to {_p}
 	else if {_pool} is "mafia":
@@ -234,8 +253,12 @@ function mStart(by: object) :: boolean:
 	if mAssign() is not true:
 		delete {-m::players::*}
 		return false
+	set {_no} to 0
 	loop {-m::players::*}:
 		set {-m::alive::%loop-value%} to true
+		# 플레이어 번호(1부터, 탭 목록과 채팅에 표시)
+		add 1 to {_no}
+		set {-m::num::%loop-value%} to {_no}
 		# 표시 이름을 시작할 때 저장(나간 사람도 닉네임 그대로)
 		set {_np} to mPlayerOf(loop-value)
 		if {_np} is set:
@@ -253,8 +276,8 @@ function mStart(by: object) :: boolean:
 		else:
 			set {_p}'s gamemode to spectator
 			mTp({_p}, {_gl})
-			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다." to {_p}
-	# 직업 안내(mRoleReveal, mMafiaReveal)는 3초 로딩 뒤 mstage.sk 의 mStgReveal 이 한다
+			send "&7게임이 시작되었습니다. 관전 중입니다." to {_p}
+	# 직업 안내(mRoleReveal, mMafiaReveal)는 5초 로딩 뒤 mstage.sk 의 mStgReveal 이 한다
 	mSceneStart()
 	mBegin()
 	mTabUpdateAll()
@@ -281,11 +304,11 @@ on join:
 	else:
 		if mIsPlayer({_p}) is true:
 			delete {-m::away::%{_id}%}
-			send "&6[마피아] &7게임에 다시 참여했습니다." to {_p}
+			send "&7게임에 다시 참여했습니다." to {_p}
 			mSceneRejoin({_p})
 		else:
 			set {_p}'s gamemode to spectator
-			send "&6[마피아] &7게임이 진행 중이라 관전자로 들어왔습니다." to {_p}
+			send "&7게임이 진행 중이라 관전자로 들어왔습니다." to {_p}
 			mSceneSpecJoin({_p})
 	mTabUpdateAll()
 
@@ -431,4 +454,4 @@ command /mstop:
 				send "&c관리자만 사용할 수 있습니다."
 				stop
 		mToLobby()
-		broadcast "&6[마피아] &7게임이 종료되어 로비로 돌아왔습니다."
+		mBc("&7게임이 종료되어 로비로 돌아왔습니다.")

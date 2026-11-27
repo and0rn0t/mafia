@@ -208,7 +208,7 @@ command /mtime [<text>] [<number>]:
 			set {_d} to mTimeDiscussPer()
 			set {_v} to mTimeVote()
 			set {_n} to mTimeNight()
-			send "&6[마피아] &7낮 토론 &f생존자 1명당 %{_d}%초 &7/ 투표 &f%{_v}%초 &7/ 밤 능력 선택 &f%{_n}%초"
+			send "&7낮 토론 &f생존자 1명당 %{_d}%초 &7/ 투표 &f%{_v}%초 &7/ 밤 능력 선택 &f%{_n}%초"
 			send "&7사용법: /mtime discuss|vote|night <초>"
 			stop
 		if arg-2 is not set:
@@ -238,9 +238,10 @@ function mBegin():
 	delete {-mfb::prev::*}
 	set {-mfb::prev::*} to {-mfb::cur::*}
 	delete {-mfb::cur::*}
-	# 3초 로딩(원탁 화면 + 액션바 loading...) 뒤 mday.sk 의 진행 루프가 직업 안내(mStgReveal)를 하고 첫 밤을 시작한다
+	# 5초 로딩(원탁 화면 + 액션바 loading...) 뒤 mday.sk 의 진행 루프가 직업 안내(mStgReveal)를 하고 첫 밤을 시작한다
+	delete {-m::log::*}
 	set {-m::state} to "loading"
-	set {-m::left} to 3
+	set {-m::left} to 5
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).
 function mReset():
@@ -249,6 +250,7 @@ function mReset():
 	delete {-m::left}
 	delete {-m::players::*}
 	delete {-m::nm::*}
+	delete {-m::num::*}
 	delete {-m::calm}
 	delete {-m::diedsince}
 	delete {-m::drawwhy}
@@ -280,3 +282,70 @@ function mReset():
 	delete {-m::ready::*}
 	delete {-m::cd}
 	delete {-mt::*}
+
+# ------------------------------------------------------------------ 게임 메시지 기록(/mlog)
+# 게임 중 전체 알림(mBc)과 본인에게만 간 메시지(mLogP: 직업 안내, 조사 결과, 접선)를 순서대로 남긴다. 다음 게임이 시작될 때 지운다.
+# 항목: "받는 사람|단계 표시|문장" (받는 사람 * = 모두)
+function mLogTag() :: text:
+	set {_s} to mState()
+	set {_d} to {-m::day}
+	if {_s} is "night" or "resolve":
+		return "&8[%{_d}%일차 밤]"
+	if {_s} is "day":
+		return "&8[%{_d}%일차 낮]"
+	if {_s} is "vote" or "execute":
+		return "&8[%{_d}%일차 투표]"
+	if {_s} is "end":
+		return "&8[종료]"
+	return "&8[시작]"
+
+function mLogAdd(who: text, t: text):
+	add "%{_who}%|%mLogTag()%|%{_t}%" to {-m::log::*}
+
+# 전체 알림 + 기록
+function mBc(t: text):
+	broadcast colored {_t}
+	if mState() is not "lobby":
+		mLogAdd("*", {_t})
+
+# 본인에게만 간 메시지 기록(보내기는 부르는 쪽이 한다)
+function mLogP(id: text, t: text):
+	mLogAdd({_id}, {_t})
+
+command /mlog [<number>]:
+	aliases: /기록
+	description: 이번 게임 메시지 기록 보기 (/mlog 2 = 그 전 쪽)
+	executable by: players
+	trigger:
+		set {_id} to "%uuid of player%"
+		loop {-m::log::*}:
+			set {_e::*} to split loop-value at "|"
+			if {_e::1} is "*" or {_id}:
+				set {_line} to loop-value
+				replace first "%{_e::1}%|" in {_line} with ""
+				add {_line} to {_mine::*}
+		set {_n} to size of {_mine::*}
+		if {_n} is 0:
+			send "&7아직 기록이 없습니다."
+			stop
+		set {_pg} to arg-1
+		if {_pg} is not set:
+			set {_pg} to 1
+		set {_per} to 12
+		set {_last} to {_n} - ({_pg} - 1) * {_per}
+		if {_last} < 1:
+			send "&7더 이전 기록은 없습니다."
+			stop
+		set {_first} to {_last} - {_per} + 1
+		if {_first} < 1:
+			set {_first} to 1
+		set {_pages} to ceil({_n} / {_per})
+		send "&6&l게임 기록 &7(%{_pg}%/%{_pages}%쪽, 최근 것이 아래)"
+		set {_i} to {_first}
+		while {_i} <= {_last}:
+			set {_l} to {_mine::%{_i}%}
+			replace first "|" in {_l} with " "
+			send colored {_l}
+			add 1 to {_i}
+		if {_first} > 1:
+			send "&8/mlog %{_pg} + 1% 로 그 전 기록"
