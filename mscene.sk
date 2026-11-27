@@ -213,13 +213,7 @@ function mSceneDead(id: text):
 		{_v}.setPersistent(false)
 		mScTrack({_v})
 	# 방화(점화)로 죽었으면 위더 스켈레톤(그 밤의 사건 목록에 burn|방화범|이 사람 이 있으면)
-	set {_type} to EntityType.SKELETON
-	loop {-m::ev::*}:
-		set {_e::*} to split loop-value at "|"
-		if {_e::1} is "burn":
-			if {_e::3} is {_id}:
-				set {_type} to EntityType.WITHER_SKELETON
-	set {_sk} to {_l}.getWorld().spawnEntity({_l}, {_type})
+	set {_sk} to {_l}.getWorld().spawnEntity({_l}, mDeadType({_id}))
 	{_sk}.setPersistent(false)
 	{_sk}.setAI(false)
 	{_sk}.setSilent(true)
@@ -230,6 +224,12 @@ function mSceneDead(id: text):
 	{_sk}.setRotation({_l}.getYaw(), 0)
 	mScTrack({_sk})
 	set {-ms::dummy::%{_id}%} to {_sk}
+	# 밤에 이 사람 집을 보던 관전자에게는 집 안 더미도 해골로 바꿔 보여 준다
+	if mState() is "night" or "resolve":
+		loop mWatchers():
+			if {-ms::watch::%loop-value%} is {_id}:
+				if {-ms::pick::%loop-value%} is not set:
+					mViewAuto(loop-value)
 
 # ------------------------------------------------------------------ 카메라(관전 잠금, 순간이동 컷)
 
@@ -256,6 +256,8 @@ function mCamTo(id: text, key: text):
 # 서버는 붙어 있다고 여기는데 화면은 예전 자리에 멈춘다(첫 시험에서 확인: 침대 화면에 고정됨).
 # 그래서 멀리 옮길 때는 관전을 풀고 플레이어를 같은 자리/방향으로 순간이동시킨 뒤, 카메라가 다시 전송되면(getTrackedBy) mCamKeep 이 다시 건다.
 function mCamCut(id: text, l: location):
+	delete {-ms::shk::%{_id}%}
+	delete {-ms::shkb::%{_id}%}
 	set {_cam} to {-ms::cam::%{_id}%}
 	if {_cam} is not set:
 		stop
@@ -321,14 +323,23 @@ function mCamSeatOf(id: text, owner: text) :: boolean:
 	mCamPlace({_id}, {_px}, {_py}, {_pz}, {_t}.getX(), {_t}.getY() + 0.3, {_t}.getZ())
 	return true
 
-# 사망자와 관전자는 A/D 로 다른 참가자 자리의 어깨너머 시점을 돌려 본다(확정). 살아 있는 참가자는 자기 자리.
+# 사망자와 관전자는 A/D 로 살아 있는 참가자만 돌려 본다(확정). 낮에는 그 사람 자리의 어깨너머, 밤에는 그 사람 집 안(밤 방).
+# 보던 사람이 죽으면: 밤 처리(resolve) 동안은 그 집에 해골(사인에 따라 스켈레톤/위더 스켈레톤)을 보여 주고, 그 뒤에는 다음 생존자로 넘어간다.
 function mWatchOf(id: text) :: text:
 	if {-m::alive::%{_id}%} is true:
 		return {_id}
-	if {-ms::watch::%{_id}%} is set:
-		return {-ms::watch::%{_id}%}
-	if {-m::players::*} contains {_id}:
-		return {_id}
+	set {_w} to {-ms::watch::%{_id}%}
+	if {_w} is set:
+		if {-m::alive::%{_w}%} is true:
+			return {_w}
+		if mState() is "resolve":
+			return {_w}
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			set {-ms::watch::%{_id}%} to loop-value
+			return loop-value
+	if {_w} is set:
+		return {_w}
 	return {-m::players::1}
 
 # 사망자/관전자인지(카메라가 있고, 살아 있는 참가자가 아님)
@@ -339,32 +350,121 @@ function mIsWatcher(id: text) :: boolean:
 		return false
 	return true
 
+# 카메라가 있는 사망자·관전자 전원
+function mWatchers() :: texts:
+	loop {-m::players::*}:
+		if mIsWatcher(loop-value) is true:
+			add loop-value to {_l::*}
+	loop {-ms::spec::*}:
+		add loop-value to {_l::*}
+	return {_l::*}
+
 function mWatchMove(id: text, d: number):
 	set {_cur} to mWatchOf({_id})
-	set {_n} to size of {-m::players::*}
+	set {_n} to 0
 	set {_i} to 1
 	loop {-m::players::*}:
-		if loop-value is {_cur}:
-			set {_i} to loop-index parsed as number
+		if {-m::alive::%loop-value%} is true:
+			add 1 to {_n}
+			set {_live::%{_n}%} to loop-value
+			if loop-value is {_cur}:
+				set {_i} to {_n}
+	if {_n} is 0:
+		stop
 	set {_i} to {_i} + {_d}
 	if {_i} < 1:
 		set {_i} to {_n}
 	if {_i} > {_n}:
 		set {_i} to 1
-	set {-ms::watch::%{_id}%} to {-m::players::%{_i}%}
+	set {-ms::watch::%{_id}%} to {_live::%{_i}%}
 	mViewAuto({_id})
 	set {_p} to mPlayerOf({_id})
 	if {_p} is set:
 		mSound({_p}, "ui.button.click", 0.4, 1.6)
+		send action bar colored "&7A/D: 시점 바꾸기 &8| %mWatchLabel({_live::%{_i}%})%" to {_p}
+
+# 관전 표시: 이름과 직업(마피아 팀은 빨강, 시민 팀은 초록, 중립은 하늘색)
+function mWatchLabel(o: text) :: text:
+	set {_r} to {-m::role::%{_o}%}
+	set {_c} to "&b"
+	if {-m::team::%{_o}%} is "mafia":
+		set {_c} to "&c"
+	else if {-m::team::%{_o}%} is "citizen":
+		set {_c} to "&a"
+	set {_n} to mNameOf({_o})
+	set {_t} to "&f%{_n}% &8| %{_c}%%mRoleName({_r})%"
+	if {-m::alive::%{_o}%} is not true:
+		set {_t} to "%{_t}% &7(사망)"
+	return {_t}
+
+# 죽은 사람 더미 종류: 방화(점화)로 죽었으면 위더 스켈레톤, 아니면 스켈레톤(확정)
+function mDeadType(id: text) :: object:
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "burn":
+			if {_e::3} is {_id}:
+				return EntityType.WITHER_SKELETON
+	return EntityType.SKELETON
+
+# 관전자가 밤에 보는 집 안 더미(관전자 본인에게만 보임). 보는 사람이 바뀌거나 죽으면 다시 만든다.
+function mWatchRoomClear(id: text):
+	loop "wdum", "wseat":
+		set {_e} to {-ms::%loop-value%::%{_id}%}
+		if {_e} is set:
+			{_e}.remove()
+		delete {-ms::%loop-value%::%{_id}%}
+	delete {-ms::wfor::%{_id}%}
+
+function mWatchRoom(id: text):
+	set {_o} to mWatchOf({_id})
+	set {_key} to "%{_o}%-%{-m::alive::%{_o}%}%"
+	if {-ms::wfor::%{_id}%} is {_key}:
+		if {-ms::wdum::%{_id}%} is set:
+			stop
+	mWatchRoomClear({_id})
+	set {_r} to mLocLoad("room")
+	if {_r} is not set:
+		stop
+	if {-m::alive::%{_o}%} is true:
+		set {_m} to mScSeated({_r}, {_o})
+		{_m}.setCustomNameVisible(false)
+		set {_seat} to {_m}.getVehicle()
+	else:
+		set {_seat} to {_r}.getWorld().spawnEntity({_r}, EntityType.ITEM_DISPLAY)
+		{_seat}.setPersistent(false)
+		mScTrack({_seat})
+		set {_m} to {_r}.getWorld().spawnEntity({_r}, mDeadType({_o}))
+		{_m}.setPersistent(false)
+		{_m}.setAI(false)
+		{_m}.setSilent(true)
+		{_m}.setInvulnerable(true)
+		{_m}.getEquipment().clear()
+		{_seat}.addPassenger({_m})
+		{_m}.setRotation({_r}.getYaw(), 0)
+		mScTrack({_m})
+	if {_seat} is set:
+		mScOnlyFor({_seat}, {_id})
+		set {-ms::wseat::%{_id}%} to {_seat}
+	mScOnlyFor({_m}, {_id})
+	set {-ms::wdum::%{_id}%} to {_m}
+	set {-ms::wfor::%{_id}%} to {_key}
 
 # 지금 상태에 맞는 기본 화면(대상 선택이 아닐 때). 살아 있는 사람은 밤에 밤 방, 그 밖에는 자기 자리 어깨너머.
-# 사망자/관전자는 고른 참가자 자리의 어깨너머(자리가 없으면 원탁 전체).
+# 사망자/관전자: 밤(밤·처리)에는 보는 사람의 집 안, 낮에는 그 사람 자리의 어깨너머(자리가 없으면 원탁 전체).
 function mViewAuto(id: text):
 	set {_s} to mState()
 	if {-m::alive::%{_id}%} is true:
 		if {_s} is "night" or "resolve":
 			mCamTo({_id}, "nightcam")
 			stop
+	else if mIsWatcher({_id}) is true:
+		if {_s} is "night" or "resolve":
+			# 자기(죽은 사람) 집 더미는 숨기고 보는 사람의 더미를 앉힌다
+			mFxSelf({_id}, false)
+			mWatchRoom({_id})
+			mCamTo({_id}, "nightcam")
+			stop
+		mWatchRoomClear({_id})
 	if mCamSeatOf({_id}, mWatchOf({_id})) is true:
 		stop
 	mCamTo({_id}, "daycam")
@@ -438,8 +538,44 @@ every 1 tick:
 		stop
 	loop {-m::players::*}:
 		mCamKeep(loop-value)
+		mCamShakeTick(loop-value)
 	loop {-ms::spec::*}:
 		mCamKeep(loop-value)
+		mCamShakeTick(loop-value)
+
+# 화면 흔들림: n 틱 동안 카메라를 조금씩(세기 amp 칸) 흔들고 원래 자리로 돌린다. 카메라를 다른 곳으로 컷하면(mCamCut) 흔들림은 끝난다.
+function mCamShake(id: text, n: number, amp: number):
+	set {_cam} to {-ms::cam::%{_id}%}
+	if {_cam} is not set:
+		stop
+	if {-ms::shk::%{_id}%} is not set:
+		set {-ms::shkb::%{_id}%} to {_cam}.getLocation()
+	set {-ms::shk::%{_id}%} to {_n}
+	set {-ms::shka::%{_id}%} to {_amp}
+
+function mCamShakeTick(id: text):
+	set {_n} to {-ms::shk::%{_id}%}
+	if {_n} is not set:
+		stop
+	set {_cam} to {-ms::cam::%{_id}%}
+	set {_b} to {-ms::shkb::%{_id}%}
+	if {_cam} is not set:
+		delete {-ms::shk::%{_id}%}
+		stop
+	if {_n} <= 0:
+		{_cam}.teleport({_b})
+		delete {-ms::shk::%{_id}%}
+		delete {-ms::shkb::%{_id}%}
+		stop
+	subtract 1 from {-ms::shk::%{_id}%}
+	set {_a} to {-ms::shka::%{_id}%}
+	set {_na} to 0 - {_a}
+	set {_l} to {_b}.clone()
+	set {_rx} to random number between {_na} and {_a}
+	set {_ry} to random number between {_na} and {_a}
+	set {_rz} to random number between {_na} and {_a}
+	{_l}.add({_rx}, {_ry}, {_rz})
+	{_cam}.teleport({_l})
 
 # Shift 로 카메라에서 내려오는 것을 막는다(입력은 PlayerInputEvent 가 따로 받는다)
 on PlayerStopSpectatingEntityEvent:
@@ -604,10 +740,13 @@ function mSceneRejoin(p: player):
 	if mSceneOn() is not true:
 		stop
 	set {_id} to "%uuid of {_p}%"
-	loop "selfseat", "self":
-		set {_e} to {-ms::%loop-value%::%{_id}%}
-		if {_e} is set:
-			{_p}.showEntity(mScPlugin(), {_e})
+	if {-m::alive::%{_id}%} is true:
+		loop "selfseat", "self":
+			set {_e} to {-ms::%loop-value%::%{_id}%}
+			if {_e} is set:
+				{_p}.showEntity(mScPlugin(), {_e})
+	# 관전자용 집 안 더미는 다시 만든다(다시 보이게)
+	mWatchRoomClear({_id})
 	if {-ms::sky} is set:
 		{_p}.setPlayerTime({-ms::sky}, false)
 	mCamMount({_id})
@@ -871,7 +1010,7 @@ function mKeyHint(id: text):
 	if mIsWatcher({_id}) is true:
 		if {-ms::stage} is not set:
 			if mState() is not "loading":
-				send action bar colored "&7A/D: 시점 바꾸기 &8| &f%mNameOf(mWatchOf({_id}))%" to {_p}
+				send action bar colored "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%" to {_p}
 		stop
 	if mPickCanOpen({_id}) is not "":
 		send action bar colored "&7W: 대상 고르기" to {_p}

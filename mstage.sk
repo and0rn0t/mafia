@@ -42,6 +42,21 @@ function mStgSoundAll(s: text, v: number, pi: number):
 		if {_p} is set:
 			mSound({_p}, {_s}, {_v}, {_pi})
 
+function mStgShakeAll(n: number, amp: number):
+	loop mStgViewers():
+		mCamShake(loop-value, {_n}, {_amp})
+
+# 원탁 자리 위(높이 dy)에 파티클
+function mStgSeatPart(id: text, name: text, n: number, dy: number):
+	set {_i} to {-ms::seat::%{_id}%}
+	if {_i} is not set:
+		stop
+	set {_s} to mScSeatLoc({_i})
+	set {_y} to {_s}.getY()
+	add {_dy} to {_y}
+	set {_l} to new Location({_s}.getWorld(), {_s}.getX(), {_y}, {_s}.getZ())
+	mStgPartAll({_name}, {_l}, {_n})
+
 function mStgPartAll(name: text, l: location, n: number):
 	loop mStgViewers():
 		set {_p} to mPlayerOf(loop-value)
@@ -90,6 +105,9 @@ function mStgMorning():
 			mCamFace(loop-value-2, {_d})
 			mStgTitle(loop-value-2, "&c%{_dn}%", "&f님이 사망했습니다", 35)
 		mStgSoundAll("block.bell.use", 0.6, 0.6)
+		mStgSoundAll("block.bell.resonate", 0.4, 0.8)
+		mStgSeatPart({_d}, "SOUL", 20, 1)
+		mStgSeatPart({_d}, "SMOKE", 10, 1)
 		wait 40 ticks
 		if mSceneOn() is not true:
 			stop
@@ -101,7 +119,11 @@ function mStgMorning():
 			mCamFace(loop-value-2, {_r})
 			mStgTitle(loop-value-2, "&6특종", "&f%{_rn}%", 40)
 		mStgSoundAll("ui.cartography_table.take_result", 1, 1)
-		wait 40 ticks
+		wait 20 ticks
+		mStgSoundAll("entity.firework_rocket.blast", 0.7, 1.4)
+		mStgSeatPart({_r}, "END_ROD", 25, 1.2)
+		mStgSeatPart({_r}, "FIREWORK", 20, 1.2)
+		wait 20 ticks
 		if mSceneOn() is not true:
 			stop
 		broadcast "&6[특종] &f%{_rn}%&e 님의 직업은 &f%{_role}%&e입니다."
@@ -136,10 +158,15 @@ function mStgBurn(x: text):
 	set {_i} to {-ms::seat::%{_x}%}
 	if {_i} is set:
 		set {_s} to mScSeatLoc({_i})
+	mStgSoundAll("entity.villager.no", 0.6, 0.8)
 	wait 10 ticks
 	mStgSoundAll("item.flintandsteel.use", 1, 1)
+	mStgSoundAll("item.firecharge.use", 1, 0.9)
+	mStgShakeAll(6, 0.05)
+	mStgSeatPart({_x}, "FLAME", 30, 0.8)
 	if {_m} is set:
 		{_m}.setFireTicks(200)
+		{_m}.playHurtAnimation(0)
 	# 둘레 바닥 불(모두의 화면에만, 실제 블록은 그대로)
 	if {_s} is set:
 		set {_fire} to Bukkit.createBlockData("minecraft:fire")
@@ -167,13 +194,25 @@ function mStgBurn(x: text):
 					{_p}.sendBlockChange(loop-value-2, {_fire})
 	wait 10 ticks
 	mStgSoundAll("entity.blaze.shoot", 1, 0.8)
+	mStgSeatPart({_x}, "LAVA", 8, 0.8)
 	wait 15 ticks
 	mStgSoundAll("entity.player.hurt_on_fire", 1, 1)
-	wait 35 ticks
+	if {_m} is set:
+		{_m}.playHurtAnimation(0)
+	# 타는 동안 불소리·불꽃·연기(10틱마다)
+	loop 3 times:
+		mStgSoundAll("block.fire.ambient", 1, 1)
+		mStgSeatPart({_x}, "FLAME", 15, 0.6)
+		mStgSeatPart({_x}, "LARGE_SMOKE", 6, 1.6)
+		wait 10 ticks
+	wait 5 ticks
 	if mSceneOn() is not true:
 		stop
 	mStgRelease({_x})
 	mStgSoundAll("block.fire.extinguish", 1, 1)
+	mStgSeatPart({_x}, "LARGE_SMOKE", 25, 1)
+	mStgSeatPart({_x}, "SOUL", 15, 1)
+	mStgShakeAll(4, 0.03)
 	wait 15 ticks
 	loop mStgViewers():
 		set {_p} to mPlayerOf(loop-value-1)
@@ -248,8 +287,11 @@ function mStgTnt(t: text, v: text):
 	set {_bz2} to {_b}.getZ()
 	set {_bl} to new Location({_w}, {_bx2}, {_by2}, {_bz2})
 	mStgSoundAll("entity.generic.explode", 1, 1)
+	mStgSoundAll("entity.dragon_fireball.explode", 0.6, 0.8)
 	mStgPartAll("EXPLOSION_EMITTER", {_bl}, 1)
 	mStgPartAll("LARGE_SMOKE", {_bl}, 20)
+	mStgPartAll("FLAME", {_bl}, 30)
+	mStgShakeAll(12, 0.15)
 	if mSceneOn() is not true:
 		stop
 	mStgRelease({_v})

@@ -156,3 +156,5 @@ ROLES.md 에 없던, 설계하면서 생긴 질문이다.
 - 서버 재시작(게임 중): 메모리 변수가 사라져 로비가 된다. 장면 엔티티는 저장되지 않는 엔티티라 남지 않고, 들어올 때 관전 모드·하늘 시간을 되돌린다.
 - 레이더 모드 대책: 연출 중에는 플레이어 본체 생성 패킷을 막는다(mbody.sk, ProtocolLib). 탭 목록은 그대로. 게임 시작/로비 복귀 때 mBodyRefresh 로 다시 보내게 한다.
   더미에는 이름·UUID 없이 스킨만 넣는다(mScProfOf). 이름표가 필요한 승리 라인업만 mScNameTag 로 이름을 넣는다.
+- 관전(사망자·관전자): mWatchOf 는 생존자만 돌려 준다(밤 처리 중에는 방금 죽은 사람도 유지). 밤에는 mWatchRoom 이 밤 방 의자에 보는 사람 더미(관전자 본인에게만 보임, {-ms::wdum/wseat/wfor::uuid})를 앉힌다. 표시는 mWatchLabel(이름 | 직업).
+- 연출 효과: 화면 흔들림 mCamShake(id, 틱, 세기, 1틱 루프가 처리, 컷하면 멈춤), 휘두르기/맞는 모습(swingMainHand, playHurtAnimation), 발소리 mFxStep, 장면 조명 mFxLight(빛 블록, 보는 사람에게만), 자막 mFxCap.

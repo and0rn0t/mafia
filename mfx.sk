@@ -272,6 +272,63 @@ function mFxBlind(vid: text, t: number):
 	if {_p} is set:
 		{_p}.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, {_t}, 0, false, false))
 
+# ------------------------------------------------------------------ 효과 보강(소리·싱크·이펙트)
+
+# 파티클: l 에서 dy 만큼 위, 퍼짐 sp, 속도 spd (그 사람 화면에만)
+function mFxP(vid: text, name: text, l: location, n: number, dy: number, sp: number, spd: number):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	if {_l} is not set:
+		stop
+	set {_y} to {_l}.getY()
+	add {_dy} to {_y}
+	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_y}, {_l}.getZ())
+	{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, {_sp}, {_sp}, {_sp}, {_spd})
+
+# 엔티티 위치 기준 파티클
+function mFxPE(vid: text, name: text, e: object, n: number, dy: number, sp: number, spd: number):
+	if {_e} is not set:
+		stop
+	mFxP({_vid}, {_name}, {_e}.getLocation(), {_n}, {_dy}, {_sp}, {_spd})
+
+# 휘두르기 / 맞는 모습(빨갛게 번쩍)
+function mFxSwing(e: object):
+	if {_e} is set:
+		{_e}.swingMainHand()
+
+function mFxHurt(e: object):
+	if {_e} is set:
+		{_e}.playHurtAnimation(0)
+
+# 발소리(걷는 동안 6틱마다). 바깥은 돌, 집 안은 나무
+function mFxStep(vid: text, t: number, outside: boolean):
+	if mod({_t}, 6) is not 0:
+		stop
+	if {_outside} is true:
+		mFxSound({_vid}, "block.stone.step", 0.6, 1)
+	else:
+		mFxSound({_vid}, "block.wood.step", 0.6, 1)
+
+# 장면 조명: l 한 칸 위 공기 칸에 빛 블록(그 사람 화면에만). 장면이 끝나면 mFxCleanup 이 되돌린다(불 목록과 같이).
+function mFxLight(vid: text, l: location):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	if {_l} is not set:
+		stop
+	set {_by} to {_l}.getBlockY()
+	add 1 to {_by}
+	set {_b} to new Location({_l}.getWorld(), {_l}.getBlockX(), {_by}, {_l}.getBlockZ())
+	if {_b}.getBlock().getType().isAir() is false:
+		stop
+	{_p}.sendBlockChange({_b}, Bukkit.createBlockData("minecraft:light[level=13]"))
+	add {_b} to {-msc::%{_vid}%::fire::*}
+
+# 장면 자막(화면 가운데 아래)
+function mFxCap(vid: text, s: text):
+	mStgTitle({_vid}, "", {_s}, 40)
+
 # 그 사람의 자기 더미(집 안 의자)를 숨기거나 다시 보여 준다(연출 동안은 장면용 더미를 쓴다)
 function mFxSelf(vid: text, show: boolean):
 	set {_p} to mPlayerOf({_vid})
@@ -560,10 +617,35 @@ function mFxSetup(vid: text, spec: text):
 	# 카메라: 집 안 장면은 대상 집 안, 바깥 장면은 그 집 바깥(out/home = 자기 집, arrive/back = 대상 집)
 	if mFxInside({_k}) is true:
 		mCamTo({_vid}, "nightcam")
+		mFxLight({_vid}, mFxL(0, "mid"))
+		mFxLight({_vid}, mFxL(0, "visit"))
 	else if {_k} is "out" or "home":
 		mCamTo({_vid}, "h%{_ha}%ext")
+		mFxLight({_vid}, mFxL({_ha}, "out"))
 	else:
 		mCamTo({_vid}, "h%{_ht}%ext")
+		mFxLight({_vid}, mFxL({_ht}, "out"))
+	# 자막: 누가 무엇을 보고 있는지 바로 알 수 있게(행동한 사람 / 대상 / 수호자)
+	set {_tn} to mNameOf({_f::3})
+	if {_k} is "leave":
+		mFxCap({_vid}, "&7집을 나섭니다")
+	else if {_k} is "out":
+		mFxCap({_vid}, "&f%{_tn}%&7 님의 집으로 향합니다")
+	else if {_k} is "arrive":
+		mFxCap({_vid}, "&f%{_tn}%&7 님의 집")
+	else if {_k} is "back":
+		mFxCap({_vid}, "&7집으로 돌아갑니다")
+	else if mFxInside({_k}) is true:
+		if {_vid} is {_f::3}:
+			if {_k} is "kill" or "burn":
+				mFxCap({_vid}, "&c누군가 집에 들어왔습니다...")
+			else if {_k} is "guardonly":
+				mFxCap({_vid}, "&b누군가 당신을 지키러 왔습니다")
+			else:
+				mFxCap({_vid}, "&7누군가 찾아왔습니다...")
+		else if {_vid} is {_f::4}:
+			if {_vid} is not {_f::2}:
+				mFxCap({_vid}, "&f%{_tn}%&7 님을 지킵니다")
 	if mFxInside({_k}) is false:
 		stop
 	# 대상 더미: 대상 집 의자(보이지 않는 디스플레이)에 앉힌다
@@ -689,8 +771,15 @@ function mFxTickTravel(vid: text, k: text, t: number):
 			mFxDoor({_vid}, {_h}, false)
 		if {_t} >= 3:
 			mFxWalk({_vis}, {_from}, {_to}, ({_t} - 3) / 37)
+			if {_t} <= 40:
+				mFxStep({_vid}, {_t}, true)
 	else:
 		mFxWalk({_vis}, {_from}, {_to}, {_t} / 35)
+		if {_t} <= 35:
+			mFxStep({_vid}, {_t}, true)
+		# 도착: 문 앞에서 잠깐 멈칫(문고리 소리)
+		if {_t} is 30:
+			mFxSound({_vid}, "block.wooden_trapdoor.open", 0.5, 1.6)
 		if {_t} is 33:
 			mFxDoor({_vid}, {_h}, true)
 		if {_t} is 40:
@@ -700,8 +789,10 @@ function mFxTickTravel(vid: text, k: text, t: number):
 
 # 1틱마다(t 는 1부터). 대상 집 안 장면의 시간표(u = 수호자 입장을 뺀 시간):
 #   입장 1~30(문 열림 1, 닫힘 10, 문 안쪽 → 방 가운데 → 대상 앞) / 쉼 / 능력 50~ / 쉼 / 퇴장(대상 앞 → 문 안쪽 25틱, 문 열림, 사라지고 문 닫힘)
-#   kill/burn: 암전 50(45틱), 공격 소리 58·62, 결과 70, 군인 팅 95, 퇴장 115 / shaman: 주문 50, 팅 75, 퇴장 95
-#   oil: 마녀 웃음 50, 물 뿌림 65, 발광 67, 퇴장 90 / visit: 퇴장 55 / guardonly: 수호자 입장 1~25, 퇴장 65
+#   kill: 무기 꺼냄 40, 공격 50·55(휘두르기+맞는 모습+파티클+흔들림, 군인은 방패 팅), 암전 60(22틱), 해골 68, 종·영혼 76, 의사 회복 66, 퇴장 115
+#   burn: 부싯돌 44, 점화 50·54, 암전 58, 위더 해골·불 64(10틱마다 불소리), 퇴장 115 / shaman: 주문 50, 팅 75, 퇴장 95
+#   oil: 마녀 웃음 50, 던짐 56, 물 뿌림 62, 발광 67, 퇴장 90 / visit: 직업별 46~62, 퇴장 80 / guardonly: 수호자 입장 1~25, 퇴장 65
+#   공통: 걷는 동안 발소리, 당한 사람은 심장 소리(8·22·34·44), 장면마다 자막, 장면 조명(빛 블록, 보는 사람 화면에만)
 function mFxTick(vid: text, t: number):
 	set {_k} to {-msc::%{_vid}%::kind}
 	if mFxInside({_k}) is false:
@@ -721,9 +812,12 @@ function mFxTick(vid: text, t: number):
 			{_me}.leaveVehicle()
 			{_me}.teleport({_visit})
 			mFxFace({_me}, {_mid})
+		if {_t} is 6:
+			mFxSound({_vid}, "block.wood.hit", 0.6, 0.8)
 		if {_t} >= 10:
 			if {_t} <= 42:
 				mFxWalk2({_me}, {_visit}, {_mid}, {_in}, ({_t} - 10) / 32)
+				mFxStep({_vid}, {_t}, false)
 		if {_t} is 36:
 			mFxDoor({_vid}, {_h}, true)
 		if {_t} is 46:
@@ -744,15 +838,19 @@ function mFxTick(vid: text, t: number):
 			set {-msc::%{_vid}%::grd} to {_gd}
 		if {_t} <= 25:
 			mFxWalk2({_gd}, {_in}, {_mid}, {_gpos}, {_t} / 25)
+			mFxStep({_vid}, {_t}, false)
 		if {_t} is 10:
 			mFxDoor({_vid}, {_h}, false)
 		if {_t} is 26:
 			mFxFace({_gd}, {_mid})
 			{_gd}.startUsingItem(EquipmentSlot.OFF_HAND)
+			mFxSound({_vid}, "item.armor.equip_iron", 0.8, 1)
+			mFxPE({_vid}, "ENCHANTED_HIT", {_gd}, 12, 1.2, 0.3, 0.1)
 	if {_k} is "guardonly":
 		if {_t} >= 65:
 			if {_t} <= 90:
 				mFxWalk2({_gd}, {_gpos}, {_mid}, {_in}, ({_t} - 65) / 25)
+				mFxStep({_vid}, {_t}, false)
 		if {_t} is 80:
 			mFxDoor({_vid}, {_h}, true)
 		if {_t} is 92:
@@ -774,123 +872,249 @@ function mFxTick(vid: text, t: number):
 	set {_vis} to {-msc::%{_vid}%::vis}
 	if {_u} <= 30:
 		mFxWalk2({_vis}, {_in}, {_mid}, {_visit}, {_u} / 30)
+		mFxStep({_vid}, {_u}, false)
 	if {_u} is 10:
 		mFxDoor({_vid}, {_h}, false)
 	if {_u} is 31:
 		mFxFace({_vis}, {_room})
-	# ---- 능력, 퇴장 시각
+	# 당한 사람 화면: 습격이 다가오는 심장 소리(점점 크게)
+	if {_vid} is {-msc::%{_vid}%::t}:
+		if {_k} is "kill" or "burn":
+			if {_u} is 8:
+				mFxSound({_vid}, "entity.warden.heartbeat", 0.5, 1)
+			if {_u} is 22:
+				mFxSound({_vid}, "entity.warden.heartbeat", 0.7, 1)
+			if {_u} is 34:
+				mFxSound({_vid}, "entity.warden.heartbeat", 0.9, 1.1)
+			if {_u} is 44:
+				mFxSound({_vid}, "entity.warden.heartbeat", 1, 1.2)
+	# ---- 능력, 퇴장 시각 (소리·동작·파티클·흔들림을 같은 틱에 맞춘다)
+	set {_vic} to {-msc::%{_vid}%::vic}
 	set {_out} to 115
 	if {_k} is "kill" or "burn":
+		if {_u} is 40:
+			mFxFace({_vis}, {_room})
+			mFxSound({_vid}, "item.armor.equip_iron", 0.7, 0.8)
+	if {_k} is "kill":
+		# 맞는 쪽: 수호자가 대신 죽으면 수호자, 아니면 대상
+		set {_hit} to {_vic}
+		if {_res} is "guarddie":
+			if {_gd} is set:
+				set {_hit} to {_gd}
+		# 첫 공격(50)
 		if {_u} is 50:
-			mFxBlind({_vid}, 45)
-		if {_u} is 58:
-			if {_k} is "burn":
-				mFxSound({_vid}, "item.flintandsteel.use", 1, 1)
-			else:
-				mFxSound({_vid}, "entity.player.attack.strong", 1, 1)
-		if {_u} is 62:
-			if {_k} is "burn":
-				mFxSound({_vid}, "entity.blaze.shoot", 1, 0.8)
-			else if {_res} is "die" or "guarddie":
-				mFxSound({_vid}, "entity.player.hurt", 1, 1)
-		if {_u} is 70:
-			if {_res} is "die":
-				mFxSkull({_vid}, false)
-			else if {_res} is "burn":
-				mFxSkull({_vid}, true)
-				mFxFire({_vid})
-			else if {_res} is "guarddie":
-				if {_gd} is set:
-					{_gd}.remove()
-					delete {-msc::%{_vid}%::grd}
-					delete {_gd}
-				set {_sk} to {_gpos}.getWorld().spawnEntity({_gpos}, EntityType.SKELETON)
-				{_sk}.setAI(false)
-				{_sk}.setSilent(true)
-				{_sk}.setInvulnerable(true)
-				{_sk}.setGravity(false)
-				{_sk}.getEquipment().clear()
-				mFxOnly({_sk}, {_vid})
-				set {-msc::%{_vid}%::gskel} to {_sk}
-		if {_u} is 74:
-			if {_res} is "burn":
-				mFxSound({_vid}, "block.fire.ambient", 1, 1)
-		if {_u} is 95:
+			mFxSwing({_vis})
 			if {_res} is "soldier":
+				mFxSound({_vid}, "item.shield.block", 1, 1)
 				mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
+				mFxPE({_vid}, "ELECTRIC_SPARK", {_vic}, 30, 1.1, 0.3, 0.2)
+				mFxPE({_vid}, "CRIT", {_vic}, 15, 1.1, 0.3, 0.3)
+				mCamShake({_vid}, 5, 0.05)
+			else:
+				if {_res} is "guarddie":
+					mFxSound({_vid}, "item.shield.block", 1, 0.9)
+				mFxSound({_vid}, "entity.player.attack.sweep", 1, 1)
+				mFxHurt({_hit})
+				mFxPE({_vid}, "SWEEP_ATTACK", {_hit}, 1, 1.1, 0, 0)
+				mFxPE({_vid}, "CRIT", {_hit}, 15, 1.1, 0.3, 0.3)
+				mCamShake({_vid}, 6, 0.06)
+		# 두 번째 공격(55)
+		if {_u} is 55:
+			if {_res} is not "soldier":
+				mFxSwing({_vis})
+				mFxSound({_vid}, "entity.player.attack.crit", 1, 1)
+				mFxHurt({_hit})
+				mFxPE({_vid}, "DAMAGE_INDICATOR", {_hit}, 8, 1.1, 0.3, 0.1)
+				mCamShake({_vid}, 6, 0.08)
+				if {_res} is not "live":
+					mFxSound({_vid}, "entity.player.hurt", 1, 1)
+			else:
+				mFxSound({_vid}, "block.anvil.place", 0.6, 2)
+				mFxPE({_vid}, "ELECTRIC_SPARK", {_vic}, 20, 1.1, 0.3, 0.2)
+		# 쓰러짐: 짧게 암전 → 어둠 속에서 해골로 바뀜 → 종소리와 영혼
+		if {_res} is "die" or "guarddie":
+			if {_u} is 60:
+				mFxBlind({_vid}, 22)
+				mFxSound({_vid}, "entity.player.death", 0.8, 1)
+			if {_u} is 68:
+				if {_res} is "die":
+					mFxSkull({_vid}, false)
+				else:
+					if {_gd} is set:
+						{_gd}.remove()
+						delete {-msc::%{_vid}%::grd}
+						delete {_gd}
+					set {_sk} to {_gpos}.getWorld().spawnEntity({_gpos}, EntityType.SKELETON)
+					{_sk}.setAI(false)
+					{_sk}.setSilent(true)
+					{_sk}.setInvulnerable(true)
+					{_sk}.setGravity(false)
+					{_sk}.getEquipment().clear()
+					mFxOnly({_sk}, {_vid})
+					set {-msc::%{_vid}%::gskel} to {_sk}
+			if {_u} is 76:
+				mFxSound({_vid}, "block.bell.use", 0.7, 0.5)
+				set {_sl} to {_room}
+				if {_res} is "guarddie":
+					set {_sl} to {_gpos}
+				mFxP({_vid}, "SOUL", {_sl}, 20, 1, 0.3, 0.03)
+				mFxP({_vid}, "SMOKE", {_sl}, 15, 1, 0.3, 0.02)
+		# 의사가 살림: 회복 소리와 하트
+		if {_res} is "live":
+			if {_u} is 66:
+				mFxSound({_vid}, "block.amethyst_block.chime", 1, 1.2)
+				mFxSound({_vid}, "entity.player.levelup", 0.4, 1.8)
+				mFxPE({_vid}, "HEART", {_vic}, 8, 1.4, 0.4, 0)
+				mFxPE({_vid}, "HAPPY_VILLAGER", {_vic}, 12, 1, 0.4, 0)
+	else if {_k} is "burn":
+		if {_u} is 44:
+			mFxSwing({_vis})
+			mFxSound({_vid}, "item.flintandsteel.use", 1, 1)
+			mFxPE({_vid}, "FLAME", {_vis}, 6, 1.2, 0.2, 0.02)
+		if {_u} is 50:
+			mFxSound({_vid}, "item.firecharge.use", 1, 1)
+			mFxHurt({_vic})
+			mFxPE({_vid}, "FLAME", {_vic}, 30, 1, 0.4, 0.05)
+			mFxPE({_vid}, "LAVA", {_vic}, 6, 1, 0.3, 0)
+			mCamShake({_vid}, 6, 0.06)
+		if {_u} is 54:
+			mFxSound({_vid}, "entity.blaze.shoot", 1, 0.8)
+			mFxPE({_vid}, "FLAME", {_vic}, 20, 1, 0.4, 0.05)
+		if {_u} is 58:
+			mFxBlind({_vid}, 16)
+		if {_u} is 64:
+			mFxSkull({_vid}, true)
+			mFxFire({_vid})
+			mFxSound({_vid}, "block.fire.ambient", 1, 1)
+			mFxP({_vid}, "LARGE_SMOKE", {_room}, 15, 1, 0.5, 0.02)
+		if {_u} > 64:
+			if mod({_u}, 10) is 0:
+				mFxSound({_vid}, "block.fire.ambient", 0.8, 1)
+				mFxP({_vid}, "FLAME", {_room}, 8, 0.6, 0.6, 0.02)
+				mFxP({_vid}, "SMOKE", {_room}, 6, 1.2, 0.5, 0.02)
 	else if {_k} is "shaman":
 		set {_out} to 95
+		if {_u} is 46:
+			mFxFace({_vis}, {_room})
 		if {_u} is 50:
+			mFxSwing({_vis})
 			mFxSound({_vid}, "entity.evoker.prepare_wololo", 1, 1)
+			mFxPE({_vid}, "WITCH", {_vis}, 30, 1, 0.4, 0.05)
+		if {_u} is 58:
+			mFxSound({_vid}, "block.amethyst_block.resonate", 0.8, 1)
+			mFxPE({_vid}, "ENCHANT", {_vis}, 40, 1.4, 0.4, 0.5)
 		if {_u} is 75:
 			mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
+			mFxSound({_vid}, "block.beacon.deactivate", 0.8, 1.2)
+			mFxHurt({_vis})
+			mFxPE({_vid}, "ELECTRIC_SPARK", {_vis}, 25, 1.1, 0.3, 0.2)
+			mCamShake({_vid}, 4, 0.05)
 	else if {_k} is "oil":
 		set {_out} to 90
 		if {_u} is 50:
 			mFxSound({_vid}, "entity.witch.celebrate", 1, 1)
-		if {_u} is 65:
+		if {_u} is 56:
+			mFxSwing({_vis})
+			mFxSound({_vid}, "entity.witch.throw", 1, 1)
+		if {_u} is 62:
 			mFxSound({_vid}, "entity.splash_potion.break", 1, 1)
+			mFxPE({_vid}, "SPLASH", {_vic}, 30, 1.2, 0.4, 0.1)
+			mFxPE({_vid}, "DRIPPING_HONEY", {_vic}, 20, 1.2, 0.4, 0)
 		if {_u} is 67:
-			mFxGlow({-msc::%{_vid}%::vic})
+			mFxGlow({_vic})
+			mFxSound({_vid}, "block.honey_block.slide", 1, 0.8)
+			mFxPE({_vid}, "FALLING_HONEY", {_vic}, 20, 1.6, 0.4, 0)
 	else if {_k} is "visit":
-		# 직업별 능력 연출(능력 50~ , 퇴장 80). 결과는 지금처럼 채팅/낮 공개로 알려 준다
+		# 직업별 능력 연출(능력 46~ , 퇴장 80). 결과는 지금처럼 채팅/낮 공개로 알려 준다
 		set {_out} to 80
 		if {_res} is "police":
-			if {_u} is 50:
+			if {_u} is 46:
+				{_vis}.startUsingItem(EquipmentSlot.HAND)
 				mFxSound({_vid}, "item.spyglass.use", 1, 1)
 			if {_u} is 62:
+				{_vis}.clearActiveItem()
+				mFxSound({_vid}, "item.spyglass.stop_using", 1, 1)
 				mFxSound({_vid}, "block.note_block.bell", 0.8, 1.2)
+				mFxPE({_vid}, "END_ROD", {_vic}, 12, 1.2, 0.4, 0.02)
 		else if {_res} is "spy":
 			if {_u} is 50:
+				mFxSwing({_vis})
 				mFxSound({_vid}, "item.book.page_turn", 1, 1)
-			if {_u} is 60:
+			if {_u} is 56:
 				mFxSound({_vid}, "item.book.page_turn", 1, 1.3)
-			if {_u} is 66:
+			if {_u} is 62:
 				mFxSound({_vid}, "entity.villager.work_cartographer", 1, 1)
+				mFxSound({_vid}, "entity.experience_orb.pickup", 0.6, 1.4)
+				mFxPE({_vid}, "ENCHANT", {_vic}, 25, 1.4, 0.4, 0.5)
 		else if {_res} is "doctor":
-			if {_u} is 50:
+			if {_u} is 46:
+				{_vis}.startUsingItem(EquipmentSlot.HAND)
+			if {_u} is 46 or 50 or 54:
 				mFxSound({_vid}, "entity.generic.eat", 1, 1)
 			if {_u} is 58:
+				{_vis}.clearActiveItem()
+				mFxSound({_vid}, "entity.player.burp", 0.6, 1)
+			if {_u} is 62:
 				mFxSound({_vid}, "block.amethyst_block.chime", 1, 1.2)
-				mFxPart({_vid}, "HEART", {_room}, 6)
+				mFxSound({_vid}, "entity.player.levelup", 0.4, 1.8)
+				mFxPE({_vid}, "HEART", {_vic}, 10, 1.4, 0.4, 0)
 		else if {_res} is "detective":
 			if {_u} is 50:
+				mFxSwing({_vis})
 				mFxSound({_vid}, "item.book.page_turn", 1, 0.9)
+			if {_u} is 56:
+				mFxSound({_vid}, "item.book.page_turn", 1, 1.1)
 			if {_u} is 62:
 				mFxSound({_vid}, "entity.villager.work_librarian", 1, 1)
+				mFxSound({_vid}, "block.enchantment_table.use", 0.6, 1.2)
+				mFxPE({_vid}, "ENCHANT", {_vic}, 30, 1.4, 0.4, 0.5)
 		else if {_res} is "reporter":
 			if {_u} is 50:
+				mFxSwing({_vis})
 				mFxSound({_vid}, "ui.cartography_table.take_result", 1, 1)
 			if {_u} is 56:
 				mFxSound({_vid}, "entity.firework_rocket.blast", 0.6, 1.6)
-				mFxPart({_vid}, "END_ROD", {_room}, 20)
+				mFxPE({_vid}, "END_ROD", {_vic}, 30, 1.2, 0.5, 0.05)
+				mFxPE({_vid}, "FIREWORK", {_vic}, 20, 1.2, 0.3, 0.1)
+				mCamShake({_vid}, 3, 0.03)
 		else if {_res} is "witch":
 			if {_u} is 50:
 				mFxSound({_vid}, "entity.witch.ambient", 1, 1)
+			if {_u} is 54:
+				mFxSwing({_vis})
+				mFxSound({_vid}, "entity.witch.throw", 1, 1)
 			if {_u} is 58:
 				mFxSound({_vid}, "entity.evoker.cast_spell", 1, 1)
-				mFxPart({_vid}, "WITCH", {_room}, 20)
+				mFxHurt({_vic})
+				mFxPE({_vid}, "WITCH", {_vic}, 40, 1.2, 0.4, 0.05)
+				mCamShake({_vid}, 4, 0.04)
 		else if {_res} is "thug":
 			if {_u} is 50:
 				mFxSound({_vid}, "entity.vindicator.ambient", 1, 1)
-			if {_u} is 58:
+			if {_u} is 54:
+				mFxSwing({_vis})
 				mFxSound({_vid}, "entity.player.attack.knockback", 1, 1)
-				mFxPart({_vid}, "ANGRY_VILLAGER", {_room}, 5)
+				mFxHurt({_vic})
+				mFxPE({_vid}, "ANGRY_VILLAGER", {_vic}, 8, 1.4, 0.4, 0)
+				mCamShake({_vid}, 5, 0.06)
 		else if {_res} is "shaman":
 			if {_u} is 50:
+				mFxSwing({_vis})
 				mFxSound({_vid}, "entity.illusioner.cast_spell", 1, 1)
 			if {_u} is 56:
-				mFxPart({_vid}, "ENCHANT", {_room}, 40)
+				mFxSound({_vid}, "block.amethyst_block.resonate", 0.8, 1)
+				mFxPE({_vid}, "ENCHANT", {_vic}, 60, 1.4, 0.5, 0.6)
 		else if {_res} is "contact":
 			if {_u} is 50:
 				mFxSound({_vid}, "entity.villager.trade", 1, 1)
 			if {_u} is 58:
 				mFxSound({_vid}, "entity.villager.yes", 1, 1)
-				mFxPart({_vid}, "HAPPY_VILLAGER", {_room}, 10)
+				mFxPE({_vid}, "HAPPY_VILLAGER", {_vic}, 10, 1.2, 0.4, 0)
 	# ---- 퇴장: 방문자(그리고 살아 있는 수호자)가 문으로 걸어 나간다
 	if {_u} >= {_out}:
 		if {_u} <= {_out} + 25:
 			set {_f} to ({_u} - {_out}) / 25
+			mFxStep({_vid}, {_u}, false)
 			mFxWalk2({_vis}, {_visit}, {_mid}, {_in}, {_f})
 			if {_gd} is set:
 				mFxWalk2({_gd}, {_gpos}, {_mid}, {_in}, {_f})
