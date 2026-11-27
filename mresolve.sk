@@ -103,7 +103,11 @@ function mResolve():
 				delete {_act::%{_x}%}
 				add "null|%{_sh}%|%{_x}%" to {-m::ev::*}
 			delete {_cand::*}
-	# ---- 4. 살해 계열
+	# ---- 4. 살해 계열: 순서대로 처리한다(확정) 1) 자경단 → 2) 중립(도둑, 암살자) → 3) 마피아.
+	#   앞 단계에서 죽은 사람은 뒤 단계의 살해를 하지 못한다(공격 자체가 없음). 이미 죽은 대상을 노린 공격은 아무 일도 없다(도둑은 1회 소모).
+	#   치료/수호/군인 방어는 단계마다 그대로 적용한다. 의사가 앞 단계에서 죽어도 그 밤의 치료는 유지된다(해석, 확인 필요).
+	#   수호자가 앞 단계에서 (대신) 죽었으면 뒤 단계에서는 지키지 못한다. 군인 방어는 먼저 들어온 공격(앞 단계)에 소모된다.
+	#   방화(점화)는 순서와 상관없이 따로 항상 발동한다(5번).
 	loop indices of {_act::*}:
 		set {_id} to loop-value
 		set {_t} to {_act::%{_id}%}
@@ -112,59 +116,74 @@ function mResolve():
 			set {_heal::%{_t}%} to true
 		else if {_ro} is "guardian":
 			set {_guard::%{_t}%} to {_id}
-		else if mHas("mafia,assassin,thief,vigilante", {_ro}) is true:
-			add {_id} to {_atk::%{_t}%::*}
-	loop indices of {_atk::*}:
-		set {_t} to loop-value
-		set {_blk} to 0
-		set {_hasblockable} to false
-		loop {_atk::%{_t}%::*}:
-			if mHas("mafia,thief,vigilante", {_r::%loop-value-2%}) is true:
-				set {_hasblockable} to true
-		if {-m::role::%{_t}%} is "soldier":
-			if {_hasblockable} is true:
-				if {-m::soldier::%{_t}%} is not true:
-					set {-m::soldier::%{_t}%} to true
-					set {_blk} to 1
-					add "soldier|%{_t}%|%{_t}%" to {-m::ev::*}
-		# 치료: 모든 공격 무효(군인 방어는 위에서 이미 소모)
-		if {_heal::%{_t}%} is true:
+	loop "vigilante", "thief,assassin", "mafia":
+		set {_phase} to loop-value-1
+		delete {_atk::*}
+		loop indices of {_act::*}:
+			set {_id} to loop-value-2
+			if mHas({_phase}, {_r::%{_id}%}) is true:
+				if {_killed::%{_id}%} is not true:
+					set {_t} to {_act::%{_id}%}
+					if {_killed::%{_t}%} is true:
+						if {_r::%{_id}%} is "thief":
+							set {_usedthief::%{_id}%} to true
+					else:
+						add {_id} to {_atk::%{_t}%::*}
+		loop indices of {_atk::*}:
+			set {_t} to loop-value-2
+			set {_blk} to 0
+			set {_hasblockable} to false
 			loop {_atk::%{_t}%::*}:
-				add "healed|%loop-value-2%|%{_t}%" to {-m::ev::*}
-				if {_r::%loop-value-2%} is "thief":
-					set {_usedthief::%loop-value-2%} to true
-			continue
-		# 수호: 대신 사망(치료/군인 효과 없음)
-		set {_victim} to {_t}
-		set {_g} to {_guard::%{_t}%}
-		if {_g} is set:
-			set {_victim} to {_g}
-			add "guard|%{_g}%|%{_t}%" to {-m::ev::*}
-		else if {_blk} is 1:
-			# 군인이 마피아/도둑 공격 하나를 막는다. 남은 공격이 있으면 죽는다.
-			set {_left} to 0
-			set {_skipped} to false
-			loop {_atk::%{_t}%::*}:
-				set {_ra} to {_r::%loop-value-2%}
-				if {_skipped} is false:
-					if mHas("mafia,thief,vigilante", {_ra}) is true:
-						set {_skipped} to true
-						add "blocked|%loop-value-2%|%{_t}%" to {-m::ev::*}
-						if {_ra} is "thief":
-							set {_usedthief::%loop-value-2%} to true
-						continue
-				add 1 to {_left}
-			if {_left} is 0:
+				if mHas("mafia,thief,vigilante", {_r::%loop-value-3%}) is true:
+					set {_hasblockable} to true
+			if {-m::role::%{_t}%} is "soldier":
+				if {_hasblockable} is true:
+					if {-m::soldier::%{_t}%} is not true:
+						set {-m::soldier::%{_t}%} to true
+						set {_blk} to 1
+						add "soldier|%{_t}%|%{_t}%" to {-m::ev::*}
+			# 치료: 이 단계의 공격 모두 무효(군인 방어는 위에서 이미 소모)
+			if {_heal::%{_t}%} is true:
+				loop {_atk::%{_t}%::*}:
+					add "healed|%loop-value-3%|%{_t}%" to {-m::ev::*}
+					if {_r::%loop-value-3%} is "thief":
+						set {_usedthief::%loop-value-3%} to true
 				continue
-		set {_killed::%{_victim}%} to true
-		loop {_atk::%{_t}%::*}:
-			add "kill|%loop-value-2%|%{_victim}%" to {-m::ev::*}
-			if {_r::%loop-value-2%} is "vigilante":
-				set {_usedvig::%loop-value-2%} to true
-				if {-m::team::%{_victim}%} is "citizen":
-					set {_vigdie::%loop-value-2%} to true
-			if {_r::%loop-value-2%} is "thief":
-				set {_steal::%loop-value-2%} to {_victim}
+			# 수호: 대신 사망(치료/군인 효과 없음). 수호자가 앞 단계에서 죽었으면 지키지 못한다.
+			set {_victim} to {_t}
+			set {_g} to {_guard::%{_t}%}
+			if {_g} is set:
+				if {_killed::%{_g}%} is true:
+					delete {_g}
+			if {_g} is set:
+				set {_victim} to {_g}
+				add "guard|%{_g}%|%{_t}%" to {-m::ev::*}
+			else if {_blk} is 1:
+				# 군인이 마피아/도둑/자경단 공격 하나를 막는다. 남은 공격이 있으면 죽는다.
+				set {_left} to 0
+				set {_skipped} to false
+				loop {_atk::%{_t}%::*}:
+					set {_ra} to {_r::%loop-value-3%}
+					if {_skipped} is false:
+						if mHas("mafia,thief,vigilante", {_ra}) is true:
+							set {_skipped} to true
+							add "blocked|%loop-value-3%|%{_t}%" to {-m::ev::*}
+							if {_ra} is "thief":
+								set {_usedthief::%loop-value-3%} to true
+							continue
+					add 1 to {_left}
+				if {_left} is 0:
+					continue
+			set {_killed::%{_victim}%} to true
+			loop {_atk::%{_t}%::*}:
+				add "kill|%loop-value-3%|%{_victim}%" to {-m::ev::*}
+				if {_r::%loop-value-3%} is "vigilante":
+					set {_usedvig::%loop-value-3%} to true
+					if {-m::team::%{_victim}%} is "citizen":
+						set {_vigdie::%loop-value-3%} to true
+						set {_killed::%loop-value-3%} to true
+				if {_r::%loop-value-3%} is "thief":
+					set {_steal::%loop-value-3%} to {_victim}
 	# ---- 5. 방화: 항상 별도, 모든 방어 무시
 	loop indices of {_ign::*}:
 		loop {-m::players::*}:
