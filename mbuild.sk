@@ -228,6 +228,9 @@ function mBuild():
 	# 방 꾸밈: 책장, 카펫
 	mBFill({_w}, 101, 65, -4, 104, 66, -4, "minecraft:bookshelf")
 	mBFill({_w}, 102, 65, -1, 105, 65, 1, "minecraft:brown_carpet")
+	# 동쪽 벽 문(킬/방문 연출에서 방문자가 들어오는 곳. 열림/닫힘은 mfx.sk 가 보는 사람 화면에만 바꾼다)
+	mBSet({_w}, 108, 65, -3, "minecraft:oak_door[half=lower,facing=west,hinge=left,open=false]")
+	mBSet({_w}, 108, 66, -3, "minecraft:oak_door[half=upper,facing=west,hinge=left,open=false]")
 	# ================= 밤 대상 선택: 붉은 침대 3개 (x -1, 0, 1, z -100), 조명 없음, 카메라는 남쪽에서 북쪽을 본다
 	mBFill({_w}, -20, 64, -125, 20, 64, -80, "minecraft:grass_block")
 	mBFill({_w}, -4, 64, -102, 4, 64, -97, "minecraft:spruce_planks")
@@ -242,7 +245,7 @@ function mBuild():
 
 # 맵 구조 버전. 블록 배치(건물)를 바꾸면 이 숫자를 올린다. 서버 맵이 이 버전보다 낮으면 관리자에게 /mbuild 를 다시 하라고 알린다.
 function mBVer() :: number:
-	return 6
+	return 7
 
 # 게임 위치, 연출 장소 6곳, 숫자 설정을 저장한다. 블록은 건드리지 않는다.
 # 스크립트를 불러올 때(on load)도 자동으로 다시 저장하므로, 카메라 위치만 바꾼 경우에는 /sk reload 만 하면 적용된다.
@@ -252,6 +255,13 @@ function mBSaveSpots(w: world):
 	# 낮: 원탁 가까이(원탁 가운데까지 약 6칸)에서 남쪽으로 내려다본다
 	mBSaveLook("daycam", {_w}, 0.5, 67.6, -5, 0.5, 65.4, 0.5)
 	mBSaveYaw("room", {_w}, 107.5, 65.5, 2.5, 90)
+	# 밤 연출(mfx.sk) 자리: 문 안쪽(방문자가 나타남), 문 블록, 대상 앞, 수호자 자리, 불타는 바닥 범위
+	mBSaveYaw("fxdoor", {_w}, 107.5, 65, -3, 90)
+	mBSaveYaw("fxdoorblock", {_w}, 108, 65, -3, 0)
+	mBSaveYaw("fxvisit", {_w}, 106.2, 65, 1.6, 0)
+	mBSaveYaw("fxguard", {_w}, 106.2, 65, 3.6, 180)
+	mBSaveYaw("fxfireA", {_w}, 100, 65, -3, 0)
+	mBSaveYaw("fxfireB", {_w}, 106, 65, 3, 0)
 	mBSaveLook("nightcam", {_w}, 103.3, 66.7, 0.9, 108, 67.6, 0.9)
 	# 침대 더미: 위치 = 발끝(침대 북쪽 끝), yaw 90 = 머리가 남쪽 베개
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)

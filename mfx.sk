@@ -1,0 +1,571 @@
+# ==============================================================================
+# [mfx.sk] 밤 처리(resolve) 연출: 킬, 군인/의사/수호자 방어, 주술 무효, 기름 뿌리기, 방화. 규칙은 ROLES.md "화면 연출", 구조는 DESIGN.md.
+# 흐름: mday.sk 가 밤이 끝나면 mResolve() 다음에 mSceneResolve() 를 부른다(이 파일). 사건 목록({-m::ev::*})으로 장면 목록을 만들고,
+#   장면을 볼 사람마다 자기 차례대로(자기가 한 일 → 자기가 당한 일, 확정 규칙) 혼자 재생한다(mFxRun, 사람마다 따로 돌고 1틱마다 mFxTick).
+#   돌려주는 값 = 가장 긴 사람의 연출 시간(초). 그동안 resolve 단계이고, 끝나면 낮으로 넘어간다.
+# 장면 무대: 피해자(대상)의 밤 방. 모든 사람의 밤 방은 같은 자리라서, 장면에 쓰는 더미(대상 더미, 방문자, 수호자, 해골)는 그 장면을 보는 사람에게만 보이고,
+#   보는 동안 그 사람의 자기 더미는 숨긴다. 문(밤 방 동쪽 벽)의 열림/닫힘과 불타는 바닥도 그 사람 화면에만 보낸다(sendBlockChange).
+# 장면(spec = "종류|방문자|대상|수호자|결과|익명", 없는 칸은 "-"):
+#   kill      방문자가 문으로 들어와 대상 앞에 선다 → 암전(실명) → 밝아지면 결과.
+#             결과 die: 대상이 해골(앉은 스켈레톤) / guarddie: 대상은 살아 있고 수호자 자리에 스켈레톤 / live(의사): 아무 일 없이 방문자가 걸어 나감
+#             / soldier: 팅! 소리 후 아무 일 없이 방문자가 걸어 나감. 대상이 살아남는 경우(live, soldier, guarddie)는 방문자가 익명 더미다.
+#             무기: 마피아 구리 검, 자경단 다이아몬드 검, 암살자 네더라이트 검, 도둑 철 검(임시, 정해지지 않음). 익명 더미는 무기를 들지 않는다.
+#             수호자가 있으면 먼저 방패를 든 익명 더미가 문으로 들어와 대상 옆(문 반대쪽)에 선다.
+#   burn      방화(점화). kill 과 같지만 방문자는 부싯돌과 부시를 들고, 결과는 위더 스켈레톤이 불타고 방 바닥이 불탄다.
+#   guardonly 공격이 없던 밤의 수호: 방패를 든 익명 더미가 들어와 대상 옆에 선다.
+#   shaman    주술로 능력이 무효가 된 사람: 자기 더미가 대상 방에 들어와 섰다가 사악한 마법사 주문 소리 → 팅! → 걸어 나간다.
+#   oil       기름 뿌리기: 도약의 물약을 든 익명 더미가 들어와 마녀 웃음 → 물 뿌리는 소리 → 대상 더미에 노란 발광 → 걸어 나간다.
+# 보는 사람: kill/burn = 방문자 본인(익명이어도 본인은 봄), 대상, 수호자 / guardonly = 수호자, 대상 / shaman = 무효가 된 사람 / oil = 방화범, 대상.
+#   대상은 자기에게 온 kill/burn 장면 중 첫 번째만 본다(마피아 여럿이 같은 사람을 노린 경우).
+# 기름 발광: 기름에 젖은 생존자의 원탁 더미와 밤 방 더미는 모두에게 노란색으로 빛난다(팀 mafia_oil). 죽으면 더미가 해골로 바뀌어 사라진다.
+# 장소 키(mbuild.sk 의 mBSaveSpots): fxdoor(문 안쪽, 방문자가 나타나는 자리) fxdoorblock(문 아래 블록) fxvisit(대상 앞에 서는 자리)
+#   fxguard(수호자가 서는 자리) fxfireA/fxfireB(불타는 바닥 범위 양 끝). 하나라도 없으면 연출 없이 "밤이 지나가고 있습니다..." 만 보여 준다.
+# 변수(임시): {-msq::uuid::*}(그 사람이 볼 장면 목록) {-msc::uuid::...}(지금 재생 중인 장면의 엔티티와 값) mFxClear 가 지운다.
+# 미검증: 전체(서버 실행 불가). 마네킹 startUsingItem(방패 들기), 엔티티 이동 걷는 모습, 시간 배분은 실제로 보고 조정해야 한다.
+# ==============================================================================
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.Location
+	org.bukkit.Material
+	org.bukkit.entity.EntityType
+	org.bukkit.inventory.ItemStack
+	org.bukkit.inventory.EquipmentSlot
+	org.bukkit.potion.PotionEffect
+	org.bukkit.potion.PotionEffectType
+	org.bukkit.potion.PotionType
+	org.bukkit.util.Vector
+	net.kyori.adventure.text.Component
+	net.kyori.adventure.text.format.NamedTextColor
+
+function mFxOn() :: boolean:
+	loop "room", "nightcam", "fxdoor", "fxdoorblock", "fxvisit", "fxguard", "fxfireA", "fxfireB":
+		if mLocSet(loop-value) is false:
+			return false
+	return true
+
+# ------------------------------------------------------------------ 도구
+
+function mFxWeapon(role: text) :: object:
+	if {_role} is "mafia":
+		return new ItemStack(Material.COPPER_SWORD)
+	if {_role} is "vigilante":
+		return new ItemStack(Material.DIAMOND_SWORD)
+	if {_role} is "assassin":
+		return new ItemStack(Material.NETHERITE_SWORD)
+	if {_role} is "thief":
+		return new ItemStack(Material.IRON_SWORD)
+	if {_role} is "arsonist":
+		return new ItemStack(Material.FLINT_AND_STEEL)
+	return {_none}
+
+function mFxLeap() :: object:
+	set {_i} to new ItemStack(Material.POTION)
+	set {_m} to {_i}.getItemMeta()
+	{_m}.setBasePotionType(PotionType.LEAPING)
+	{_i}.setItemMeta({_m})
+	return {_i}
+
+# 그 사람에게만 보이는 엔티티로 만든다
+function mFxOnly(e: object, vid: text):
+	{_e}.setPersistent(false)
+	{_e}.setVisibleByDefault(false)
+	mScTrack({_e})
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		{_p}.showEntity(mScPlugin(), {_e})
+
+# 장면용 마네킹(owner 가 "-" 면 익명: 기본 모습). 이름표 없음, 그 사람에게만 보임.
+function mFxDummy(vid: text, l: location, owner: text) :: object:
+	set {_m} to {_l}.getWorld().spawnEntity({_l}, EntityType.MANNEQUIN)
+	{_m}.setInvulnerable(true)
+	{_m}.setSilent(true)
+	{_m}.setGravity(false)
+	{_m}.setImmovable(true)
+	{_m}.setDescription(Component.empty())
+	if {_owner} is not "-":
+		mScSkin({_m}, {_owner})
+	{_m}.setCustomNameVisible(false)
+	{_m}.setRotation({_l}.getYaw(), 0)
+	mFxOnly({_m}, {_vid})
+	return {_m}
+
+# a 에서 b 로 f(0~1)만큼 옮기고, 가는 방향을 보게 한다
+function mFxWalk(e: object, a: location, b: location, f: number):
+	if {_e} is not set:
+		stop
+	if {_f} > 1:
+		set {_f} to 1
+	set {_x} to {_a}.getX() + ({_b}.getX() - {_a}.getX()) * {_f}
+	set {_z} to {_a}.getZ() + ({_b}.getZ() - {_a}.getZ()) * {_f}
+	set {_l} to new Location({_a}.getWorld(), {_x}, {_a}.getY(), {_z})
+	set {_dx} to {_b}.getX() - {_a}.getX()
+	set {_dz} to {_b}.getZ() - {_a}.getZ()
+	if {_dx} is 0:
+		if {_dz} is 0:
+			set {_dx} to 0.01
+	{_l}.setDirection(new Vector({_dx}, 0, {_dz}))
+	{_e}.teleport({_l})
+
+# 서 있는 자리에서 to 쪽을 바라보게 한다
+function mFxFace(e: object, to: location):
+	if {_e} is not set:
+		stop
+	set {_l} to {_e}.getLocation()
+	set {_dx} to {_to}.getX() - {_l}.getX()
+	set {_dz} to {_to}.getZ() - {_l}.getZ()
+	if {_dx} is 0:
+		if {_dz} is 0:
+			stop
+	{_l}.setDirection(new Vector({_dx}, 0, {_dz}))
+	{_e}.teleport({_l})
+
+# 문 열기/닫기(그 사람 화면에만) + 소리
+function mFxDoor(vid: text, open: boolean):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	set {_l} to mLocLoad("fxdoorblock")
+	set {_u} to new Location({_l}.getWorld(), {_l}.getX(), {_l}.getY() + 1, {_l}.getZ())
+	set {_o} to "false"
+	if {_open} is true:
+		set {_o} to "true"
+	{_p}.sendBlockChange({_l}, Bukkit.createBlockData("minecraft:oak_door[half=lower,facing=west,hinge=left,open=%{_o}%]"))
+	{_p}.sendBlockChange({_u}, Bukkit.createBlockData("minecraft:oak_door[half=upper,facing=west,hinge=left,open=%{_o}%]"))
+	if {_open} is true:
+		mSound({_p}, "block.wooden_door.open", 1, 1)
+	else:
+		mSound({_p}, "block.wooden_door.close", 1, 1)
+
+function mFxSound(vid: text, s: text, v: number, pi: number):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		mSound({_p}, {_s}, {_v}, {_pi})
+
+function mFxBlind(vid: text, t: number):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		{_p}.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, {_t}, 0, false, false))
+
+# 그 사람의 자기 더미(밤 방)를 숨기거나 다시 보여 준다(장면 동안 대상 더미가 그 의자에 앉으므로)
+function mFxSelf(vid: text, show: boolean):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	loop "selfseat", "self":
+		set {_e} to {-ms::%loop-value%::%{_vid}%}
+		if {_e} is set:
+			if {_show} is true:
+				{_p}.showEntity(mScPlugin(), {_e})
+			else:
+				{_p}.hideEntity(mScPlugin(), {_e})
+
+# 기름 발광 팀(노란색)
+function mFxTeam() :: object:
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_tm} to {_sb}.getTeam("mafia_oil")
+	if {_tm} is not set:
+		set {_tm} to {_sb}.registerNewTeam("mafia_oil")
+		{_tm}.color(NamedTextColor.YELLOW)
+	return {_tm}
+
+function mFxGlow(e: object):
+	if {_e} is not set:
+		stop
+	set {_tm} to mFxTeam()
+	{_tm}.addEntity({_e})
+	{_e}.setGlowing(true)
+
+# 기름에 젖은 생존자의 원탁 더미와 밤 방 더미에 발광(낮이 시작될 때 mSceneDay 가 부른다)
+function mFxOilGlow():
+	loop {-m::players::*}:
+		if {-m::oil::%loop-value%} is true:
+			if {-m::alive::%loop-value%} is true:
+				mFxGlow({-ms::dummy::%loop-value%})
+				mFxGlow({-ms::self::%loop-value%})
+
+function mFxClear():
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_tm} to {_sb}.getTeam("mafia_oil")
+	if {_tm} is set:
+		{_tm}.unregister()
+	delete {-msc::*}
+	delete {-msq::*}
+
+# ------------------------------------------------------------------ 장면 목록 만들기
+
+# 장면 길이(틱). 수호자가 있으면 앞에 30틱(수호자 입장)이 붙는다.
+function mFxLen(spec: text) :: number:
+	set {_f::*} to split {_spec} at "|"
+	set {_k} to {_f::1}
+	set {_g} to 0
+	if {_f::4} is not "-":
+		set {_g} to 30
+	if {_k} is "kill":
+		if {_f::5} is "live":
+			return {_g} + 118
+		if {_f::5} is "soldier":
+			return {_g} + 118
+		return {_g} + 90
+	if {_k} is "burn":
+		return 100
+	if {_k} is "guardonly":
+		return 50
+	if {_k} is "shaman":
+		return 102
+	if {_k} is "oil":
+		return 97
+	return 20
+
+function mFxAddA(vid: text, spec: text):
+	if mIsBot({_vid}) is true:
+		stop
+	add {_spec} to {-msq::a::%{_vid}%::*}
+
+function mFxAddV(vid: text, spec: text):
+	if mIsBot({_vid}) is true:
+		stop
+	add {_spec} to {-msq::v::%{_vid}%::*}
+
+# 밤 처리 결과를 연출로 보여 준다. 돌려주는 값: 연출에 걸리는 초(최소 3초). 연출을 쓰지 않으면 1.
+function mSceneResolve() :: number:
+	delete {-msq::*}
+	if mSceneOn() is not true:
+		return 1
+	if mFxOn() is not true:
+		loop {-m::players::*}:
+			set {_p} to mPlayerOf(loop-value)
+			if {_p} is set:
+				send title "" with subtitle "&7밤이 지나가고 있습니다..." to {_p} for 3 seconds
+		return 3
+	# 수호자가 지킨 대상(주술로 무효가 된 수호는 뺀다)
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "null":
+			set {_nul::%{_e::3}%} to true
+	loop {-m::players::*}:
+		if {-m::role::%loop-value%} is "guardian":
+			set {_t} to {-m::act::%loop-value%}
+			if {_t} is set:
+				if {_nul::%loop-value%} is not true:
+					set {_gof::%{_t}%} to loop-value
+	# 사건 → 장면
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		set {_ty} to {_e::1}
+		set {_a} to {_e::2}
+		set {_x} to {_e::3}
+		set {_spec} to ""
+		set {_g} to "-"
+		if {_ty} is "kill":
+			set {_t} to {-m::act::%{_a}%}
+			if {_t} is not set:
+				set {_t} to {_x}
+			if {_t} is not {_x}:
+				set {_spec} to "kill|%{_a}%|%{_t}%|%{_x}%|guarddie|1"
+				set {_g} to {_x}
+			else:
+				set {_spec} to "kill|%{_a}%|%{_t}%|-|die|0"
+		else if {_ty} is "healed":
+			set {_t} to {_x}
+			if {_gof::%{_t}%} is set:
+				set {_g} to {_gof::%{_t}%}
+			set {_spec} to "kill|%{_a}%|%{_t}%|%{_g}%|live|1"
+		else if {_ty} is "blocked":
+			set {_t} to {_x}
+			if {_gof::%{_t}%} is set:
+				set {_g} to {_gof::%{_t}%}
+			set {_spec} to "kill|%{_a}%|%{_t}%|%{_g}%|soldier|1"
+		else if {_ty} is "burn":
+			set {_t} to {_x}
+			set {_spec} to "burn|%{_a}%|%{_t}%|-|burn|0"
+		else if {_ty} is "oil":
+			set {_t} to {_x}
+			mFxAddA({_a}, "oil|-|%{_t}%|-|oil|1")
+			mFxAddV({_t}, "oil|-|%{_t}%|-|oil|1")
+		else if {_ty} is "null":
+			set {_t} to {-m::act::%{_a}%}
+			if {_t} is set:
+				mFxAddA({_x}, "shaman|%{_x}%|%{_t}%|-|null|0")
+		if {_spec} is not "":
+			set {_hit::%{_t}%} to true
+			mFxAddA({_a}, {_spec})
+			if {_g} is not "-":
+				mFxAddA({_g}, {_spec})
+			if {_vseen::%{_t}%} is not true:
+				set {_vseen::%{_t}%} to true
+				mFxAddV({_t}, {_spec})
+	# 공격이 없던 수호
+	loop indices of {_gof::*}:
+		if {_hit::%loop-value%} is not true:
+			set {_spec} to "guardonly|-|%loop-value%|%{_gof::%loop-value%}%|guard|1"
+			mFxAddA({_gof::%loop-value%}, {_spec})
+			mFxAddV(loop-value, {_spec})
+	# 사람마다 재생(자기가 한 일 → 당한 일)
+	set {_max} to 0
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		delete {_q::*}
+		add {-msq::a::%{_id}%::*} to {_q::*}
+		add {-msq::v::%{_id}%::*} to {_q::*}
+		set {_p} to mPlayerOf({_id})
+		if {_p} is set:
+			if size of {_q::*} is 0:
+				send title "" with subtitle "&7밤이 지나가고 있습니다..." to {_p} for 3 seconds
+			else:
+				set {_sum} to 0
+				loop {_q::*}:
+					add mFxLen(loop-value-2) + 5 to {_sum}
+				if {_sum} > {_max}:
+					set {_max} to {_sum}
+				set {-msq::%{_id}%::*} to {_q::*}
+				mFxRun({_id})
+	set {_sec} to ceil({_max} / 20) + 1
+	if {_sec} < 3:
+		set {_sec} to 3
+	return {_sec}
+
+# ------------------------------------------------------------------ 재생
+
+function mFxRun(vid: text):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	mCamTo({_vid}, "nightcam")
+	mFxSelf({_vid}, false)
+	loop {-msq::%{_vid}%::*}:
+		mFxSetup({_vid}, loop-value)
+		set {_len} to {-msc::%{_vid}%::len}
+		set {_t} to 0
+		while {_t} < {_len}:
+			wait 1 tick
+			if mSceneOn() is not true:
+				stop
+			add 1 to {_t}
+			mFxTick({_vid}, {_t})
+		mFxCleanup({_vid})
+		wait 5 ticks
+	mFxSelf({_vid}, true)
+	delete {-msq::%{_vid}%::*}
+
+function mFxSetup(vid: text, spec: text):
+	delete {-msc::%{_vid}%::*}
+	set {_f::*} to split {_spec} at "|"
+	set {-msc::%{_vid}%::kind} to {_f::1}
+	set {-msc::%{_vid}%::a} to {_f::2}
+	set {-msc::%{_vid}%::t} to {_f::3}
+	set {-msc::%{_vid}%::g} to {_f::4}
+	set {-msc::%{_vid}%::res} to {_f::5}
+	set {-msc::%{_vid}%::anon} to {_f::6}
+	set {-msc::%{_vid}%::len} to mFxLen({_spec})
+	# 대상 더미: 밤 방 의자(보이지 않는 디스플레이)에 앉힌다
+	set {_r} to mLocLoad("room")
+	set {_seat} to {_r}.getWorld().spawnEntity({_r}, EntityType.ITEM_DISPLAY)
+	mFxOnly({_seat}, {_vid})
+	set {_v} to mFxDummy({_vid}, {_r}, {_f::3})
+	{_seat}.addPassenger({_v})
+	{_v}.setRotation({_r}.getYaw(), 0)
+	set {-msc::%{_vid}%::vseat} to {_seat}
+	set {-msc::%{_vid}%::vic} to {_v}
+	if {_f::1} is "oil":
+		stop
+	if {-m::oil::%{_f::3}%} is true:
+		if {-m::alive::%{_f::3}%} is true:
+			mFxGlow({_v})
+
+# 방문자(또는 수호자)를 문에 세운다
+function mFxEnter(vid: text, owner: text, item: object, key: text):
+	set {_d} to mLocLoad("fxdoor")
+	set {_m} to mFxDummy({_vid}, {_d}, {_owner})
+	if {_item} is set:
+		{_m}.getEquipment().setItemInMainHand({_item})
+	set {-msc::%{_vid}%::%{_key}%} to {_m}
+
+# 대상 자리에 해골(앉은 스켈레톤 / 위더 스켈레톤)
+function mFxSkull(vid: text, wither: boolean):
+	set {_v} to {-msc::%{_vid}%::vic}
+	if {_v} is set:
+		{_v}.remove()
+	set {_r} to mLocLoad("room")
+	set {_type} to EntityType.SKELETON
+	if {_wither} is true:
+		set {_type} to EntityType.WITHER_SKELETON
+	set {_sk} to {_r}.getWorld().spawnEntity({_r}, {_type})
+	{_sk}.setAI(false)
+	{_sk}.setSilent(true)
+	{_sk}.setInvulnerable(true)
+	{_sk}.getEquipment().clear()
+	mFxOnly({_sk}, {_vid})
+	set {_seat} to {-msc::%{_vid}%::vseat}
+	if {_seat} is set:
+		{_seat}.addPassenger({_sk})
+	{_sk}.setRotation({_r}.getYaw(), 0)
+	if {_wither} is true:
+		{_sk}.setFireTicks(400)
+	set {-msc::%{_vid}%::skel} to {_sk}
+
+# 불타는 방(바닥 위에 불, 그 사람 화면에만)
+function mFxFire(vid: text):
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is not set:
+		stop
+	set {_a} to mLocLoad("fxfireA")
+	set {_b} to mLocLoad("fxfireB")
+	set {_fire} to Bukkit.createBlockData("minecraft:fire")
+	loop 16 times:
+		set {_x} to random integer between {_a}.getBlockX() and {_b}.getBlockX()
+		set {_z} to random integer between {_a}.getBlockZ() and {_b}.getBlockZ()
+		set {_l} to new Location({_a}.getWorld(), {_x}, {_a}.getBlockY(), {_z})
+		{_p}.sendBlockChange({_l}, {_fire})
+		add {_l} to {-msc::%{_vid}%::fire::*}
+
+function mFxCleanup(vid: text):
+	loop "vis", "vic", "vseat", "grd", "skel", "gskel":
+		set {_e} to {-msc::%{_vid}%::%loop-value%}
+		if {_e} is set:
+			{_e}.remove()
+	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		loop {-msc::%{_vid}%::fire::*}:
+			set {_l} to loop-value
+			{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
+		set {_l} to mLocLoad("fxdoorblock")
+		set {_u} to new Location({_l}.getWorld(), {_l}.getX(), {_l}.getY() + 1, {_l}.getZ())
+		{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
+		{_p}.sendBlockChange({_u}, {_u}.getBlock().getBlockData())
+	delete {-msc::%{_vid}%::*}
+
+# 1틱마다(t 는 1부터)
+function mFxTick(vid: text, t: number):
+	set {_k} to {-msc::%{_vid}%::kind}
+	set {_g} to {-msc::%{_vid}%::g}
+	set {_door} to mLocLoad("fxdoor")
+	set {_visit} to mLocLoad("fxvisit")
+	set {_gpos} to mLocLoad("fxguard")
+	set {_room} to mLocLoad("room")
+	# ---- 수호자 입장(앞 30틱): 방패를 든 익명 더미가 대상 옆(문 반대쪽)에 선다
+	set {_u} to {_t}
+	if {_g} is not "-":
+		set {_u} to {_t} - 30
+		if {_t} is 1:
+			mFxDoor({_vid}, true)
+			mFxEnter({_vid}, "-", {_none}, "grd")
+			{-msc::%{_vid}%::grd}.getEquipment().setItemInOffHand(new ItemStack(Material.SHIELD))
+		if {_t} <= 25:
+			mFxWalk({-msc::%{_vid}%::grd}, {_door}, {_gpos}, {_t} / 25)
+		if {_t} is 8:
+			mFxDoor({_vid}, false)
+		if {_t} is 26:
+			mFxFace({-msc::%{_vid}%::grd}, {_door})
+			{-msc::%{_vid}%::grd}.startUsingItem(EquipmentSlot.OFF_HAND)
+	if {_k} is "guardonly":
+		stop
+	if {_u} < 1:
+		stop
+	set {_res} to {-msc::%{_vid}%::res}
+	set {_a} to {-msc::%{_vid}%::a}
+	# ---- 입장: 문 열림 → 대상 앞까지 걸어옴
+	if {_u} is 1:
+		mFxDoor({_vid}, true)
+		set {_owner} to {_a}
+		set {_item} to {_none}
+		if {-msc::%{_vid}%::anon} is "1":
+			set {_owner} to "-"
+		else if {_k} is "burn":
+			set {_item} to mFxWeapon("arsonist")
+		else if {_k} is "kill":
+			set {_item} to mFxWeapon({-m::role::%{_a}%})
+		else if {_k} is "shaman":
+			set {_item} to mFxWeapon({-m::role::%{_a}%})
+		if {_k} is "oil":
+			set {_owner} to "-"
+			set {_item} to mFxLeap()
+		mFxEnter({_vid}, {_owner}, {_item}, "vis")
+	set {_vis} to {-msc::%{_vid}%::vis}
+	if {_u} <= 30:
+		mFxWalk({_vis}, {_door}, {_visit}, {_u} / 30)
+	if {_u} is 8:
+		mFxDoor({_vid}, false)
+	if {_u} is 31:
+		mFxFace({_vis}, {_room})
+	# ---- 종류별
+	if {_k} is "kill" or "burn":
+		if {_u} is 40:
+			mFxBlind({_vid}, 45)
+		if {_u} is 48:
+			if {_k} is "burn":
+				mFxSound({_vid}, "item.flintandsteel.use", 1, 1)
+			else:
+				mFxSound({_vid}, "entity.player.attack.strong", 1, 1)
+		if {_u} is 52:
+			if {_k} is "burn":
+				mFxSound({_vid}, "entity.blaze.shoot", 1, 0.8)
+			else if {_res} is "die":
+				mFxSound({_vid}, "entity.player.hurt", 1, 1)
+			else if {_res} is "guarddie":
+				mFxSound({_vid}, "entity.player.hurt", 1, 1)
+		if {_u} is 60:
+			if {_res} is "die":
+				mFxSkull({_vid}, false)
+				{_vis}.remove()
+			else if {_res} is "burn":
+				mFxSkull({_vid}, true)
+				mFxFire({_vid})
+				{_vis}.remove()
+			else if {_res} is "guarddie":
+				set {_gd} to {-msc::%{_vid}%::grd}
+				if {_gd} is set:
+					{_gd}.remove()
+				set {_sk} to {_gpos}.getWorld().spawnEntity({_gpos}, EntityType.SKELETON)
+				{_sk}.setAI(false)
+				{_sk}.setSilent(true)
+				{_sk}.setInvulnerable(true)
+				{_sk}.setGravity(false)
+				{_sk}.getEquipment().clear()
+				mFxOnly({_sk}, {_vid})
+				set {-msc::%{_vid}%::gskel} to {_sk}
+				{_vis}.remove()
+		if {_u} is 64:
+			if {_res} is "burn":
+				mFxSound({_vid}, "block.fire.ambient", 1, 1)
+		if {_u} is 82:
+			if {_res} is "soldier":
+				mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
+		# 살아남은 경우: 방문자가 걸어 나간다
+		if {_res} is "live" or "soldier":
+			if {_u} >= 85:
+				if {_u} <= 110:
+					mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 85) / 25)
+			if {_u} is 100:
+				mFxDoor({_vid}, true)
+			if {_u} is 112:
+				{_vis}.remove()
+				mFxDoor({_vid}, false)
+	else if {_k} is "shaman":
+		if {_u} is 35:
+			mFxSound({_vid}, "entity.evoker.prepare_wololo", 1, 1)
+		if {_u} is 60:
+			mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
+		if {_u} >= 65:
+			if {_u} <= 95:
+				mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 65) / 30)
+		if {_u} is 90:
+			mFxDoor({_vid}, true)
+		if {_u} is 100:
+			{_vis}.remove()
+			mFxDoor({_vid}, false)
+	else if {_k} is "oil":
+		if {_u} is 35:
+			mFxSound({_vid}, "entity.witch.celebrate", 1, 1)
+		if {_u} is 50:
+			mFxSound({_vid}, "entity.splash_potion.break", 1, 1)
+		if {_u} is 52:
+			mFxGlow({-msc::%{_vid}%::vic})
+		if {_u} >= 60:
+			if {_u} <= 90:
+				mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 60) / 30)
+		if {_u} is 85:
+			mFxDoor({_vid}, true)
+		if {_u} is 95:
+			{_vis}.remove()
+			mFxDoor({_vid}, false)
