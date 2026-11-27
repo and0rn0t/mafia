@@ -5,6 +5,7 @@
 #   돌려주는 값 = 가장 긴 사람의 연출 시간(초). 그동안 resolve 단계이고, 끝나면 낮으로 넘어간다.
 # 장면 무대: 피해자(대상)의 밤 방. 모든 사람의 밤 방은 같은 자리라서, 장면에 쓰는 더미(대상 더미, 방문자, 수호자, 해골)는 그 장면을 보는 사람에게만 보이고,
 #   보는 동안 그 사람의 자기 더미는 숨긴다. 문(밤 방 동쪽 벽)의 열림/닫힘과 불타는 바닥도 그 사람 화면에만 보낸다(sendBlockChange).
+# 방문 장면은 공통으로 입장(문으로 들어와 대상 앞에 섬) → 쉼 → 능력 → 쉼 → 퇴장(방문자와 살아 있는 수호자가 문으로 걸어 나감) 순서다(시간표는 mFxTick 위 주석).
 # 장면(spec = "종류|방문자|대상|수호자|결과|익명", 없는 칸은 "-"):
 #   kill      방문자가 문으로 들어와 대상 앞에 선다 → 암전(실명) → 밝아지면 결과.
 #             결과 die: 대상이 해골(앉은 스켈레톤) / guarddie: 대상은 살아 있고 수호자 자리에 스켈레톤 / live(의사): 아무 일 없이 방문자가 걸어 나감
@@ -195,27 +196,24 @@ function mFxClear():
 
 # ------------------------------------------------------------------ 장면 목록 만들기
 
-# 장면 길이(틱). 수호자가 있으면 앞에 30틱(수호자 입장)이 붙는다.
+# 장면 길이(틱). 방문 장면은 입장(문 → 대상 앞, 30틱) → 쉼 → 능력 → 쉼 → 퇴장(대상 앞 → 문, 25틱) 순서.
+# 수호자가 있으면 앞에 40틱(수호자 입장 25틱 + 쉼 15틱)이 붙고, 수호자는 마지막에 방문자와 같이 나간다(대신 죽으면 해골로 남음).
 function mFxLen(spec: text) :: number:
 	set {_f::*} to split {_spec} at "|"
 	set {_k} to {_f::1}
 	set {_g} to 0
 	if {_f::4} is not "-":
-		set {_g} to 30
+		set {_g} to 40
 	if {_k} is "kill":
-		if {_f::5} is "live":
-			return {_g} + 118
-		if {_f::5} is "soldier":
-			return {_g} + 118
-		return {_g} + 90
+		return {_g} + 150
 	if {_k} is "burn":
-		return 100
+		return 150
 	if {_k} is "guardonly":
-		return 50
+		return 100
 	if {_k} is "shaman":
-		return 102
+		return 130
 	if {_k} is "oil":
-		return 97
+		return 125
 	if {_k} is "leave":
 		return 60
 	return 20
@@ -444,7 +442,11 @@ function mFxCleanup(vid: text):
 		{_p}.sendBlockChange({_u}, {_u}.getBlock().getBlockData())
 	delete {-msc::%{_vid}%::*}
 
-# 1틱마다(t 는 1부터)
+# 1틱마다(t 는 1부터). 방문 장면의 시간표(u = 수호자 입장을 뺀 시간):
+#   입장 1~30(문 열림 1, 닫힘 8) / 쉼 31~49 / 능력 50~ / 쉼 / 퇴장(대상 앞 → 문 25틱, 문 열림, 사라지고 문 닫힘)
+#   kill/burn: 암전 50(45틱), 공격 소리 58·62, 결과 70(해골/위더/수호자 해골), 군인 팅 95, 퇴장 115~140, 문 130, 끝 142
+#   shaman: 주문 50, 팅 75, 퇴장 95~120, 문 110, 끝 122 / oil: 마녀 웃음 50, 물 뿌림 65, 발광 67, 퇴장 90~115, 문 105, 끝 117
+#   guardonly: 수호자 입장 1~25, 서 있기, 퇴장 65~90, 문 80, 끝 92
 function mFxTick(vid: text, t: number):
 	set {_k} to {-msc::%{_vid}%::kind}
 	set {_g} to {-msc::%{_vid}%::g}
@@ -470,22 +472,33 @@ function mFxTick(vid: text, t: number):
 		if {_t} is 52:
 			mFxDoor({_vid}, false)
 		stop
-	# ---- 수호자 입장(앞 30틱): 방패를 든 익명 더미가 대상 옆(문 반대쪽)에 선다
+	set {_gd} to {-msc::%{_vid}%::grd}
+	# ---- 수호자 입장(앞 40틱): 방패를 든 익명 더미가 대상 옆(문 반대쪽)에 선다
 	set {_u} to {_t}
 	if {_g} is not "-":
-		set {_u} to {_t} - 30
+		if {_k} is not "guardonly":
+			set {_u} to {_t} - 40
 		if {_t} is 1:
 			mFxDoor({_vid}, true)
 			mFxEnter({_vid}, "-", {_none}, "grd")
-			{-msc::%{_vid}%::grd}.getEquipment().setItemInOffHand(new ItemStack(Material.SHIELD))
+			set {_gd} to {-msc::%{_vid}%::grd}
+			{_gd}.getEquipment().setItemInOffHand(new ItemStack(Material.SHIELD))
 		if {_t} <= 25:
-			mFxWalk({-msc::%{_vid}%::grd}, {_door}, {_gpos}, {_t} / 25)
+			mFxWalk({_gd}, {_door}, {_gpos}, {_t} / 25)
 		if {_t} is 8:
 			mFxDoor({_vid}, false)
 		if {_t} is 26:
-			mFxFace({-msc::%{_vid}%::grd}, {_door})
-			{-msc::%{_vid}%::grd}.startUsingItem(EquipmentSlot.OFF_HAND)
+			mFxFace({_gd}, {_door})
+			{_gd}.startUsingItem(EquipmentSlot.OFF_HAND)
 	if {_k} is "guardonly":
+		if {_t} >= 65:
+			if {_t} <= 90:
+				mFxWalk({_gd}, {_gpos}, {_door}, ({_t} - 65) / 25)
+		if {_t} is 80:
+			mFxDoor({_vid}, true)
+		if {_t} is 92:
+			{_gd}.remove()
+			mFxDoor({_vid}, false)
 		stop
 	if {_u} < 1:
 		stop
@@ -515,34 +528,32 @@ function mFxTick(vid: text, t: number):
 		mFxDoor({_vid}, false)
 	if {_u} is 31:
 		mFxFace({_vis}, {_room})
-	# ---- 종류별
+	# ---- 능력, 퇴장 시각
+	set {_out} to 115
 	if {_k} is "kill" or "burn":
-		if {_u} is 40:
+		if {_u} is 50:
 			mFxBlind({_vid}, 45)
-		if {_u} is 48:
+		if {_u} is 58:
 			if {_k} is "burn":
 				mFxSound({_vid}, "item.flintandsteel.use", 1, 1)
 			else:
 				mFxSound({_vid}, "entity.player.attack.strong", 1, 1)
-		if {_u} is 52:
+		if {_u} is 62:
 			if {_k} is "burn":
 				mFxSound({_vid}, "entity.blaze.shoot", 1, 0.8)
-			else if {_res} is "die":
+			else if {_res} is "die" or "guarddie":
 				mFxSound({_vid}, "entity.player.hurt", 1, 1)
-			else if {_res} is "guarddie":
-				mFxSound({_vid}, "entity.player.hurt", 1, 1)
-		if {_u} is 60:
+		if {_u} is 70:
 			if {_res} is "die":
 				mFxSkull({_vid}, false)
-				{_vis}.remove()
 			else if {_res} is "burn":
 				mFxSkull({_vid}, true)
 				mFxFire({_vid})
-				{_vis}.remove()
 			else if {_res} is "guarddie":
-				set {_gd} to {-msc::%{_vid}%::grd}
 				if {_gd} is set:
 					{_gd}.remove()
+					delete {-msc::%{_vid}%::grd}
+					delete {_gd}
 				set {_sk} to {_gpos}.getWorld().spawnEntity({_gpos}, EntityType.SKELETON)
 				{_sk}.setAI(false)
 				{_sk}.setSilent(true)
@@ -551,48 +562,38 @@ function mFxTick(vid: text, t: number):
 				{_sk}.getEquipment().clear()
 				mFxOnly({_sk}, {_vid})
 				set {-msc::%{_vid}%::gskel} to {_sk}
-				{_vis}.remove()
-		if {_u} is 64:
+		if {_u} is 74:
 			if {_res} is "burn":
 				mFxSound({_vid}, "block.fire.ambient", 1, 1)
-		if {_u} is 82:
+		if {_u} is 95:
 			if {_res} is "soldier":
 				mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
-		# 살아남은 경우: 방문자가 걸어 나간다
-		if {_res} is "live" or "soldier":
-			if {_u} >= 85:
-				if {_u} <= 110:
-					mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 85) / 25)
-			if {_u} is 100:
-				mFxDoor({_vid}, true)
-			if {_u} is 112:
-				{_vis}.remove()
-				mFxDoor({_vid}, false)
 	else if {_k} is "shaman":
-		if {_u} is 35:
-			mFxSound({_vid}, "entity.evoker.prepare_wololo", 1, 1)
-		if {_u} is 60:
-			mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
-		if {_u} >= 65:
-			if {_u} <= 95:
-				mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 65) / 30)
-		if {_u} is 90:
-			mFxDoor({_vid}, true)
-		if {_u} is 100:
-			{_vis}.remove()
-			mFxDoor({_vid}, false)
-	else if {_k} is "oil":
-		if {_u} is 35:
-			mFxSound({_vid}, "entity.witch.celebrate", 1, 1)
+		set {_out} to 95
 		if {_u} is 50:
+			mFxSound({_vid}, "entity.evoker.prepare_wololo", 1, 1)
+		if {_u} is 75:
+			mFxSound({_vid}, "block.anvil.place", 0.8, 1.8)
+	else if {_k} is "oil":
+		set {_out} to 90
+		if {_u} is 50:
+			mFxSound({_vid}, "entity.witch.celebrate", 1, 1)
+		if {_u} is 65:
 			mFxSound({_vid}, "entity.splash_potion.break", 1, 1)
-		if {_u} is 52:
+		if {_u} is 67:
 			mFxGlow({-msc::%{_vid}%::vic})
-		if {_u} >= 60:
-			if {_u} <= 90:
-				mFxWalk({_vis}, {_visit}, {_door}, ({_u} - 60) / 30)
-		if {_u} is 85:
-			mFxDoor({_vid}, true)
-		if {_u} is 95:
+	# ---- 퇴장: 방문자(그리고 살아 있는 수호자)가 문으로 걸어 나간다
+	if {_u} >= {_out}:
+		if {_u} <= {_out} + 25:
+			set {_f} to ({_u} - {_out}) / 25
+			mFxWalk({_vis}, {_visit}, {_door}, {_f})
+			if {_gd} is set:
+				mFxWalk({_gd}, {_gpos}, {_door}, {_f})
+	if {_u} is {_out} + 15:
+		mFxDoor({_vid}, true)
+	if {_u} is {_out} + 27:
+		if {_vis} is set:
 			{_vis}.remove()
-			mFxDoor({_vid}, false)
+		if {_gd} is set:
+			{_gd}.remove()
+		mFxDoor({_vid}, false)
