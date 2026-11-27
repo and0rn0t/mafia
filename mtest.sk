@@ -107,6 +107,9 @@ function mBotKOfRole(r: text) :: text:
 
 # 게임 시작 때 한 번: 의심 초기값, 마피아 팀은 서로 안다
 function mBotInit():
+	delete {-mt::sum::*}
+	delete {-mtllm::sf}
+	delete {-mtllm::sd}
 	delete {-mt::chat::*}
 	delete {-mt::pmem::*}
 	delete {-mt::k::*}
@@ -1066,7 +1069,14 @@ function mBotPMem(b: text, line: text):
 	add "[%{-m::day}%일차] %{_line}%" to {-mt::pmem::%{_b}%::*}
 
 # 기억을 AI 에게 줄 글로: 사건(전체 알림) 최근 40줄 + 대화 최근 40줄
+# 기억을 AI 에게 줄 글로: 지난 날들의 요약(mBotSummarize) + 최근 사건 40줄 + 대화(요약이 없는 날과 오늘, 최근 40줄)
 function mBotHistory() :: text:
+	set {_sum} to ""
+	set {_d} to 1
+	while {_d} < {-m::day}:
+		if {-mt::sum::%{_d}%} is set:
+			set {_sum} to "%{_sum}%[%{_d}%일차 요약] %{-mt::sum::%{_d}%}%%nl%"
+		add 1 to {_d}
 	set {_n} to size of {-m::log::*}
 	set {_from} to {_n} - 39
 	set {_i} to 0
@@ -1083,15 +1093,91 @@ function mBotHistory() :: text:
 				# 봇이 한 말은 대화 기억에 따로 있으니 뺀다
 				if {_l} does not contain "<":
 					set {_ev} to "%{_ev}%%{_l}%%nl%"
-	set {_n} to size of {-mt::chat::*}
+	# 대화: 요약이 있는 날은 빼고(요약으로 대신), 최근 40줄
+	loop {-mt::chat::*}:
+		set {_l} to loop-value
+		set {_ld} to {_l}.replaceAll("^\[(\d+)일차\].*$", "$1")
+		if {-mt::sum::%{_ld}%} is not set:
+			add {_l} to {_keep::*}
+	set {_n} to size of {_keep::*}
 	set {_from} to {_n} - 39
 	set {_i} to 0
 	set {_ch} to ""
-	loop {-mt::chat::*}:
+	loop {_keep::*}:
 		add 1 to {_i}
 		if {_i} >= {_from}:
 			set {_ch} to "%{_ch}%%loop-value%%nl%"
-	return "[지금까지 일어난 일]%nl%%{_ev}%%nl%[지금까지의 대화]%nl%%{_ch}%"
+	return "[지난 날 요약]%nl%%{_sum}%%nl%[최근 일어난 일]%nl%%{_ev}%%nl%[대화]%nl%%{_ch}%"
+
+# d 일차에 공개된 일(기록)과 대화를 글로
+function mBotDayText(d: number) :: text:
+	set {_t} to ""
+	loop {-m::log::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "*":
+			if {_e::2} contains "[%{_d}%일차":
+				set {_l} to {_e::3}
+				set {_l} to {_l}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+				if {_l} does not contain "<":
+					set {_t} to "%{_t}%%{_l}%%nl%"
+	loop {-mt::chat::*}:
+		if loop-value starts with "[%{_d}%일차]":
+			set {_t} to "%{_t}%%loop-value%%nl%"
+	return {_t}
+
+# 하루가 끝나면(다음 밤이 시작될 때) 그날을 AI 로 요약해 둔다(공개된 사실만, 모든 봇이 같이 쓴다). 하루 한 번 요청
+function mBotSummarize(d: number):
+	if mBotLlmOn() is false:
+		stop
+	if {_d} < 1:
+		stop
+	if {-mt::sum::%{_d}%} is set:
+		stop
+	if {-mtllm::sf} is set:
+		stop
+	set {_txt} to mBotDayText({_d})
+	if {_txt} is "":
+		stop
+	set {_ps} to ""
+	loop {-m::players::*}:
+		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
+	set {_sys} to "너는 한국어 마피아 게임의 하루 기록을 요약한다. 참가자: %{_ps}%. 공개된 사실만 6줄 이내로 써라. 사람은 '3번 이름'으로 쓴다. 빠뜨리지 말 것: 누가 어떤 직업을 주장했는지(경찰 결과 포함), 누가 누구를 의심하거나 변호했는지, 말이 바뀌거나 모순된 사람, 투표 결과와 처형, 밤 사망자, 공개된 직업. 추측이나 설명은 쓰지 마라."
+	set {-mtllm::sf} to mBotLlmPost({_sys}, "%{_d}%일차 기록:%nl%%{_txt}%", 900)
+	set {-mtllm::sd} to {_d}
+	set {-mtllm::st} to {-mau::sec}
+
+function mBotSummaryPoll():
+	set {_f} to {-mtllm::sf}
+	set {_done} to false
+	set {_txt} to ""
+	if {_f}.isDone() is true:
+		set {_done} to true
+		if {_f}.isCompletedExceptionally() is false:
+			set {_res} to {_f}.get()
+			if {_res}.statusCode() is 200:
+				set {_o} to JsonParser.parseString({_res}.body()).getAsJsonObject()
+				if {_o}.has("choices") is true:
+					set {_txt} to {_o}.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString()
+	else if {-mau::sec} - {-mtllm::st} > mBotLlmWait() + 5:
+		set {_done} to true
+		{_f}.cancel(true)
+	if {_done} is false:
+		stop
+	set {_d} to {-mtllm::sd}
+	delete {-mtllm::sf}
+	delete {-mtllm::sd}
+	delete {-mtllm::st}
+	if {_txt} is "":
+		stop
+	set {_txt} to {_txt}.replaceAll("[&§]", "").replaceAll("[\r\n]+", " / ").trim()
+	if {_txt}.length() > 700:
+		set {_txt} to {_txt}.substring(0, 700)
+	set {-mt::sum::%{_d}%} to {_txt}
+	Bukkit.getConsoleSender().sendMessage("[mafia] %{_d}%일차 요약: %{_txt}%")
+
+every second:
+	if {-mtllm::sf} is set:
+		mBotSummaryPoll()
 
 # 봇 b 의 개인 기억(글)
 function mBotPMemText(b: text) :: text:
@@ -1304,6 +1390,8 @@ every second:
 			mBotLearn()
 		if {_s} is "night":
 			delete {-mt::qm::*}
+			# 지난 하루를 요약해 둔다(긴 게임에서도 초반을 기억하게)
+			mBotSummarize({-m::day} - 1)
 			delete {-mt::qt::*}
 			delete {-mt::defend::*}
 			delete {-mt::conflict::*}
