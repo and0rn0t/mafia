@@ -7,7 +7,7 @@
 #   daycam    낮 전체 카메라(눈 위치와 바라보는 방향)
 #   room      밤 방에서 자기 더미가 앉는 곳
 #   nightcam  밤 방 카메라
-#   bed       밤 대상 선택 때 대상 더미가 눕는 침대 위치
+#   bed       밤 대상 선택 침대 줄의 가운데 침대(대상 더미가 눕는 자리). 양옆 침대는 침대 카메라 오른쪽 방향으로 {mcfg::scene::bedgap}(기본 2)칸씩
 #   bedcam    침대 카메라
 # 숫자 설정: {mcfg::scene::radius}(원탁 반지름, 기본 3), {mcfg::scene::facedist}(얼굴 클로즈업 거리, 기본 1.4),
 #            {mcfg::scene::faceh}(앉은 더미 얼굴 높이, 기본 1.1). ({mcfg::scene::eye} 는 예전 탈것 방식용이라 지금은 쓰지 않는다)
@@ -32,7 +32,8 @@
 #   {-ms::seat::uuid}, {-ms::seatn}   원탁 자리 번호(1부터) / 자리 수
 #   {-ms::dummy::uuid}        원탁 더미(생존: 마네킹, 사망: 스켈레톤)
 #   {-ms::self::uuid}         밤 방의 자기 더미(본인에게만 보임)
-#   {-ms::bed::uuid}          침대 더미(본인에게만 보임, 대상 선택 때 대상의 모습으로 바뀜)
+#   {-ms::bedL/bedC/bedR::uuid}  침대 줄의 더미 3개(본인에게만 보임. 가운데 = 지금 후보, 왼쪽 = 이전, 오른쪽 = 다음)
+#   {-ms::sky}                지금 보여 주는 하늘 시간(플레이어마다 setPlayerTime: 밤 18000, 낮 6000). 정리할 때 resetPlayerTime
 #   {-ms::cam::uuid}          카메라 엔티티(텍스트 디스플레이)
 #   {-ms::att::uuid}          카메라를 처음 건 뒤 지난 틱(0, 6, 25틱에 강제로 다시 건다. 끝나면 지움). 걸기 전이면 -1
 #   {-ms::retry::uuid}        카메라 놓침 감지 후 다시 걸기 쿨다운
@@ -48,6 +49,7 @@
 import:
 	org.bukkit.Bukkit
 	org.bukkit.Location
+	org.bukkit.WeatherType
 	org.bukkit.entity.EntityType
 	org.bukkit.entity.Pose
 	org.bukkit.entity.Mannequin
@@ -354,24 +356,73 @@ function mSceneStart():
 		set {_self} to mScSeated(mLocLoad("room"), {_id})
 		mScOnlyFor({_self}, {_id})
 		set {-ms::self::%{_id}%} to {_self}
-		set {_bl} to mLocLoad("bed")
-		set {_bed} to {_bl}.getWorld().spawnEntity({_bl}, EntityType.MANNEQUIN)
-		mScDummySetup({_bed}, {_id})
-		{_bed}.setPose(Pose.SLEEPING, true)
-		mScOnlyFor({_bed}, {_id})
-		set {-ms::bed::%{_id}%} to {_bed}
+		loop "L", "C", "R":
+			set {_k} to -1
+			if loop-value-2 is "C":
+				set {_k} to 0
+			else if loop-value-2 is "R":
+				set {_k} to 1
+			set {_bl} to mScBedLoc({_k})
+			set {_bed} to {_bl}.getWorld().spawnEntity({_bl}, EntityType.MANNEQUIN)
+			mScDummySetup({_bed}, {_id})
+			{_bed}.setGravity(false)
+			{_bed}.setPose(Pose.SLEEPING, true)
+			{_bed}.setInvisible(true)
+			{_bed}.setCustomNameVisible(false)
+			mScOnlyFor({_bed}, {_id})
+			set {-ms::bed%loop-value-2%::%{_id}%} to {_bed}
 	loop {-m::players::*}:
 		mCamMount(loop-value)
+
+# 밤 대상 선택 침대 줄의 k 번째 자리(0 = 가운데, -1 = 화면 왼쪽(이전 후보), 1 = 화면 오른쪽(다음 후보)).
+# 침대 카메라(bedcam)가 바라보는 방향의 오른쪽으로 {mcfg::scene::bedgap}(기본 2) 칸씩 떨어진다. 방향(yaw)은 bed 장소 것.
+function mScBedLoc(k: number) :: location:
+	set {_b} to mLocLoad("bed")
+	set {_c} to mLocLoad("bedcam")
+	set {_yaw} to {_c}.getYaw()
+	set {_g} to mScNum("bedgap", 2) * {_k}
+	set {_x} to {_b}.getX() - cos({_yaw}) * {_g}
+	set {_z} to {_b}.getZ() - sin({_yaw}) * {_g}
+	set {_l} to new Location({_b}.getWorld(), {_x}, {_b}.getY(), {_z}, {_b}.getYaw(), 0)
+	return {_l}
+
+# 침대 더미 하나를 그 후보 모습으로 보여 주거나(owner), owner 가 ""/"ignite" 면 숨긴다
+function mScBedSet(e: object, owner: text):
+	if {_e} is not set:
+		stop
+	if {_owner} is "":
+		{_e}.setInvisible(true)
+		{_e}.setCustomNameVisible(false)
+		stop
+	if {_owner} is "ignite":
+		{_e}.setInvisible(true)
+		{_e}.setCustomNameVisible(false)
+		stop
+	mScSkin({_e}, {_owner})
+	{_e}.setInvisible(false)
+
+# 하늘 시간(플레이어마다 따로): 밤 18000(자정), 낮 6000(정오). 월드 시간은 그대로 둔다.
+function mScSky(night: boolean):
+	set {_t} to 6000
+	if {_night} is true:
+		set {_t} to 18000
+	set {-ms::sky} to {_t}
+	loop all players:
+		set {_p} to loop-player
+		{_p}.setPlayerTime({_t}, false)
+		{_p}.setPlayerWeather(WeatherType.CLEAR)
 
 # 다시 접속한 참가자: 혼자만 보이던 더미를 다시 보여 주고 카메라를 다시 건다
 function mSceneRejoin(p: player):
 	if mSceneOn() is not true:
 		stop
 	set {_id} to "%uuid of {_p}%"
-	loop "self", "bed":
+	loop "self", "bedL", "bedC", "bedR":
 		set {_e} to {-ms::%loop-value%::%{_id}%}
 		if {_e} is set:
 			{_p}.showEntity(mScPlugin(), {_e})
+	if {-ms::sky} is set:
+		{_p}.setPlayerTime({-ms::sky}, false)
 	mCamMount({_id})
 
 # 연출 엔티티를 전부 지우고 관전 대상을 푼다(mToLobby 가 부른다. 게임 모드는 mToLobby 가 되돌린다)
@@ -379,6 +430,8 @@ function mSceneClear():
 	set {-ms::force} to true
 	loop all players:
 		set {_p} to loop-player
+		{_p}.resetPlayerTime()
+		{_p}.resetPlayerWeather()
 		if {-ms::cam::%uuid of {_p}%} is set:
 			if gamemode of {_p} is spectator:
 				{_p}.setSpectatorTarget(null)
@@ -400,6 +453,7 @@ on damage:
 function mSceneNight():
 	if mSceneOn() is not true:
 		stop
+	mScSky(true)
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:
@@ -411,6 +465,7 @@ function mSceneNight():
 function mSceneDay():
 	if mSceneOn() is not true:
 		stop
+	mScSky(false)
 	set {_n} to size of {-m::dead::*}
 	set {_sub} to "&7지난 밤에는 아무도 사망하지 않았습니다"
 	if {_n} > 0:
@@ -544,17 +599,32 @@ function mPickLabel(c: text) :: text:
 		return "&6점화 &7(기름에 젖은 사람을 모두 불태움)"
 	return "&f%mNameOf({_c})%"
 
-# 지금 후보를 화면에 보여 준다(컷). 밤: 침대 더미를 그 사람 모습으로, 낮: 원탁의 그 사람 얼굴. 점화는 밤 방 화면.
+# 지금 후보를 화면에 보여 준다(컷).
+#   밤: 붉은 침대 줄. 가운데 침대에 지금 후보, 화면 왼쪽 침대에 이전 후보(A), 오른쪽 침대에 다음 후보(D)가 누워 있다(본인에게만 보이는 더미 3개를 바꿔 입힌다).
+#       후보가 1명이면 양옆은 비우고, 2명이면 오른쪽만 보여 준다. 점화 후보는 가운데를 비운다.
+#   낮: 원탁의 그 사람 얼굴.
 function mPickShow(id: text):
 	set {_c} to mPickCur({_id})
 	if {_c} is not set:
 		stop
-	if {_c} is "ignite":
-		mCamTo({_id}, "nightcam")
-	else if {-ms::pick::%{_id}%} is "night":
-		set {_bed} to {-ms::bed::%{_id}%}
-		if {_bed} is set:
-			mScSkin({_bed}, {_c})
+	if {-ms::pick::%{_id}%} is "night":
+		set {_all} to size of {-ms::cand::%{_id}%::*}
+		set {_i} to {-ms::idx::%{_id}%}
+		set {_pi} to {_i} - 1
+		if {_pi} < 1:
+			set {_pi} to {_all}
+		set {_ni} to {_i} + 1
+		if {_ni} > {_all}:
+			set {_ni} to 1
+		set {_pv} to ""
+		set {_nx} to ""
+		if {_all} >= 2:
+			set {_nx} to {-ms::cand::%{_id}%::%{_ni}%}
+		if {_all} >= 3:
+			set {_pv} to {-ms::cand::%{_id}%::%{_pi}%}
+		mScBedSet({-ms::bedC::%{_id}%}, {_c})
+		mScBedSet({-ms::bedL::%{_id}%}, {_pv})
+		mScBedSet({-ms::bedR::%{_id}%}, {_nx})
 		mCamTo({_id}, "bedcam")
 	else:
 		mCamFace({_id}, {_c})
