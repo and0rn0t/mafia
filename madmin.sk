@@ -2,7 +2,7 @@
 # [madmin.sk] 관리자 메뉴(상자 GUI, OP 전용). 규칙은 ROLES.md, 구조는 DESIGN.md 7번.
 # 명령: /madmin
 # 메뉴:
-#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
+#   main   시간 설정(좌클릭 늘리기 / 우클릭 줄이기), 연속 퍼블 금지 켜고 끄기, 직업 켜고 끄기, 장소·카메라 설정, 게임 시작/강제 종료(지금 인원과 시작 가능 여부 표시)
 #   roles  직업마다 켜짐(초록)/꺼짐(빨강)/고정(노랑). 클릭하면 켜고 끈다. 마피아/경찰/의사는 끌 수 없다
 #   scene  연출 장소(mscene.sk 머리말의 6곳): 좌클릭 = 지금 위치로 정하기, 우클릭 = 그 위치로 이동
 #          카메라 3곳(daycam/nightcam/bedcam)은 눈 위치와 바라보는 방향을 저장한다. 나머지는 발 위치와 바라보는 방향
@@ -76,6 +76,10 @@ function mAdmOpen(p: player, menu: text):
 		set slot 10 of {_inv} to mAdmItem(clock, "&f낮 토론 시간: &e%{_d}%초", "&7좌클릭 +10초 / 우클릭 -10초")
 		set slot 11 of {_inv} to mAdmItem(clock, "&f투표 시간: &e%{_v}%초", "&7좌클릭 +5초 / 우클릭 -5초")
 		set slot 12 of {_inv} to mAdmItem(clock, "&f밤 능력 선택 시간: &e%{_n}%초", "&7좌클릭 +5초 / 우클릭 -5초")
+		if mFbOn() is true:
+			set slot 13 of {_inv} to mAdmItem(lime dye, "&f연속 퍼블 금지: &a켜짐", ("&7지난 게임 1일차 밤에 죽은 사람은", "&7이번 게임 1일차 밤에 살해 대상이 될 수 없습니다.", "&7클릭하면 끕니다."))
+		else:
+			set slot 13 of {_inv} to mAdmItem(gray dye, "&f연속 퍼블 금지: &c꺼짐", ("&7지난 게임 1일차 밤에 죽은 사람은", "&7이번 게임 1일차 밤에 살해 대상이 될 수 없습니다.", "&7클릭하면 켭니다."))
 		set slot 14 of {_inv} to mAdmItem(book, "&f직업 켜고 끄기", "&7보조 3, 중립 3, 시민 팀(경찰/의사 제외)")
 		set slot 15 of {_inv} to mAdmItem(spyglass, "&f장소/카메라 설정", "&7원탁, 방, 침대, 카메라 위치")
 		if mState() is "lobby":
@@ -155,6 +159,11 @@ on inventory click:
 			mAdmTime("vote", 5 * {_sign})
 		else if {_s} is 12:
 			mAdmTime("night", 5 * {_sign})
+		else if {_s} is 13:
+			if mFbOn() is true:
+				set {mcfg::nofb} to false
+			else:
+				delete {mcfg::nofb}
 		else if {_s} is 14:
 			mAdmOpen(player, "roles")
 			stop

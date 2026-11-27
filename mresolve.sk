@@ -282,6 +282,11 @@ function mResolve():
 	loop indices of {_killed::*}:
 		mDie(loop-value)
 		add "die|%loop-value%|%loop-value%" to {-m::ev::*}
+	# 연속 퍼블 금지: 1일차 밤 사망자를 기록해 다음 게임에서 보호한다(mcore.sk 의 mBegin 이 넘김)
+	if {-m::day} is 1:
+		delete {-mfb::cur::*}
+		loop indices of {_killed::*}:
+			add loop-value to {-mfb::cur::*}
 
 # 임시 표시: 채팅으로 사망 알림과 본인 결과를 보낸다. mscene.sk 가 만들어지면 연출로 교체한다.
 function mResolveShow():

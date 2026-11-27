@@ -27,6 +27,7 @@
 #   {-ms::...}               화면 연출 상태(카메라, 더미, 대상 선택 화면). 목록과 뜻은 mscene.sk 머리말. mSceneClear 가 한꺼번에 지운다   mscene.sk
 #   {mcfg::loc::table/daycam/room/nightcam/bed/bedcam::...}, {mcfg::scene::radius/facedist/faceh/eye}   연출 장소와 숫자 설정   madmin.sk
 #   {-madm::uuid}            관리자 메뉴에서 지금 열어 둔 메뉴 이름                                          madmin.sk
+#   {mcfg::nofb}             false 면 연속 퍼블 금지 꺼짐(없으면 켜짐). {-mfb::prev/cur::*} 지난/이번 게임 1일차 밤 사망자(mReset 이 지우지 않음)   mnight.sk, mresolve.sk, mBegin
 #
 # 위치 저장은 PvP 서버(andornot)의 gcSaveLoc/gcLoadLoc 와 같은 방식이다(월드 이름 + 좌표). 월드는 world.sk 의 /world create 로 먼저 만들어 둔다.
 # 명령(관리자 전용): /mloc lobby|game set|tp|info , /mtime discuss|vote|night <초> , /mtime (현재 값)
@@ -200,6 +201,10 @@ command /mtime [<text>] [<number>]:
 # 게임을 시작한 직후 첫 밤으로 넘어간다. (밤/낮/투표 진행은 mnight.sk, mday.sk, mvote.sk 를 만들 때 여기에 이어 붙인다)
 function mBegin():
 	set {-m::day} to 0
+	# 연속 퍼블 금지: 지난 게임의 1일차 밤 사망자를 이번 게임의 보호 대상으로 넘긴다(mnight.sk 의 mFbProtected)
+	delete {-mfb::prev::*}
+	set {-mfb::prev::*} to {-mfb::cur::*}
+	delete {-mfb::cur::*}
 	mStartNight()
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).

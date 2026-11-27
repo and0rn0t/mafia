@@ -94,7 +94,27 @@ function mTargetCheck(id: text, t: text) :: text:
 	if {_role} is "mafia":
 		if {-m::role::%{_t}%} is "mafia":
 			return "같은 마피아는 고를 수 없습니다."
+	if mHas("mafia,assassin,thief,vigilante", {_role}) is true:
+		if mFbProtected({_t}) is true:
+			return "연속 퍼블 금지: 이 사람은 이번 첫날 밤에 죽일 수 없습니다."
 	return ""
+
+# 연속 퍼블 금지(관리자 메뉴에서 켜고 끔, 기본 켜짐). {mcfg::nofb} 가 false 면 꺼짐.
+function mFbOn() :: boolean:
+	if {mcfg::nofb} is false:
+		return false
+	return true
+
+# 이전 게임의 1일차 밤에 죽은 사람은 이번 게임 1일차 밤에 살해 계열(마피아, 암살자, 도둑, 자경단)의 대상이 될 수 없다.
+# {-mfb::prev::*} 이전 게임 1일차 밤 사망자, {-mfb::cur::*} 이번 게임 1일차 밤 사망자(mresolve.sk 가 채움, mBegin 이 넘김). 서버를 다시 켜면 지워진다.
+function mFbProtected(t: text) :: boolean:
+	if mFbOn() is not true:
+		return false
+	if {-m::day} is not 1:
+		return false
+	if {-mfb::prev::*} contains {_t}:
+		return true
+	return false
 
 # 고를 수 있는 대상 uuid 목록(능력을 못 쓰는 상태면 비어 있음)
 function mTargets(id: text) :: texts:
