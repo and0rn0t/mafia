@@ -13,6 +13,9 @@ import:
 	org.bukkit.Material
 	org.bukkit.inventory.ItemStack
 	java.util.ArrayList
+	java.util.HashSet
+	io.papermc.paper.datacomponent.DataComponentTypes
+	io.papermc.paper.datacomponent.item.TooltipDisplay
 
 # 쪽 글: "|" 는 줄바꿈, "&" 색 코드
 function mGuideText(s: text) :: text:
@@ -70,14 +73,24 @@ function mGuideBook() :: object:
 		{_pg}.add(mGuideText({_line}))
 	{_m}.setPages({_pg})
 	{_it}.setItemMeta({_m})
+	# 아이템 설명(저자, 원본 표시)은 숨긴다. 이름만 보인다
+	set {_hs} to new HashSet()
+	{_hs}.add(DataComponentTypes.WRITTEN_BOOK_CONTENT)
+	{_it}.setData(DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay().hiddenComponents({_hs}).build())
 	return {_it}
 
 # 로비 핫바 9번 칸(인덱스 8)에 안내서(없을 때만 넣는다)
+# 책을 바꿀 때마다 mGuideVer 를 올리면 이미 가진 사람의 책도 한 번 새것으로 바뀐다
+function mGuideVer() :: text:
+	return "2"
+
 function mGuideGive(p: player):
 	set {_cur} to {_p}.getInventory().getItem(8)
 	if {_cur} is set:
 		if {_cur}.getType().equals(Material.WRITTEN_BOOK) is true:
-			stop
+			if {-mguide::%uuid of {_p}%} is mGuideVer():
+				stop
+	set {-mguide::%uuid of {_p}%} to mGuideVer()
 	{_p}.getInventory().setItem(8, mGuideBook())
 
 function mGuideOpen(p: player):
