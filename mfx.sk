@@ -636,15 +636,17 @@ function mFxRun(vid: text):
 		mFxCleanup({_vid})
 		wait 5 ticks
 	mFxSelf({_vid}, true)
+	# 장면 목록을 먼저 지운다: 밤 처리에서 죽은 사람은 이때부터 관전 상태가 된다(mscene.sk mIsWatcher)
+	set {_ws::*} to mFxWatchersOf({_vid})
+	delete {-msq::%{_vid}%::*}
 	# 장면이 밤 처리 시간을 넘겨 낮이 이미 시작됐으면 카메라는 아침 발표가 정한 화면 그대로 둔다(토론 중 갑자기 바뀌지 않게)
 	if mState() is "resolve":
 		mViewAuto({_vid})
 		# 따라 보던 관전자도 평소 관전 화면(그 사람 집 안)으로
-		loop mFxWatchersOf({_vid}):
+		loop {_ws::*}:
 			mViewAuto(loop-value)
 	else if mState() is "night":
 		mViewAuto({_vid})
-	delete {-msq::%{_vid}%::*}
 
 function mFxSetup(vid: text, spec: text):
 	delete {-msc::%{_vid}%::*}

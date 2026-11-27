@@ -357,6 +357,9 @@ function mWatchOf(id: text) :: text:
 function mIsWatcher(id: text) :: boolean:
 	if {-ms::cam::%{_id}%} is not set:
 		return false
+	# 밤 처리에서 죽은 사람은 자기 장면(습격당하는 장면 등)이 다 끝난 뒤에 관전 상태가 된다
+	if size of {-msq::%{_id}%::*} > 0:
+		return false
 	if {-m::alive::%{_id}%} is true:
 		return false
 	return true
