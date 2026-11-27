@@ -69,6 +69,9 @@ function mActCheck(id: text) :: text:
 	if {-m::sealed::%{_id}%} is true:
 		return "마담에게 지목당해 이번 밤에는 능력을 쓸 수 없습니다."
 	set {_role} to mActRole({_id})
+	if {_role} is "reporter":
+		if {-m::day} is 1:
+			return "기자는 첫째 날 밤에는 능력을 쓸 수 없습니다."
 	set {_tm} to mRoleTiming({_role})
 	if {_tm} is "nightly":
 		return ""
