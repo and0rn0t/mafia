@@ -33,7 +33,7 @@
 #   {-ms::dummy::uuid}        원탁 더미(생존: 마네킹, 사망: 스켈레톤)
 #   {-ms::self::uuid}         밤 방의 자기 더미(본인에게만 보임)
 #   {-ms::bedL/bedC/bedR::uuid}  침대 줄의 더미 3개(본인에게만 보임. 가운데 = 지금 후보, 왼쪽 = 이전, 오른쪽 = 다음)
-#   {-ms::sky}                지금 보여 주는 하늘 시간(플레이어마다 setPlayerTime: 밤 18000, 낮 6000). 정리할 때 resetPlayerTime
+#   {-ms::sky}                지금 보여 주는 하늘 시간(플레이어마다 setPlayerTime: 밤 13800, 낮 6000). 정리할 때 resetPlayerTime
 #   {-ms::cam::uuid}          카메라 엔티티(텍스트 디스플레이)
 #   {-ms::att::uuid}          카메라를 처음 건 뒤 지난 틱(0, 6, 25틱에 강제로 다시 건다. 끝나면 지움). 걸기 전이면 -1
 #   {-ms::retry::uuid}        카메라 놓침 감지 후 다시 걸기 쿨다운
@@ -157,7 +157,7 @@ function mScSeatLoc(i: number) :: location:
 	set {_l} to new Location({_t}.getWorld(), {_x}, {_t}.getY(), {_z}, {_a} + 90, 0)
 	return {_l}
 
-# 사망: 원탁 자리의 마네킹을 엎드린 스켈레톤으로 바꾼다
+# 사망: 원탁 자리의 마네킹을 누운(SLEEPING 자세) 스켈레톤으로 바꾼다(손에 든 활은 비운다). 서버 시간이 밤이라 햇빛에 타지 않는다(mbuild.sk).
 function mSceneDead(id: text):
 	if mSceneOn() is not true:
 		stop
@@ -177,7 +177,9 @@ function mSceneDead(id: text):
 	{_sk}.setSilent(true)
 	{_sk}.setInvulnerable(true)
 	{_sk}.setGravity(false)
-	{_sk}.setPose(Pose.SWIMMING, true)
+	{_sk}.setPose(Pose.SLEEPING, true)
+	{_sk}.getEquipment().clear()
+	{_sk}.setFireTicks(0)
 	mScTrack({_sk})
 	set {-ms::dummy::%{_id}%} to {_sk}
 
@@ -401,11 +403,11 @@ function mScBedSet(e: object, owner: text):
 	mScSkin({_e}, {_owner})
 	{_e}.setInvisible(false)
 
-# 하늘 시간(플레이어마다 따로): 밤 18000(자정), 낮 6000(정오). 월드 시간은 그대로 둔다.
+# 하늘 시간(플레이어마다 따로): 밤 13800(달이 동쪽 하늘 낮게 떠 밤 방 창으로 보인다), 낮 6000(정오). 월드 시간은 그대로 둔다.
 function mScSky(night: boolean):
 	set {_t} to 6000
 	if {_night} is true:
-		set {_t} to 18000
+		set {_t} to 13800
 	set {-ms::sky} to {_t}
 	loop all players:
 		set {_p} to loop-player

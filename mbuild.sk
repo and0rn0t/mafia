@@ -1,20 +1,20 @@
 # ==============================================================================
-# [mbuild.sk] 마피아 게임 맵 자동 생성(관리자 전용). 빈 월드 "mafia_map" 에 원탁 마당, 밤 방, 밤 대상 선택 침대 줄을 짓고
+# [mbuild.sk] 마피아 게임 맵 자동 생성(관리자 전용). 빈 월드 "mafia_map" 에 낮 광장, 밤 방, 밤 대상 선택 침대를 서로 떨어뜨려 짓고
 #             게임 월드 위치와 연출 장소 6곳(mscene.sk), 원탁 반지름 등 숫자 설정까지 정한다.
-# 명령: /mbuild        맵을 짓는다(이미 있으면 같은 자리에 다시 덮어 짓는다. 예전 건물도 지운다). 짓는 동안 서버가 잠깐 멈출 수 있다.
-#       /mbuild tp     원탁 마당으로 이동
-# 낮/밤 구분: 하늘이 보이게 지붕 없는 야외로 짓고, mscene.sk 가 단계마다 플레이어별 하늘 시간을 바꾼다(밤 = 자정, 낮 = 정오).
-#   둘레 넓게 풀밭을 깔아 지평선이 보이게 했다.
+# 명령: /mbuild        맵을 짓는다(이미 있으면 같은 자리에 다시 덮어 짓는다. 예전 버전 건물도 지운다). 짓는 동안 서버가 잠깐 멈출 수 있다.
+#       /mbuild tp     원탁 광장으로 이동
+# 배경 분리: 세 공간은 100칸씩 떨어져 있고, 각 카메라는 다른 공간을 등지는 방향을 본다(시야 거리 8청크 안이라 화면 전환 때 청크를 다시 받지 않는다).
+# 낮/밤: 서버 시간은 밤(18000)으로 고정(스켈레톤 더미가 타지 않게). 화면의 하늘은 mscene.sk 가 플레이어별로 바꾼다(낮 정오, 밤은 달이 동쪽 낮게 뜬 13800).
 # 배치(월드 mafia_map, 바닥 블록 y=64, 바닥 위 y=65):
-#   풀밭      x -30~70, z -30~45 (y=64 잔디)
-#   원탁 마당 x,z -10~10, 지붕 없음. 둘레 낮은 담(±11, 1칸 + 반 블록)과 기둥 8개(위에 랜턴). 원탁(반 블록 판자)은 (0,0) 중심, 더미 자리 반지름 3.2
-#             낮 카메라: 남쪽 담 가까이 높은 곳(눈 y=69)에서 원탁과 하늘을 같이 본다
-#   밤 방     x 37~43, z -3~3, 지붕 있음. 북쪽 벽은 유리창(밤하늘이 보임). 조명은 촛불 하나. 자기 더미는 방 가운데, 카메라는 남쪽 위에서 창 쪽을 본다
-#   침대 줄   야외(지붕 없음), 조명 없음(달빛만). 가문비나무 바닥 x 32~48, z 18~21 위에 붉은 침대 7개(x 34,36,...,46, 머리 북쪽 z=19)
-#             가운데 침대(x=40)가 지금 후보, 양옆(x=42 화면 왼쪽, x=38 화면 오른쪽)이 이전/다음 후보. 카메라는 머리 쪽(북쪽) 위에서 남쪽을 내려다본다
-# 월드 설정: 몹 생성 끔, 시간 정오 고정, 날씨 고정, 구조물 없음. world.sk 의 자동 불러오기 목록({worldlist::mafia_map})에 넣는다.
-# 미검증: 전체(서버 실행 불가). 특히 마네킹이 앉는 높이와 침대에 눕는 위치/방향은 실제로 보고 조정해야 한다
-#   (숫자는 /madmin 장소·카메라 메뉴에서 바꿀 수 있고, /mbuild 를 다시 하면 여기 값으로 돌아간다).
+#   낮 광장   (0,0) 둘레 풀밭. 반지름 14 돌 광장(가운데 붉은 카펫 원과 원탁), 가로등 8개, 꽃밭, 벤치, 나무, 남쪽에 집 4채.
+#             카메라는 북쪽 높은 곳(눈 y=69, z=-9)에서 남쪽으로 원탁, 집, 하늘을 본다. 더미 자리 반지름 3.2
+#   밤 방     x 100~107, z -4~4, 천장 y=71. 동쪽 벽에 큰 유리창(z -1~1, y 66~70)으로 달이 보인다. 창 앞에 탁자(반 블록)와 꽃병, 촛불,
+#             창 옆(남쪽) 의자에 자기 더미가 카메라를 보고 앉는다. 카메라는 서쪽 벽 가까이에서 동쪽(창)을 본다
+#   침대      (0, -100) 둘레 풀밭. 붉은 침대 3개(x -2, 0, 2, 머리 남쪽), 뒤에 잎 울타리, 조명 없음(달빛만).
+#             가운데 = 지금 후보, 화면 왼쪽(x=-2) = 이전, 오른쪽(x=2) = 다음. 카메라는 남쪽 위에서 북쪽을 내려다본다
+# 월드 설정: 몹 생성 끔, 시간/날씨 고정, 구조물 없음. world.sk 의 자동 불러오기 목록({worldlist::mafia_map})에 넣는다.
+# 미검증: 전체(서버 실행 불가). 마네킹 누운 방향은 첫 시험 화면(yaw 180 = 머리 동쪽, 위치 = 머리)을 보고 yaw 270(머리 남쪽)으로 맞췄다.
+#   앉은 높이(의자 위 y+0.5), 달이 창에 걸리는지는 실제로 보고 조정해야 한다(/madmin 장소·카메라 메뉴, /mbuild 를 다시 하면 여기 값으로 돌아간다).
 # ==============================================================================
 
 import:
@@ -70,44 +70,61 @@ function mBSaveYaw(key: text, w: world, x: number, y: number, z: number, yaw: nu
 	set {_l} to new Location({_w}, {_x}, {_y}, {_z}, {_yaw}, 0)
 	mLocSave({_key}, {_l})
 
+# 나무 하나(줄기 4칸 + 잎)
+function mBTree(w: world, x: number, z: number):
+	mBFill({_w}, {_x} - 2, 68, {_z} - 2, {_x} + 2, 69, {_z} + 2, "minecraft:oak_leaves[persistent=true]")
+	mBFill({_w}, {_x} - 1, 70, {_z} - 1, {_x} + 1, 71, {_z} + 1, "minecraft:oak_leaves[persistent=true]")
+	mBFill({_w}, {_x}, 65, {_z}, {_x}, 69, {_z}, "minecraft:oak_log")
+
+# 가로등(울타리 3칸 + 랜턴)
+function mBLamp(w: world, x: number, z: number):
+	mBFill({_w}, {_x}, 65, {_z}, {_x}, 67, {_z}, "minecraft:dark_oak_fence")
+	mBSet({_w}, {_x}, 68, {_z}, "minecraft:lantern")
+
+# 집 하나(광장을 향한 북쪽 면에 문과 창). x1~x1+6, z1~z1+5
+function mBHouse(w: world, x1: number, z1: number, wall: text):
+	set {_x2} to {_x1} + 6
+	set {_z2} to {_z1} + 5
+	mBFill({_w}, {_x1}, 65, {_z1}, {_x2}, 68, {_z2}, {_wall})
+	mBFill({_w}, {_x1}, 65, {_z1}, {_x1}, 68, {_z1}, "minecraft:dark_oak_log")
+	mBFill({_w}, {_x2}, 65, {_z1}, {_x2}, 68, {_z1}, "minecraft:dark_oak_log")
+	mBFill({_w}, {_x1} + 3, 65, {_z1}, {_x1} + 3, 66, {_z1}, "minecraft:spruce_planks")
+	mBSet({_w}, {_x1} + 1, 66, {_z1}, "minecraft:glass")
+	mBSet({_w}, {_x1} + 5, 66, {_z1}, "minecraft:glass")
+	mBSet({_w}, {_x1} + 1, 68, {_z1}, "minecraft:glass")
+	mBSet({_w}, {_x1} + 5, 68, {_z1}, "minecraft:glass")
+	mBFill({_w}, {_x1} - 1, 69, {_z1} - 1, {_x2} + 1, 69, {_z2} + 1, "minecraft:dark_oak_planks")
+	mBFill({_w}, {_x1}, 70, {_z1}, {_x2}, 70, {_z2}, "minecraft:dark_oak_planks")
+	mBFill({_w}, {_x1} + 1, 71, {_z1} + 1, {_x2} - 1, 71, {_z2} - 1, "minecraft:dark_oak_slab[type=bottom]")
+
 function mBuild():
 	set {_w} to mBWorld()
 	{_w}.setGameRule(GameRule.DO_MOB_SPAWNING, false)
 	{_w}.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false)
 	{_w}.setGameRule(GameRule.DO_WEATHER_CYCLE, false)
-	{_w}.setTime(6000)
+	# 서버 시간은 밤으로 둔다(스켈레톤 더미가 햇빛에 타지 않게). 화면의 낮/밤은 mscene.sk 가 플레이어별 하늘 시간으로 보여 준다.
+	{_w}.setTime(18000)
 	{_w}.setSpawnLocation(0, 65, -8)
-	# ---- 예전 건물 지우기(지붕 있던 홀/침대 방)
-	mBFill({_w}, -12, 64, -12, 12, 73, 12, "minecraft:air")
+	# ---- 예전 건물 지우기
+	mBFill({_w}, -12, 65, -12, 12, 73, 12, "minecraft:air")
 	mBFill({_w}, 35, 64, -5, 45, 70, 5, "minecraft:air")
 	mBFill({_w}, 30, 64, 14, 50, 70, 26, "minecraft:air")
-	# ---- 풀밭(지평선)
-	mBFill({_w}, -30, 64, -30, 70, 64, 45, "minecraft:grass_block")
-	# ---- 원탁 마당(지붕 없음)
-	mBFill({_w}, -10, 64, -10, 10, 64, 10, "minecraft:dark_oak_planks")
-	loop -11, 11:
-		set {_a} to loop-value
-		mBFill({_w}, {_a}, 64, -11, {_a}, 65, 11, "minecraft:stone_bricks")
-		mBFill({_w}, {_a}, 66, -11, {_a}, 66, 11, "minecraft:stone_brick_slab[type=bottom]")
-		mBFill({_w}, -11, 64, {_a}, 11, 65, {_a}, "minecraft:stone_bricks")
-		mBFill({_w}, -11, 66, {_a}, 11, 66, {_a}, "minecraft:stone_brick_slab[type=bottom]")
-	loop -11, 0, 11:
+	# ================= 낮: 원탁 광장 (0, 0), 카메라는 북쪽에서 남쪽을 본다
+	mBFill({_w}, -45, 64, -35, 45, 64, 45, "minecraft:grass_block")
+	loop integers between -14 and 14:
 		set {_x} to loop-value-1
-		loop -11, 0, 11:
+		loop integers between -14 and 14:
 			set {_z} to loop-value-2
-			if {_x} is not 0:
-				mBFill({_w}, {_x}, 65, {_z}, {_x}, 68, {_z}, "minecraft:stone_bricks")
-				mBSet({_w}, {_x}, 69, {_z}, "minecraft:lantern")
-			else if {_z} is not 0:
-				mBFill({_w}, {_x}, 65, {_z}, {_x}, 68, {_z}, "minecraft:stone_bricks")
-				mBSet({_w}, {_x}, 69, {_z}, "minecraft:lantern")
-	# 바닥 무늬: 가운데 붉은 원(반지름 5 안쪽)은 붉은 카펫
-	loop integers between -5 and 5:
-		set {_x} to loop-value-1
-		loop integers between -5 and 5:
-			set {_z} to loop-value-2
-			if {_x} * {_x} + {_z} * {_z} <= 25:
-				mBSet({_w}, {_x}, 65, {_z}, "minecraft:red_carpet")
+			set {_d2} to {_x} * {_x} + {_z} * {_z}
+			if {_d2} <= 196:
+				if {_d2} > 100:
+					mBSet({_w}, {_x}, 64, {_z}, "minecraft:stone_bricks")
+				else if {_d2} > 64:
+					mBSet({_w}, {_x}, 64, {_z}, "minecraft:polished_andesite")
+				else:
+					mBSet({_w}, {_x}, 64, {_z}, "minecraft:stone_bricks")
+				if {_d2} <= 25:
+					mBSet({_w}, {_x}, 65, {_z}, "minecraft:red_carpet")
 	# 원탁: 반지름 2 안쪽 반 블록 판자
 	loop integers between -2 and 2:
 		set {_x} to loop-value-1
@@ -115,24 +132,73 @@ function mBuild():
 			set {_z} to loop-value-2
 			if {_x} * {_x} + {_z} * {_z} <= 5:
 				mBSet({_w}, {_x}, 65, {_z}, "minecraft:dark_oak_slab[type=bottom]")
-	# ---- 밤 방(지붕 있음, 북쪽 유리창, 촛불 하나)
-	mBRoom({_w}, 37, -3, 43, 3, 64, 69, "minecraft:spruce_planks", "minecraft:deepslate_bricks", "minecraft:spruce_planks")
-	mBFill({_w}, 37, 65, -4, 43, 68, -4, "minecraft:glass")
-	mBSet({_w}, 40, 65, 0, "minecraft:black_carpet")
-	mBSet({_w}, 42, 65, 2, "minecraft:candle[candles=1,lit=true]")
-	# ---- 밤 대상 선택 침대 줄(야외, 조명 없음)
-	mBFill({_w}, 32, 64, 18, 48, 64, 21, "minecraft:spruce_planks")
-	loop 34, 36, 38, 40, 42, 44, 46:
-		mBSet({_w}, loop-value, 65, 19, "minecraft:red_bed[part=head,facing=north]")
-		mBSet({_w}, loop-value, 65, 20, "minecraft:red_bed[part=foot,facing=north]")
+	# 가로등 8개(반지름 11), 꽃밭, 벤치
+	mBLamp({_w}, 0, 11)
+	mBLamp({_w}, 0, -11)
+	mBLamp({_w}, 11, 0)
+	mBLamp({_w}, -11, 0)
+	mBLamp({_w}, 8, 8)
+	mBLamp({_w}, -8, 8)
+	mBLamp({_w}, 8, -8)
+	mBLamp({_w}, -8, -8)
+	loop -6, 6:
+		set {_x} to loop-value
+		mBFill({_w}, {_x} - 1, 64, 12, {_x} + 1, 64, 13, "minecraft:grass_block")
+		mBSet({_w}, {_x} - 1, 65, 12, "minecraft:poppy")
+		mBSet({_w}, {_x}, 65, 12, "minecraft:dandelion")
+		mBSet({_w}, {_x} + 1, 65, 12, "minecraft:cornflower")
+		mBSet({_w}, {_x} - 1, 65, 13, "minecraft:oxeye_daisy")
+		mBSet({_w}, {_x}, 65, 13, "minecraft:allium")
+		mBSet({_w}, {_x} + 1, 65, 13, "minecraft:poppy")
+		mBFill({_w}, {_x} - 1, 65, 9, {_x} + 1, 65, 9, "minecraft:spruce_stairs[facing=south]")
+	mBFill({_w}, 12, 64, -2, 13, 64, 2, "minecraft:grass_block")
+	mBFill({_w}, 12, 65, -2, 13, 65, 2, "minecraft:azure_bluet")
+	mBFill({_w}, -13, 64, -2, -12, 64, 2, "minecraft:grass_block")
+	mBFill({_w}, -13, 65, -2, -12, 65, 2, "minecraft:red_tulip")
+	# 나무 4그루
+	mBTree({_w}, 17, 12)
+	mBTree({_w}, -17, 12)
+	mBTree({_w}, 18, -6)
+	mBTree({_w}, -18, -6)
+	# 광장 뒤쪽(남쪽) 집들
+	mBHouse({_w}, -19, 20, "minecraft:white_terracotta")
+	mBHouse({_w}, -10, 21, "minecraft:birch_planks")
+	mBHouse({_w}, 4, 21, "minecraft:white_terracotta")
+	mBHouse({_w}, 13, 20, "minecraft:bricks")
+	mBTree({_w}, -2, 25)
+	# ================= 밤: 달이 보이는 작은 방 (x 100~107, z -4~4), 동쪽 창, 카메라는 서쪽에서 동쪽을 본다
+	mBFill({_w}, 75, 64, -30, 135, 64, 30, "minecraft:grass_block")
+	mBRoom({_w}, 100, -4, 107, 4, 64, 71, "minecraft:dark_oak_planks", "minecraft:spruce_planks", "minecraft:spruce_planks")
+	loop 99, 108:
+		set {_x} to loop-value-1
+		loop -5, 5:
+			mBFill({_w}, {_x}, 65, loop-value-2, {_x}, 70, loop-value-2, "minecraft:dark_oak_log")
+	# 동쪽 창(달), 창 앞 탁자와 꽃병, 촛불
+	mBFill({_w}, 108, 66, -1, 108, 70, 1, "minecraft:glass")
+	mBSet({_w}, 107, 65, -1, "minecraft:oak_slab[type=top]")
+	mBSet({_w}, 107, 65, 0, "minecraft:oak_slab[type=top]")
+	mBSet({_w}, 107, 66, 0, "minecraft:potted_poppy")
+	mBSet({_w}, 107, 66, -1, "minecraft:candle[candles=2,lit=true]")
+	# 창 옆 의자(자기 더미가 앉는 자리)
+	mBSet({_w}, 107, 65, 2, "minecraft:spruce_stairs[facing=east]")
+	# 방 꾸밈: 책장, 카펫
+	mBFill({_w}, 101, 65, -4, 104, 66, -4, "minecraft:bookshelf")
+	mBFill({_w}, 102, 65, -1, 105, 65, 1, "minecraft:brown_carpet")
+	# ================= 밤 대상 선택: 붉은 침대 3개 (x -2, 0, 2, z -100), 조명 없음, 카메라는 남쪽에서 북쪽을 본다
+	mBFill({_w}, -20, 64, -125, 20, 64, -80, "minecraft:grass_block")
+	mBFill({_w}, -4, 64, -102, 4, 64, -97, "minecraft:spruce_planks")
+	loop -2, 0, 2:
+		mBSet({_w}, loop-value, 65, -99, "minecraft:red_bed[part=head,facing=south]")
+		mBSet({_w}, loop-value, 65, -100, "minecraft:red_bed[part=foot,facing=south]")
+	mBFill({_w}, -5, 65, -103, 5, 66, -103, "minecraft:oak_leaves[persistent=true]")
 	# ---- 위치와 설정
 	mBSaveYaw("game", {_w}, 0.5, 65, -8.5, 0)
 	mBSaveYaw("table", {_w}, 0.5, 65, 0.5, 0)
 	mBSaveLook("daycam", {_w}, 0.5, 69, -9, 0.5, 65.8, 0.5)
-	mBSaveYaw("room", {_w}, 40.5, 65, 0.5, 0)
-	mBSaveLook("nightcam", {_w}, 40.5, 67, 3, 40.5, 65.9, 0.5)
-	mBSaveYaw("bed", {_w}, 40.5, 65.6875, 19.5, 180)
-	mBSaveLook("bedcam", {_w}, 40.5, 67.6, 17.4, 40.5, 65.7, 19.9)
+	mBSaveYaw("room", {_w}, 107.5, 65.5, 2.5, 90)
+	mBSaveLook("nightcam", {_w}, 100.8, 66.8, 0.5, 108, 68, 0.8)
+	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -98.4, 270)
+	mBSaveLook("bedcam", {_w}, 0.5, 67.6, -96.6, 0.5, 65.7, -99.4)
 	set {mcfg::scene::radius} to 3.2
 	set {mcfg::scene::facedist} to 1.4
 	set {mcfg::scene::faceh} to 1.1
