@@ -139,6 +139,13 @@ function mTabUpdate(p: player):
 	set {_dj} to "[{""text"":""%{_no}% "",""color"":""#ffaa00""},{""text"":""%{_nm}%""}]"
 	{_p}.displayName(GsonComponentSerializer.gson().deserialize({_dj}))
 
+# 번호 + 닉네임(대상 고르기 화면 등). 번호가 없으면 닉네임만
+function mNumName(id: text) :: text:
+	set {_no} to mNum({_id})
+	if {_no} is "":
+		return "&f%mNameOf({_id})%"
+	return "&6%{_no}% &f%mNameOf({_id})%"
+
 # 게임 중 플레이어 번호(참가자가 아니거나 로비면 "")
 function mNum(id: text) :: text:
 	if mState() is "lobby":

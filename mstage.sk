@@ -450,3 +450,66 @@ function mStgBoard(w: text, win: texts, c: location):
 	{_e}.setBillboard(StgBillboard.VERTICAL)
 	{_e}.setLineWidth(400)
 	{_e}.setBackgroundColor(Color.fromARGB(150, 0, 0, 0))
+
+# ------------------------------------------------------------------ 승리 효과음
+
+# 접속한 모두에게(연출 카메라가 없어도) 소리
+function mStgSoundEvery(s: text, v: number, pi: number):
+	loop all players:
+		mSound(loop-player, {_s}, {_v}, {_pi})
+
+# 음 높이: 소리 블록 n 칸(0 = F#3, 12 = F#4, 24 = F#5)
+function mStgNote(n: number) :: number:
+	set {_e} to {_n} - 12
+	set {_e} to {_e} / 12
+	return 2 ^ {_e}
+
+# 화음 한 번(벨 + 플링, 아래는 베이스)
+function mStgChord(a: number, b: number, c: number, v: number):
+	mStgSoundEvery("block.note_block.bell", {_v}, mStgNote({_a}))
+	mStgSoundEvery("block.note_block.pling", {_v}, mStgNote({_b}))
+	mStgSoundEvery("block.note_block.pling", {_v}, mStgNote({_c}))
+
+# 게임이 끝날 때 팡파르(배경음악 없이 효과음만). 승부가 났으면 도-미-솔-도 올라가는 팡파르 + 불꽃, 무승부면 낮은 종 두 번.
+#   도4 = 6칸, 미4 = 10칸, 솔4 = 13칸, 도5 = 18칸, 미5 = 22칸
+function mStgFanfare(w: text):
+	if {_w} is "draw":
+		mStgSoundEvery("block.bell.use", 0.8, 0.6)
+		wait 20 ticks
+		mStgSoundEvery("block.bell.use", 0.8, 0.5)
+		mStgSoundEvery("block.bell.resonate", 0.5, 0.6)
+		stop
+	wait 10 ticks
+	mStgSoundEvery("block.note_block.bass", 0.8, mStgNote(6))
+	mStgSoundEvery("block.note_block.pling", 0.8, mStgNote(6))
+	wait 3 ticks
+	mStgSoundEvery("block.note_block.pling", 0.8, mStgNote(10))
+	wait 3 ticks
+	mStgSoundEvery("block.note_block.pling", 0.8, mStgNote(13))
+	wait 3 ticks
+	mStgChord(18, 13, 10, 0.9)
+	mStgSoundEvery("block.note_block.bass", 0.8, mStgNote(6))
+	wait 8 ticks
+	mStgSoundEvery("block.note_block.pling", 0.8, mStgNote(13))
+	wait 3 ticks
+	mStgChord(22, 18, 13, 1)
+	mStgSoundEvery("block.note_block.bass", 0.9, mStgNote(6))
+	mStgSoundEvery("ui.toast.challenge_complete", 0.7, 1)
+	# 불꽃(라인업 자리가 있으면 그 위에서)
+	set {_c} to mLocLoad("lineup")
+	loop 3 times:
+		mStgSoundEvery("entity.firework_rocket.launch", 0.7, 1)
+		wait 8 ticks
+		mStgSoundEvery("entity.firework_rocket.large_blast", 0.7, 1)
+		mStgSoundEvery("entity.firework_rocket.twinkle", 0.5, 1)
+		if {_c} is set:
+			set {_y} to {_c}.getY()
+			add 5 to {_y}
+			set {_rx} to random number between -2 and 2
+			add {_c}.getX() to {_rx}
+			set {_l} to new Location({_c}.getWorld(), {_rx}, {_y}, {_c}.getZ())
+			loop all players:
+				set {_pl} to loop-player
+				{_pl}.spawnParticle(Particle.FIREWORK, {_l}, 60, 0.6, 0.6, 0.6, 0.15)
+				{_pl}.spawnParticle(Particle.END_ROD, {_l}, 20, 0.8, 0.8, 0.8, 0.05)
+		wait 6 ticks

@@ -127,8 +127,12 @@ function mCheckEnd() :: boolean:
 	mEnd({_w})
 	loop {-m::players::*}:
 		mViewAuto(loop-value)
+	# 종료 화면은 낮 하늘(배경음악은 maudio.sk 가 종료 단계에서 끈다)
+	mScSky(false)
 	# 승리 팀 라인업(관리자 메뉴에서 정한 위치가 있을 때)
 	mStgLineup({_w})
+	# 승리 효과음(팡파르, 무승부면 종소리)
+	mStgFanfare({_w})
 	return true
 
 every second:

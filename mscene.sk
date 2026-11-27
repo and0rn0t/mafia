@@ -391,8 +391,8 @@ function mWatchLabel(o: text) :: text:
 		set {_c} to "&c"
 	else if {-m::team::%{_o}%} is "citizen":
 		set {_c} to "&a"
-	set {_n} to mNameOf({_o})
-	set {_t} to "&f%{_n}% &8| %{_c}%%mRoleName({_r})%"
+	set {_n} to mNumName({_o})
+	set {_t} to "%{_n}% &8| %{_c}%%mRoleName({_r})%"
 	if {-m::alive::%{_o}%} is not true:
 		set {_t} to "%{_t}% &7(사망)"
 	return {_t}
@@ -887,7 +887,7 @@ function mPickCur(id: text) :: text:
 function mPickLabel(c: text) :: text:
 	if {_c} is "ignite":
 		return "&6점화 &7(기름에 젖은 사람을 모두 불태움)"
-	return "&f%mNameOf({_c})%"
+	return mNumName({_c})
 
 # 지금 후보를 화면에 보여 준다(컷).
 #   밤: 붉은 침대 줄. 가운데 침대에 지금 후보, 화면 왼쪽 침대에 이전 후보(A), 오른쪽 침대에 다음 후보(D)가 누워 있다(본인에게만 보이는 더미 3개를 바꿔 입힌다).
@@ -957,13 +957,13 @@ function mPickConfirm(id: text):
 		set {_ok} to "&6점화를 골랐습니다. 밤이 끝나면 기름에 젖은 사람이 모두 불탑니다."
 	else if {_mode} is "night":
 		set {_why} to mSetAct({_id}, {_c})
-		set {_ok} to "&a%mNameOf({_c})% 님을 골랐습니다."
+		set {_ok} to "%mNumName({_c})%&a 님을 골랐습니다."
 	else if {_mode} is "vote":
 		set {_why} to mVoteCast({_id}, {_c})
-		set {_ok} to "&a%mNameOf({_c})% 님에게 투표했습니다."
+		set {_ok} to "%mNumName({_c})%&a 님에게 투표했습니다."
 	else:
 		set {_why} to mTakePick({_id}, {_c})
-		set {_ok} to "&c%mNameOf({_c})% 님을 길동무로 데려갑니다."
+		set {_ok} to "%mNumName({_c})%&c 님을 길동무로 데려갑니다."
 	if {_p} is set:
 		if {_why} is not "":
 			send "&c%{_why}%" to {_p}
