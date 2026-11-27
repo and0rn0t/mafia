@@ -23,6 +23,7 @@
 #   {-m::sealed::uuid}       마담에게 지목당해 이번 밤 능력 불가                                           mnight.sk(읽기), mvote.sk/mresolve.sk
 #   {-m::fake::uuid}         광인에게 보여 준 가짜 직업                                                      mjoin.sk, mnight.sk
 #   {-m::contact/soldier/oil/nocht/novote/stolen::uuid}, {-m::ev/info/pub/dead::*}   밤 처리 결과·상태 (자세한 뜻은 mresolve.sk 머리말)
+#   {-m::vote/votes/tadj::uuid}, {-m::exe}   투표 대상 / 받은 표 / 낮 시간 조절 사용 / 길동무 선택 대기 테러리스트   mvote.sk, mday.sk
 # (아래 변수는 DESIGN.md 3번 참고, 해당 파일을 만들 때 이 목록에 옮긴다: nocht, novote, oil, soldier, votes, tadj, ev)
 #
 # 위치 저장은 PvP 서버(andornot)의 gcSaveLoc/gcLoadLoc 와 같은 방식이다(월드 이름 + 좌표). 월드는 world.sk 의 /world create 로 먼저 만들어 둔다.
@@ -193,10 +194,8 @@ command /mtime [<text>] [<number>]:
 
 # 게임을 시작한 직후 첫 밤으로 넘어간다. (밤/낮/투표 진행은 mnight.sk, mday.sk, mvote.sk 를 만들 때 여기에 이어 붙인다)
 function mBegin():
-	set {-m::day} to 1
-	set {-m::state} to "night"
-	mNightStart()
-	broadcast "&6[마피아] &71일차 밤이 시작됩니다. (밤 단계는 아직 구현되지 않았습니다. /mstop 으로 로비로 돌아갑니다.)"
+	set {-m::day} to 0
+	mStartNight()
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).
 function mReset():
@@ -214,6 +213,10 @@ function mReset():
 	delete {-m::used::*}
 	delete {-m::sealed::*}
 	delete {-m::fake::*}
+	delete {-m::vote::*}
+	delete {-m::votes::*}
+	delete {-m::tadj::*}
+	delete {-m::exe}
 	delete {-m::contact::*}
 	delete {-m::soldier::*}
 	delete {-m::oil::*}

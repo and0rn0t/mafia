@@ -1,0 +1,108 @@
+# ==============================================================================
+# [mday.sk] 게임 진행 루프(밤 → 처리 → 낮 → 투표 → 처형 → 밤 …), 낮 시간 조절, 로비 복귀. 규칙은 ROLES.md, 구조는 DESIGN.md.
+# 진행: every second 한 개가 {-m::state} 별로 {-m::left} 를 줄이고 0 이 되면 다음 단계로 넘긴다.
+#   night(밤 입력 시간) → [mResolve + mResolveShow + 승패] → day(토론) → vote(mvote.sk) → [mTally, 테러리스트면 execute] → [승패] → night …  end → 10초 뒤 로비
+# 낮 시간 조절: /mdisc up|down  (낮마다 한 사람 한 번, 15초, 누가 눌렀는지 알림, 0초가 되면 투표로)
+# 변수: {-m::tadj::uuid}(이 낮에 시간 조절 사용함, 낮 시작 때 초기화)
+# 미검증: 전체(서버 실행 불가). 연출(mscene.sk), 채팅 분리(mchat.sk)는 아직 없다.
+# ==============================================================================
+
+function mToLobby():
+	mReset()
+	set {_lb} to mLobbyLoc()
+	loop all players:
+		if loop-player is not op:
+			set loop-player's gamemode to adventure
+		else if gamemode of loop-player is spectator:
+			set loop-player's gamemode to creative
+		mTp(loop-player, {_lb})
+		mLobbyEnsure(loop-player)
+	mTabUpdateAll()
+
+function mStartNight():
+	add 1 to {-m::day}
+	set {-m::state} to "night"
+	mNightStart()
+	broadcast "&6[마피아] &7%{-m::day}%일차 밤이 시작됩니다. (%{-m::left}%초)"
+
+function mStartDay():
+	set {-m::state} to "day"
+	set {-m::left} to mTimeDiscuss()
+	delete {-m::tadj::*}
+	broadcast "&6[마피아] &7%{-m::day}%일차 낮입니다. 토론하세요. (%{-m::left}%초)"
+
+# 승패가 났으면 종료 처리하고 true
+function mCheckEnd() :: boolean:
+	set {_w} to mWinCheck()
+	if {_w} is "":
+		return false
+	mEnd({_w})
+	return true
+
+every second:
+	set {_s} to mState()
+	if mRunning() is not true:
+		if {_s} is "end":
+			subtract 1 from {-m::left}
+			if {-m::left} <= 0:
+				mToLobby()
+				broadcast "&6[마피아] &7게임이 종료되어 로비로 돌아왔습니다."
+		stop
+	subtract 1 from {-m::left}
+	if {-m::left} > 0:
+		stop
+	if {_s} is "night":
+		set {-m::state} to "resolve"
+		mResolve()
+		mResolveShow()
+		if mCheckEnd() is true:
+			stop
+		mStartDay()
+	else if {_s} is "day":
+		mVoteStart()
+	else if {_s} is "vote":
+		mTally()
+		if mState() is "execute":
+			stop
+		if mCheckEnd() is true:
+			stop
+		mStartNight()
+	else if {_s} is "execute":
+		if {-m::exe} is set:
+			set {_x} to {-m::exe}
+			loop {-m::players::*}:
+				if loop-value is not {_x}:
+					if {-m::alive::%loop-value%} is true:
+						add loop-value to {_cand::*}
+			if size of {_cand::*} > 0:
+				mTakePick({_x}, random element of {_cand::*})
+		if mCheckEnd() is true:
+			stop
+		mStartNight()
+
+command /mdisc <text>:
+	description: 낮 토론 시간 15초 늘리기/줄이기 (마피아 게임, 낮마다 한 번)
+	executable by: players
+	trigger:
+		set {_id} to "%uuid of player%"
+		if mState() is not "day":
+			send "&c낮 토론 시간에만 쓸 수 있습니다."
+			stop
+		if {-m::alive::%{_id}%} is not true:
+			send "&c생존자만 쓸 수 있습니다."
+			stop
+		if {-m::tadj::%{_id}%} is true:
+			send "&c오늘은 이미 시간을 조절했습니다."
+			stop
+		if arg-1 is "up":
+			add 15 to {-m::left}
+			broadcast "&6[마피아] &f%name of player%&7 님이 토론 시간을 15초 늘렸습니다."
+		else if arg-1 is "down":
+			subtract 15 from {-m::left}
+			if {-m::left} < 0:
+				set {-m::left} to 0
+			broadcast "&6[마피아] &f%name of player%&7 님이 토론 시간을 15초 줄였습니다."
+		else:
+			send "&7사용법: /mdisc up|down"
+			stop
+		set {-m::tadj::%{_id}%} to true

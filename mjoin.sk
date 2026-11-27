@@ -402,14 +402,5 @@ command /mstop:
 			if player is not op:
 				send "&c관리자만 사용할 수 있습니다."
 				stop
-		mReset()
-		set {_lb} to mLobbyLoc()
-		loop all players:
-			if loop-player is not op:
-				set loop-player's gamemode to adventure
-			else if gamemode of loop-player is spectator:
-				set loop-player's gamemode to creative
-			mTp(loop-player, {_lb})
-			mLobbyEnsure(loop-player)
-		mTabUpdateAll()
+		mToLobby()
 		broadcast "&6[마피아] &7게임이 종료되어 로비로 돌아왔습니다."

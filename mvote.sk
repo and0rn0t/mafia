@@ -1,0 +1,192 @@
+# ==============================================================================
+# [mvote.sk] 투표, 처형, 테러리스트 길동무, 승리 판정. 규칙은 ROLES.md, 구조는 DESIGN.md. 단계 진행은 mday.sk 의 진행 루프가 부른다.
+# 함수: mVoteStart() 투표 시작 / mVoteCast(투표자, 대상) 투표(바꾸면 덮어씀, 해석 - 확인 필요) / mTally() 집계·처형 / mTakeStart(테러리스트) / mTakePick(테러리스트, 대상)
+#       mWeight(id) 표 수(정치인 2) / mWinCheck() "" 진행, "draw", "mafia", "citizen", "neutral:uuid" / mEnd(승자) 종료 처리(mday.sk 의 mToLobby 로 복귀)
+# 변수: {-m::vote::uuid}(투표 대상), {-m::votes::uuid}(받은 표), {-m::exe}(처형된 테러리스트 uuid, 길동무 선택 대기 중)
+# 시험용 명령: /mvote <닉네임>, /mtake <닉네임>(테러리스트 길동무). GUI 는 나중에 연결한다.
+# 마담: 투표 시간에 마담에게 투표당한 사람은 직후 밤 능력 불가({-m::sealed}). 대상이 마피아 직업이면 봉인 대신 접선. 마담의 표도 일반 표로 센다.
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+function mWeight(id: text) :: number:
+	if {-m::role::%{_id}%} is "politician":
+		return 2
+	return 1
+
+function mVoteStart():
+	delete {-m::vote::*}
+	delete {-m::votes::*}
+	set {-m::state} to "vote"
+	set {-m::left} to mTimeVote()
+	broadcast "&6[마피아] &7투표 시간입니다. /mvote <닉네임> 으로 투표하세요. (%{-m::left}%초)"
+
+function mVoteCast(v: text, t: text) :: text:
+	if mState() is not "vote":
+		return "투표 시간이 아닙니다."
+	if {-m::alive::%{_v}%} is not true:
+		return "사망한 플레이어는 투표할 수 없습니다."
+	if {-m::away::%{_v}%} is true:
+		return "자리비움 상태입니다."
+	if {-m::novote::%{_v}%} is true:
+		return "건달에게 협박당해 오늘은 투표할 수 없습니다."
+	if {-m::alive::%{_t}%} is not true:
+		return "살아 있는 참가자에게만 투표할 수 있습니다."
+	set {_old} to {-m::vote::%{_v}%}
+	if {_old} is set:
+		subtract mWeight({_v}) from {-m::votes::%{_old}%}
+	set {-m::vote::%{_v}%} to {_t}
+	add mWeight({_v}) to {-m::votes::%{_t}%}
+	set {_n} to mNameOf({_t})
+	set {_c} to {-m::votes::%{_t}%}
+	loop {-m::players::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			send "&6[마피아] &f%{_n}%&7 님 &e%{_c}%표" to {_p}
+	return ""
+
+function mTally():
+	# 마담 효과(투표 결과와 무관하게 마담의 표 대상에 적용)
+	delete {-m::sealed::*}
+	loop {-m::players::*}:
+		if {-m::role::%loop-value%} is "madam":
+			if {-m::alive::%loop-value%} is true:
+				set {_t} to {-m::vote::%loop-value%}
+				if {_t} is set:
+					if {-m::role::%{_t}%} is "mafia":
+						set {-m::contact::%loop-value%} to true
+						set {-m::team::%loop-value%} to "mafia"
+						set {_mp} to mPlayerOf(loop-value)
+						if {_mp} is set:
+							send "&c마피아와 접선했습니다." to {_mp}
+					else:
+						set {-m::sealed::%{_t}%} to true
+	# 종합 알림
+	set {_max} to 0
+	loop {-m::players::*}:
+		set {_v} to {-m::votes::%loop-value%}
+		if {_v} is set:
+			if {_v} > 0:
+				set {_nm} to mNameOf(loop-value)
+				broadcast "&6[마피아] &f%{_nm}%&7 님 &e%{_v}%표"
+			if {_v} > {_max}:
+				set {_max} to {_v}
+	if {_max} is 0:
+		broadcast "&6[마피아] &7투표한 사람이 없어 처형은 없습니다."
+		stop
+	loop {-m::players::*}:
+		if {-m::votes::%loop-value%} is {_max}:
+			add loop-value to {_top::*}
+	if size of {_top::*} > 1:
+		broadcast "&6[마피아] &7최다 득표자가 여럿이라 처형은 없습니다."
+		stop
+	set {_x} to {_top::1}
+	set {_xn} to mNameOf({_x})
+	if {-m::role::%{_x}%} is "politician":
+		broadcast "&6[마피아] &f%{_xn}%&7 님이 최다 득표했지만 처형되지 않았습니다."
+		stop
+	mDie({_x})
+	broadcast "&6[마피아] &f%{_xn}%&7 님이 투표로 처형되었습니다."
+	if {-m::role::%{_x}%} is "terrorist":
+		set {-m::exe} to {_x}
+		set {-m::state} to "execute"
+		set {-m::left} to 15
+		set {_tp} to mPlayerOf({_x})
+		if {_tp} is set:
+			send "&c길동무를 고르세요. /mtake <닉네임> (15초, 시간 초과 시 무작위)" to {_tp}
+
+function mTakePick(t: text, v: text) :: text:
+	if mState() is not "execute":
+		return "지금은 선택할 수 없습니다."
+	if {-m::exe} is not {_t}:
+		return "테러리스트가 아닙니다."
+	if {_v} is {_t}:
+		return "자기 자신은 고를 수 없습니다."
+	if {-m::alive::%{_v}%} is not true:
+		return "살아 있는 참가자만 고를 수 있습니다."
+	mDie({_v})
+	set {_n} to mNameOf({_v})
+	broadcast "&6[마피아] &f%{_n}%&7 님이 테러리스트의 길동무가 되어 사망했습니다."
+	delete {-m::exe}
+	return ""
+
+function mWinCheck() :: text:
+	set {_a} to 0
+	set {_m} to 0
+	set {_c} to 0
+	set {_nn} to 0
+	set {_thug} to false
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			add 1 to {_a}
+			set {_tm} to {-m::team::%loop-value%}
+			if {_tm} is "mafia":
+				add 1 to {_m}
+			else if {_tm} is "citizen":
+				add mWeight(loop-value) to {_c}
+				if {-m::role::%loop-value%} is "thug":
+					set {_thug} to true
+			else if {_tm} is "neutral":
+				add 1 to {_nn}
+				set {_last} to loop-value
+	if {_a} is 0:
+		return "draw"
+	if {_nn} > 0:
+		if {_m} is 0:
+			if {_c} is 0:
+				if {_nn} is 1:
+					return "neutral:%{_last}%"
+		return ""
+	set {_mv} to {_m}
+	# 보조 직업(접선 전/후)의 표는 마피아 팀 승리 계산에서 접선한 경우만 센다(team 변수가 mafia 면 이미 {_m} 에 들어 있음)
+	if {_thug} is true:
+		subtract 1 from {_mv}
+	if {_m} > 0:
+		if {_mv} > {_c}:
+			return "mafia"
+		return ""
+	return "citizen"
+
+function mEnd(w: text):
+	set {-m::state} to "end"
+	set {-m::left} to 10
+	if {_w} is "draw":
+		broadcast "&6[마피아] &7생존자가 없어 무승부입니다."
+	else if {_w} is "mafia":
+		broadcast "&6[마피아] &c마피아 팀&7이 승리했습니다."
+	else if {_w} is "citizen":
+		broadcast "&6[마피아] &a시민 팀&7이 승리했습니다."
+	else:
+		set {_id} to {_w}
+		replace all "neutral:" in {_id} with ""
+		set {_n} to mNameOf({_id})
+		set {_rn} to mRoleName({-m::role::%{_id}%})
+		broadcast "&6[마피아] &e중립 %{_rn}% &f%{_n}%&7 님이 승리했습니다."
+	broadcast "&6[마피아] &7최초 직업 공개"
+	loop {-m::players::*}:
+		set {_n} to mNameOf(loop-value)
+		set {_rn} to mRoleName({-m::orig::%loop-value%})
+		broadcast "&7- &f%{_n}% &7: &e%{_rn}%"
+
+command /mvote <text>:
+	description: 투표 (마피아 게임)
+	executable by: players
+	trigger:
+		set {_tp} to arg-1 parsed as player
+		if {_tp} is not set:
+			send "&c그런 플레이어가 없습니다."
+			stop
+		set {_why} to mVoteCast("%uuid of player%", "%uuid of {_tp}%")
+		if {_why} is not "":
+			send "&c%{_why}%"
+
+command /mtake <text>:
+	description: 테러리스트 길동무 선택 (마피아 게임)
+	executable by: players
+	trigger:
+		set {_tp} to arg-1 parsed as player
+		if {_tp} is not set:
+			send "&c그런 플레이어가 없습니다."
+			stop
+		set {_why} to mTakePick("%uuid of player%", "%uuid of {_tp}%")
+		if {_why} is not "":
+			send "&c%{_why}%"
