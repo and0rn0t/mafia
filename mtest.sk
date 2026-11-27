@@ -816,8 +816,11 @@ function mBotRecent() :: text:
 function mBotLlmSend(b: text, intent: text) :: boolean:
 	set {_root} to new JsonObject()
 	{_root}.addProperty("model", {mcfg::llm::model})
-	{_root}.addProperty("max_tokens", 80)
+	# 생각하는 모델(Gemini 등)은 생각에도 토큰을 써서 넉넉히 둔다(답은 mBotLlmText 가 60자로 자른다)
+	{_root}.addProperty("max_tokens", 600)
 	{_root}.addProperty("temperature", 0.9)
+	if {mcfg::llm::effort} is set:
+		{_root}.addProperty("reasoning_effort", {mcfg::llm::effort})
 	set {_msgs} to new JsonArray()
 	set {_sys} to new JsonObject()
 	{_sys}.addProperty("role", "system")
@@ -910,7 +913,9 @@ every second:
 function mBotLlmTest(p: player):
 	set {_root} to new JsonObject()
 	{_root}.addProperty("model", {mcfg::llm::model})
-	{_root}.addProperty("max_tokens", 40)
+	{_root}.addProperty("max_tokens", 600)
+	if {mcfg::llm::effort} is set:
+		{_root}.addProperty("reasoning_effort", {mcfg::llm::effort})
 	set {_msgs} to new JsonArray()
 	set {_usr} to new JsonObject()
 	{_usr}.addProperty("role", "user")
@@ -1201,6 +1206,14 @@ command /mtest [<text>] [<text>] [<text>]:
 				set {mcfg::llm::model} to arg-3
 				send "&aAI 모델을 정했습니다: &f%arg-3%"
 				stop
+			if {_k} is "effort":
+				if arg-3 is not set:
+					delete {mcfg::llm::effort}
+					send "&7생각 정도(reasoning_effort)를 보내지 않습니다."
+					stop
+				set {mcfg::llm::effort} to arg-3
+				send "&a생각 정도를 &f%arg-3%&a(으)로 보냅니다. &7(none/low/medium/high, 지원하지 않는 모델이면 /mtest llm effort 로 끄기)"
+				stop
 			if {_k} is "on":
 				set {mcfg::llm::on} to true
 				send "&a봇 말하기를 AI 로 합니다."
@@ -1238,7 +1251,7 @@ command /mtest [<text>] [<text>] [<text>]:
 				if {_er}.length() > 150:
 					set {_er} to {_er}.substring(0, 150)
 				send "&7마지막 오류: &c%{_er}%"
-			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | on | off | test | status"
+			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | effort [none|low] | on | off | test | status"
 			stop
 		if {_a} is "stop":
 			mToLobby()
