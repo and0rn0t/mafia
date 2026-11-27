@@ -191,7 +191,9 @@ every second:
 		mStartNight()
 
 command /mdisc <text>:
-	description: 낮 토론 시간 15초 늘리기/줄이기 (마피아 게임, 낮마다 한 번)
+	aliases: /토론, /disc
+	description: 낮 토론 시간 15초 늘리기/줄이기 (마피아 게임, 낮마다 한 번) - 늘리기|줄이기 (up|down)
+	usage: &7사용법: /토론 늘리기|줄이기
 	executable by: players
 	trigger:
 		set {_id} to "%uuid of player%"
@@ -204,16 +206,16 @@ command /mdisc <text>:
 		if {-m::tadj::%{_id}%} is true:
 			send "&c오늘은 이미 시간을 조절했습니다."
 			stop
-		if arg-1 is "up":
+		if arg-1 is "up" or "늘리기" or "+":
 			add 15 to {-m::left}
 			mBc("&f%name of player%&7 님이 토론 시간을 15초 늘렸습니다.")
-		else if arg-1 is "down":
+		else if arg-1 is "down" or "줄이기" or "-":
 			subtract 15 from {-m::left}
 			if {-m::left} < 0:
 				set {-m::left} to 0
 			mBc("&f%name of player%&7 님이 토론 시간을 15초 줄였습니다.")
 		else:
-			send "&7사용법: /mdisc up|down"
+			send "&7사용법: /토론 늘리기|줄이기 (또는 /mdisc up|down)"
 			stop
 		set {-m::tadj::%{_id}%} to true
 		# 0초가 되면 다음 초를 기다리지 않고 바로 투표로

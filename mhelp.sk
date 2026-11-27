@@ -54,7 +54,8 @@ function mGuideBook() :: object:
 	{_m}.setTitle("마피아 안내서")
 	{_m}.setAuthor("마피아")
 	set {_pg} to new ArrayList()
-	{_pg}.add(mGuideText("&l     마피아 안내서&r||&01. 게임 진행|2. 조작|3. 팀과 승리|4. 직업 19개||&8로비 핫바 9번 칸에 있고,|게임 중에는 /mhelp 책|으로 다시 열 수 있습니다."))
+	{_pg}.add(mGuideText("&l     마피아 안내서&r||&01. 명령어|2. 게임 진행|3. 조작|4. 팀과 승리|5. 직업 19개||&8로비 핫바 9번 칸에 있고,|게임 중에는 /도움말 책|으로 다시 열 수 있습니다."))
+	{_pg}.add(mGuideText("&l명령어&r &8(한글=영문)|&0/투표 <번호/닉네임>|&8 /mvote /vote|&0/길동무 <번호/닉네임>|&8 /mtake /take|&0/토론 늘리기/줄이기|&8 /mdisc up/down|&0/기록 [쪽]  &8/mlog|&0/도움말  &8/마피아 /mhelp|&0/도움말 책/직업/내직업|&8 book/role/me/명령어"))
 	{_pg}.add(mGuideText("&l게임 진행&r||&9밤&0: 능력을 쓸 대상을|고릅니다.|&5밤 처리&0: 밤 사이 일어난|일을 연출로 봅니다.|&6낮&0: 사망자 발표 뒤 토론.|토론 시간 = 생존자 수×%mTimeDiscussPer()%초|&c투표&0: 가장 많이 받은|한 명이 화형됩니다.|승부가 날 때까지 반복!"))
 	{_pg}.add(mGuideText("&l조작&r|&8게임 중에는 화면이|고정되고 이동 키로 조작|&0W  대상 고르기 열기|A/D  대상 바꾸기|Space  확정|Shift  고르지 않기|&6낮&0 W/S  토론 ±15초|  (하루 한 번)|&7죽은 뒤&0 A/D 로|  생존자를 관전합니다."))
 	{_pg}.add(mGuideText("&l팀과 승리&r||&c마피아 팀&0: 중립이 없고|마피아 팀 표가 시민 팀|표보다 많으면 승리||&a시민 팀&0: 중립과 마피아|팀이 모두 없으면 승리||&b중립&0: 혼자 남으면 승리"))
@@ -112,10 +113,24 @@ function mMyRole(p: player):
 	else if {_po} is "support":
 		send "&7아직 마피아와 접선하지 않았습니다." to {_p}
 
+# 사용자 명령어 모음(채팅). 한글 명령과 영문 명령은 같다.
+function mHelpCmds(s: commandsender):
+	send "&e명령어 &8(한글 / 영문 같음)" to {_s}
+	send "&f /투표 <번호|닉네임> &8(/mvote, /vote) &7투표" to {_s}
+	send "&f /길동무 <번호|닉네임> &8(/mtake, /take) &7테러리스트 길동무" to {_s}
+	send "&f /토론 늘리기|줄이기 &8(/mdisc up|down) &7토론 15초 조절" to {_s}
+	send "&f /기록 [쪽] &8(/mlog, /log) &7이번 게임 메시지 기록" to {_s}
+	send "&f /도움말 &8(/마피아, /mhelp) &7도움말" to {_s}
+	send "&f /도움말 책 &8(book) &7안내서  &f/도움말 명령어 &8(commands)" to {_s}
+	send "&f /도움말 직업 [이름] &8(role) &7직업 설명  &f/도움말 내직업 &8(me) &7내 직업" to {_s}
+
 command /mhelp [<text>] [<text>]:
-	aliases: /마피아
+	aliases: /마피아, /도움말
 	description: 마피아 게임 도움말
 	trigger:
+		if arg-1 is "명령어" or "commands" or "cmd":
+			mHelpCmds(sender)
+			stop
 		if arg-1 is "책" or "book":
 			if sender is not a player:
 				stop
@@ -128,7 +143,7 @@ command /mhelp [<text>] [<text>]:
 			stop
 		if arg-1 is "직업" or "role":
 			if arg-2 is not set:
-				send "&7직업 목록 &8(/mhelp 직업 <이름>)"
+				send "&7직업 목록 &8(/도움말 직업 <이름>)"
 				loop "mafia", "support", "citizen", "neutral":
 					set {_po} to loop-value
 					delete {_ns::*}
@@ -139,7 +154,7 @@ command /mhelp [<text>] [<text>]:
 				stop
 			set {_r} to mRoleFind(arg-2)
 			if {_r} is "":
-				send "&c그런 직업이 없습니다. /mhelp 직업 으로 목록을 보세요."
+				send "&c그런 직업이 없습니다. /도움말 직업 으로 목록을 보세요."
 				stop
 			set {_po} to mRolePool({_r})
 			send "%mTeamColor({_po})%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)"
@@ -152,11 +167,7 @@ command /mhelp [<text>] [<text>]:
 		send "&f A / D &7대상 바꾸기 &8| &7사망·관전 중에는 볼 사람 바꾸기"
 		send "&f Space &7고른 대상 확정  &f Shift &7고르지 않기"
 		send "&f W / S &7(낮 토론 중) 토론 시간 15초 늘리기 / 줄이기, 낮마다 한 번"
-		send "&e더 보기"
-		send "&f /mhelp 책 &7안내서(규칙, 팀과 승리, 직업 설명) 열기"
-		send "&f /mhelp 직업 [이름] &7직업 목록 / 설명  &f/mhelp 내직업 &7게임 중 내 직업"
-		send "&f /mlog [쪽] &7이번 게임 메시지 기록 (/기록)"
-		send "&f /mvote <닉네임> &7투표  &f/mtake <닉네임> &7길동무  &f/mdisc up|down &7토론 시간"
+		mHelpCmds(sender)
 		if sender is a player:
 			if player is not op:
 				stop

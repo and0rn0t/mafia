@@ -313,7 +313,7 @@ function mLogP(id: text, t: text):
 	mLogAdd({_id}, {_t})
 
 command /mlog [<number>]:
-	aliases: /기록
+	aliases: /기록, /log
 	description: 이번 게임 메시지 기록 보기 (/mlog 2 = 그 전 쪽)
 	executable by: players
 	trigger:
@@ -348,7 +348,7 @@ command /mlog [<number>]:
 			send colored {_l}
 			add 1 to {_i}
 		if {_first} > 1:
-			send "&8/mlog %{_pg} + 1% 로 그 전 기록"
+			send "&8/기록 %{_pg} + 1% 로 그 전 기록"
 
 # ------------------------------------------------------------------ 봇 시험(mtest.sk) 연결점
 # 게임 코드는 봇에 대해 이 세 함수만 부른다. 봇 변수({-mt::*})는 mtest.sk 가 채우고, 그 파일이 없으면 늘 비어 있어 봇이 없는 것과 같다.

@@ -20,7 +20,7 @@ function mVoteStart():
 	set {-m::state} to "vote"
 	set {-m::left} to mTimeVote()
 	mAuUpdate()
-	mBc("&7투표 시간입니다. 핫바의 대상 고르기(또는 /mvote <닉네임>)로 투표하세요. (%{-m::left}%초)")
+	mBc("&7투표 시간입니다. W 로 대상을 고르거나 /투표 <번호 또는 닉네임> 으로 투표하세요. (%{-m::left}%초)")
 	mSceneVote()
 
 function mVoteCast(v: text, t: text) :: text:
@@ -96,7 +96,7 @@ function mTally():
 		set {-m::left} to mStgBurnLen() + mTimeTake()
 		set {_tp} to mPlayerOf({_x})
 		if {_tp} is set:
-			send "&c화형이 끝나면 길동무를 고르세요. A/D 로 고르고 스페이스로 확정(또는 /mtake <닉네임>). %mTimeTake()%초가 지나면 무작위로 정해집니다." to {_tp}
+			send "&c화형이 끝나면 길동무를 고르세요. A/D 로 고르고 스페이스로 확정(또는 /길동무 <번호 또는 닉네임>). %mTimeTake()%초가 지나면 무작위로 정해집니다." to {_tp}
 	# 화형 컷신(연출이 없으면 바로 해골, 테러리스트면 컷신 뒤 길동무 선택 화면)
 	mStgBurn({_x})
 
@@ -254,26 +254,46 @@ function mEnd(w: text):
 		set {_rn} to mRoleName({-m::orig::%loop-value%})
 		mBc("&7- &f%{_n}% &7: &e%{_rn}%")
 
+# 번호 또는 닉네임 → 참가자 uuid(없으면 "")
+function mFindTarget(s: text) :: text:
+	set {_no} to {_s} parsed as integer
+	if {_no} is set:
+		loop {-m::players::*}:
+			if {-m::num::%loop-value%} is {_no}:
+				return loop-value
+		return ""
+	loop {-m::players::*}:
+		if mNameOf(loop-value) is {_s}:
+			return loop-value
+	set {_tp} to {_s} parsed as player
+	if {_tp} is set:
+		return "%uuid of {_tp}%"
+	return ""
+
 command /mvote <text>:
-	description: 투표 (마피아 게임)
+	aliases: /투표, /vote
+	description: 투표 (마피아 게임) - 번호 또는 닉네임
+	usage: &7사용법: /투표 <번호 또는 닉네임>
 	executable by: players
 	trigger:
-		set {_tp} to arg-1 parsed as player
-		if {_tp} is not set:
-			send "&c그런 플레이어가 없습니다."
+		set {_t} to mFindTarget(arg-1)
+		if {_t} is "":
+			send "&c그런 참가자가 없습니다. 번호나 닉네임을 확인해 주세요."
 			stop
-		set {_why} to mVoteCast("%uuid of player%", "%uuid of {_tp}%")
+		set {_why} to mVoteCast("%uuid of player%", {_t})
 		if {_why} is not "":
 			send "&c%{_why}%"
 
 command /mtake <text>:
-	description: 테러리스트 길동무 선택 (마피아 게임)
+	aliases: /길동무, /take
+	description: 테러리스트 길동무 선택 (마피아 게임) - 번호 또는 닉네임
+	usage: &7사용법: /길동무 <번호 또는 닉네임>
 	executable by: players
 	trigger:
-		set {_tp} to arg-1 parsed as player
-		if {_tp} is not set:
-			send "&c그런 플레이어가 없습니다."
+		set {_t} to mFindTarget(arg-1)
+		if {_t} is "":
+			send "&c그런 참가자가 없습니다. 번호나 닉네임을 확인해 주세요."
 			stop
-		set {_why} to mTakePick("%uuid of player%", "%uuid of {_tp}%")
+		set {_why} to mTakePick("%uuid of player%", {_t})
 		if {_why} is not "":
 			send "&c%{_why}%"
