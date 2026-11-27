@@ -258,6 +258,10 @@ function mCamTo(id: text, key: text):
 function mCamCut(id: text, l: location):
 	delete {-ms::shk::%{_id}%}
 	delete {-ms::shkb::%{_id}%}
+	# 밤 처리 중 이 사람이 장면을 보고 있으면, 이 사람을 관전 중인 사람 카메라도 같이 옮긴다(mfx.sk 의 장면 따라 보기)
+	if {-msc::%{_id}%::kind} is set:
+		loop mFxWatchersOf({_id}):
+			mCamCut(loop-value, {_l})
 	set {_cam} to {-ms::cam::%{_id}%}
 	if {_cam} is not set:
 		stop
@@ -385,6 +389,9 @@ function mWatchMove(id: text, d: number):
 		set {_i} to 1
 	set {-ms::watch::%{_id}%} to {_live::%{_i}%}
 	mViewAuto({_id})
+	# 밤 처리 중이면 새로 보는 사람의 지금 장면으로 바로 옮긴다(이전 사람 장면은 내 화면에서 치운다)
+	if mState() is "resolve":
+		mFxWatchSwitch({_id}, {_cur}, {_live::%{_i}%})
 	set {_p} to mPlayerOf({_id})
 	if {_p} is set:
 		mSound({_p}, "ui.button.click", 0.4, 1.6)
@@ -552,6 +559,25 @@ every 1 tick:
 
 # 화면 흔들림: n 틱 동안 카메라를 조금씩(세기 amp 칸) 흔들고 원래 자리로 돌린다. 카메라를 다른 곳으로 컷하면(mCamCut) 흔들림은 끝난다.
 function mCamShake(id: text, n: number, amp: number):
+	mCamShake1({_id}, {_n}, {_amp})
+	if {-msc::%{_id}%::kind} is set:
+		loop mFxWatchersOf({_id}):
+			mCamShake1(loop-value, {_n}, {_amp})
+
+# 밤 처리(resolve) 동안 vid 를 관전 중이고, 자기 장면을 보고 있지 않은 사망자·관전자(장면 따라 보기 대상)
+function mFxWatchersOf(vid: text) :: texts:
+	if mState() is not "resolve":
+		return {_none::*}
+	loop mWatchers():
+		set {_w} to loop-value
+		if {_w} is not {_vid}:
+			if size of {-msq::%{_w}%::*} is 0:
+				if {-ms::pick::%{_w}%} is not set:
+					if mWatchOf({_w}) is {_vid}:
+						add {_w} to {_l::*}
+	return {_l::*}
+
+function mCamShake1(id: text, n: number, amp: number):
 	set {_cam} to {-ms::cam::%{_id}%}
 	if {_cam} is not set:
 		stop

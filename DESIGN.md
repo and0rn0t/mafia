@@ -162,3 +162,4 @@ ROLES.md 에 없던, 설계하면서 생긴 질문이다.
 - 맵 청크 유지(mscene.sk mScChunks): 게임 동안 연출 장소 둘레 청크에 플러그인 티켓을 건다. 저장되지 않는 더미가 청크가 내려갈 때 지워지는 것을 막는다. mScHeal 이 2초마다 원탁·집 더미가 사라졌으면 다시 만들고 콘솔에 "[mafia] ... 다시 만듦" 을 남긴다.
 - 메시지 기록(mcore.sk): 전체 알림은 mBc(문장)로 보내고 기록한다. 본인에게만 간 것은 mLogP(uuid, 문장). 보기: /기록(/mlog), Paper 대화창(dialog)으로 띄운다(채팅에 쓰지 않음).
 - 배경음(maudio.sk, maudio_data.sk, tools/BuildPack.java): ogg 폴더 → `java tools/BuildPack.java <폴더> .` 로 mafia-pack.zip 과 maudio_data.sk(키, 길이, SHA-1)를 만든다. 팩 주소는 저장소 raw(또는 {mcfg::packurl}).
+- 장면 따라 보기(mfx.sk): 장면 보내기는 모두 mFxAud(vid) = 본인 + mFxWatchersOf(vid)(밤 처리 중 그 사람을 보는 사망자·관전자, 자기 장면 재생 중인 사람 제외)로 간다. 카메라 컷(mCamCut)과 흔들림(mCamShake)은 그 사람 장면 중이면 관전자에게도 같이 적용된다. A/D 로 바꾸면 mFxWatchSwitch 가 이전 장면을 치우고 새 장면을 붙인다.

@@ -140,23 +140,33 @@ function mFxRoleItem(role: text) :: text:
 	return "-"
 
 # 그 사람 화면에만 파티클(대상 머리 쪽)
-function mFxPart(vid: text, name: text, l: location, n: number):
+# 그 사람의 장면을 받는 사람들: 본인 + 밤 처리 동안 그 사람을 관전 중인 사망자·관전자(mscene.sk mFxWatchersOf)
+function mFxAud(vid: text) :: players:
 	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
+	if {_p} is set:
+		add {_p} to {_l::*}
+	loop mFxWatchersOf({_vid}):
+		set {_w} to mPlayerOf(loop-value)
+		if {_w} is set:
+			add {_w} to {_l::*}
+	return {_l::*}
+
+function mFxPart(vid: text, name: text, l: location, n: number):
 	if {_l} is not set:
 		stop
 	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_l}.getY() + 1, {_l}.getZ())
-	{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, 0.3, 0.3, 0.3, 0)
+	loop mFxAud({_vid}):
+		set {_p} to loop-value
+		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, 0.3, 0.3, 0.3, 0)
 
-# 그 사람에게만 보이는 엔티티로 만든다
+# 그 사람(과 관전 중인 사람)에게만 보이는 엔티티로 만든다
 function mFxOnly(e: object, vid: text):
 	{_e}.setPersistent(false)
 	{_e}.addScoreboardTag("mafia_tmp")
 	{_e}.setVisibleByDefault(false)
 	mScTrack({_e})
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is set:
+	loop mFxAud({_vid}):
+		set {_p} to loop-value
 		{_p}.showEntity(mScPlugin(), {_e})
 
 # 장면용 마네킹(owner 가 "-" 면 익명 스킨). 이름표 없음, 그 사람에게만 보임.
@@ -232,9 +242,10 @@ function mFxFace(e: object, to: location):
 
 # 집 h 의 문 열기/닫기(그 사람 화면에만) + 소리
 function mFxDoor(vid: text, h: number, open: boolean):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
+	loop mFxAud({_vid}):
+		mFxDoorFor(loop-value, {_h}, {_open})
+
+function mFxDoorFor(p: player, h: number, open: boolean):
 	set {_l} to mFxL({_h}, "door")
 	if {_l} is not set:
 		stop
@@ -254,9 +265,10 @@ function mFxDoor(vid: text, h: number, open: boolean):
 
 # 집 h 의 문을 실제 블록으로 되돌린다
 function mFxDoorReset(vid: text, h: number):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
+	loop mFxAud({_vid}):
+		mFxDoorResetFor(loop-value, {_h})
+
+function mFxDoorResetFor(p: player, h: number):
 	set {_l} to mFxL({_h}, "door")
 	if {_l} is not set:
 		stop
@@ -265,28 +277,26 @@ function mFxDoorReset(vid: text, h: number):
 	{_p}.sendBlockChange({_u}, {_u}.getBlock().getBlockData())
 
 function mFxSound(vid: text, s: text, v: number, pi: number):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is set:
-		mSound({_p}, {_s}, {_v}, {_pi})
+	loop mFxAud({_vid}):
+		mSound(loop-value, {_s}, {_v}, {_pi})
 
 function mFxBlind(vid: text, t: number):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is set:
+	loop mFxAud({_vid}):
+		set {_p} to loop-value
 		{_p}.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, {_t}, 0, false, false))
 
 # ------------------------------------------------------------------ 효과 보강(소리·싱크·이펙트)
 
 # 파티클: l 에서 dy 만큼 위, 퍼짐 sp, 속도 spd (그 사람 화면에만)
 function mFxP(vid: text, name: text, l: location, n: number, dy: number, sp: number, spd: number):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
 	if {_l} is not set:
 		stop
 	set {_y} to {_l}.getY()
 	add {_dy} to {_y}
 	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_y}, {_l}.getZ())
-	{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, {_sp}, {_sp}, {_sp}, {_spd})
+	loop mFxAud({_vid}):
+		set {_p} to loop-value
+		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, {_sp}, {_sp}, {_sp}, {_spd})
 
 # 엔티티 위치 기준 파티클
 function mFxPE(vid: text, name: text, e: object, n: number, dy: number, sp: number, spd: number):
@@ -314,9 +324,6 @@ function mFxStep(vid: text, t: number, outside: boolean):
 
 # 장면 조명: l 한 칸 위 공기 칸에 빛 블록(그 사람 화면에만). 장면이 끝나면 mFxCleanup 이 되돌린다(불 목록과 같이).
 function mFxLight(vid: text, l: location):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
 	if {_l} is not set:
 		stop
 	set {_by} to {_l}.getBlockY()
@@ -324,16 +331,35 @@ function mFxLight(vid: text, l: location):
 	set {_b} to new Location({_l}.getWorld(), {_l}.getBlockX(), {_by}, {_l}.getBlockZ())
 	if {_b}.getBlock().getType().isAir() is false:
 		stop
-	{_p}.sendBlockChange({_b}, Bukkit.createBlockData("minecraft:light[level=13]"))
+	set {_ld} to Bukkit.createBlockData("minecraft:light[level=13]")
+	loop mFxAud({_vid}):
+		set {_p} to loop-value
+		{_p}.sendBlockChange({_b}, {_ld})
 	add {_b} to {-msc::%{_vid}%::fire::*}
+	add {_b} to {-msc::%{_vid}%::lt::*}
 
-# 그 사람의 자기 더미(집 안 의자)를 숨기거나 다시 보여 준다(연출 동안은 장면용 더미를 쓴다)
+# 그 사람의 자기 더미(집 안 의자)를 숨기거나 다시 보여 준다(연출 동안은 장면용 더미를 쓴다).
+# 관전 중인 사람에게는 관전용 집 더미({-ms::wdum/wseat::관전자})를 같이 숨기고 보여 준다.
 function mFxSelf(vid: text, show: boolean):
 	set {_p} to mPlayerOf({_vid})
+	if {_p} is set:
+		loop "selfseat", "self":
+			set {_e} to {-ms::%loop-value%::%{_vid}%}
+			if {_e} is set:
+				if {_show} is true:
+					{_p}.showEntity(mScPlugin(), {_e})
+				else:
+					{_p}.hideEntity(mScPlugin(), {_e})
+	loop mFxWatchersOf({_vid}):
+		mFxWatchDum(loop-value, {_show})
+
+# 관전자 w 의 관전용 집 더미 보이기/숨기기
+function mFxWatchDum(w: text, show: boolean):
+	set {_p} to mPlayerOf({_w})
 	if {_p} is not set:
 		stop
-	loop "selfseat", "self":
-		set {_e} to {-ms::%loop-value%::%{_vid}%}
+	loop "wseat", "wdum":
+		set {_e} to {-ms::%loop-value%::%{_w}%}
 		if {_e} is set:
 			if {_show} is true:
 				{_p}.showEntity(mScPlugin(), {_e})
@@ -613,6 +639,9 @@ function mFxRun(vid: text):
 	# 장면이 밤 처리 시간을 넘겨 낮이 이미 시작됐으면 카메라는 아침 발표가 정한 화면 그대로 둔다(토론 중 갑자기 바뀌지 않게)
 	if mState() is "resolve":
 		mViewAuto({_vid})
+		# 따라 보던 관전자도 평소 관전 화면(그 사람 집 안)으로
+		loop mFxWatchersOf({_vid}):
+			mViewAuto(loop-value)
 	else if mState() is "night":
 		mViewAuto({_vid})
 	delete {-msq::%{_vid}%::*}
@@ -690,9 +719,7 @@ function mFxSkull(vid: text, wither: boolean):
 
 # 불타는 방(바닥 위에 불, 그 사람 화면에만)
 function mFxFire(vid: text):
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is not set:
-		stop
+	set {_aud::*} to mFxAud({_vid})
 	set {_h} to 0
 	set {_a} to mFxL({_h}, "fireA")
 	set {_b} to mFxL({_h}, "fireB")
@@ -701,7 +728,9 @@ function mFxFire(vid: text):
 		set {_x} to random integer between {_a}.getBlockX() and {_b}.getBlockX()
 		set {_z} to random integer between {_a}.getBlockZ() and {_b}.getBlockZ()
 		set {_l} to new Location({_a}.getWorld(), {_x}, {_a}.getBlockY(), {_z})
-		{_p}.sendBlockChange({_l}, {_fire})
+		loop {_aud::*}:
+			set {_p} to loop-value-2
+			{_p}.sendBlockChange({_l}, {_fire})
 		add {_l} to {-msc::%{_vid}%::fire::*}
 
 function mFxCleanup(vid: text):
@@ -709,15 +738,20 @@ function mFxCleanup(vid: text):
 		set {_e} to {-msc::%{_vid}%::%loop-value%}
 		if {_e} is set:
 			{_e}.remove()
-	set {_p} to mPlayerOf({_vid})
-	if {_p} is set:
-		loop {-msc::%{_vid}%::fire::*}:
-			set {_l} to loop-value
-			{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
-		mFxDoorReset({_vid}, {-msc::%{_vid}%::ha})
-		mFxDoorReset({_vid}, {-msc::%{_vid}%::ht})
-		mFxDoorReset({_vid}, 0)
+	loop mFxAud({_vid}):
+		mFxRestoreFor(loop-value, {_vid})
 	delete {-msc::%{_vid}%::*}
+
+# p 의 화면에서 vid 장면의 불·빛 블록과 문을 실제 블록으로 되돌린다
+function mFxRestoreFor(p: player, vid: text):
+	loop {-msc::%{_vid}%::fire::*}:
+		set {_l} to loop-value
+		{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
+	if {-msc::%{_vid}%::ha} is set:
+		mFxDoorResetFor({_p}, {-msc::%{_vid}%::ha})
+	if {-msc::%{_vid}%::ht} is set:
+		mFxDoorResetFor({_p}, {-msc::%{_vid}%::ht})
+	mFxDoorResetFor({_p}, 0)
 
 # 집 h 의 문간(문 블록 가운데)
 function mFxDoorway(h: number) :: location:
@@ -1269,3 +1303,36 @@ function mFxReveal(vid: text):
 		mFxIcon({_vid}, new ItemStack(Material.BARRIER))
 		mFxSound({_vid}, "block.note_block.bass", 0.8, 0.8)
 	mFxInfoNow({_vid})
+
+# ------------------------------------------------------------------ 관전자 장면 따라 보기
+# 밤 처리 동안 사망자·관전자는 보고 있는 사람의 장면을 같이 본다(엔티티·소리·파티클·문·불·카메라 컷·흔들림 모두 mFxAud 로 보낸다).
+# 조사 결과 문장(채팅)은 본인에게만 간다. 보던 사람을 A/D 로 바꾸면 이전 사람 장면은 내 화면에서 치우고 새 사람의 지금 장면으로 옮긴다.
+function mFxWatchSwitch(w: text, od: text, nw: text):
+	set {_p} to mPlayerOf({_w})
+	if {_p} is not set:
+		stop
+	if {_od} is set:
+		if {_od} is not {_nw}:
+			loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
+				set {_e} to {-msc::%{_od}%::%loop-value%}
+				if {_e} is set:
+					{_p}.hideEntity(mScPlugin(), {_e})
+			mFxRestoreFor({_p}, {_od})
+	if {-msc::%{_nw}%::kind} is not set:
+		stop
+	loop "vis", "vic", "vseat", "grd", "skel", "gskel", "icon":
+		set {_e} to {-msc::%{_nw}%::%loop-value%}
+		if {_e} is set:
+			{_p}.showEntity(mScPlugin(), {_e})
+	set {_fire} to Bukkit.createBlockData("minecraft:fire")
+	set {_ld} to Bukkit.createBlockData("minecraft:light[level=13]")
+	loop {-msc::%{_nw}%::fire::*}:
+		set {_l} to loop-value
+		if {-msc::%{_nw}%::lt::*} contains {_l}:
+			{_p}.sendBlockChange({_l}, {_ld})
+		else:
+			{_p}.sendBlockChange({_l}, {_fire})
+	mFxWatchDum({_w}, false)
+	set {_c} to {-ms::cam::%{_nw}%}
+	if {_c} is set:
+		mCamCut({_w}, {_c}.getLocation())
