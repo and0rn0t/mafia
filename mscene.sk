@@ -167,7 +167,7 @@ function mScSeatLoc(i: number) :: location:
 	set {_l} to new Location({_t}.getWorld(), {_x}, {_t}.getY(), {_z}, {_a} + 90, 0)
 	return {_l}
 
-# 사망: 원탁 자리의 마네킹을 같은 의자(보이지 않는 디스플레이)에 앉은 스켈레톤으로 바꾼다(손에 든 활은 비운다).
+# 사망: 원탁 자리의 마네킹을 같은 의자(보이지 않는 디스플레이)에 앉은 스켈레톤으로 바꾼다(손에 든 활은 비운다). 방화로 죽었으면 위더 스켈레톤(확정).
 # 누운 자세는 원탁 쪽으로 누워 가려져서(시험 화면) 다른 더미처럼 앉힌다. 서버 시간이 밤이라 햇빛에 타지 않는다(mbuild.sk).
 function mSceneDead(id: text):
 	if mSceneOn() is not true:
@@ -184,7 +184,14 @@ function mSceneDead(id: text):
 		set {_v} to {_l}.getWorld().spawnEntity({_l}, EntityType.ITEM_DISPLAY)
 		{_v}.setPersistent(false)
 		mScTrack({_v})
-	set {_sk} to {_l}.getWorld().spawnEntity({_l}, EntityType.SKELETON)
+	# 방화(점화)로 죽었으면 위더 스켈레톤(그 밤의 사건 목록에 burn|방화범|이 사람 이 있으면)
+	set {_type} to EntityType.SKELETON
+	loop {-m::ev::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "burn":
+			if {_e::3} is {_id}:
+				set {_type} to EntityType.WITHER_SKELETON
+	set {_sk} to {_l}.getWorld().spawnEntity({_l}, {_type})
 	{_sk}.setPersistent(false)
 	{_sk}.setAI(false)
 	{_sk}.setSilent(true)
