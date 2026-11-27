@@ -739,6 +739,10 @@ function mScSky(night: boolean):
 	set {_t} to 6000
 	if {_night} is true:
 		set {_t} to 13800
+	mScSkyTime({_t})
+
+# 모두의 하늘 시간을 t 로(플레이어별 시간, 서버 시간은 그대로)
+function mScSkyTime(t: number):
 	set {-ms::sky} to {_t}
 	loop all players:
 		set {_p} to loop-player
