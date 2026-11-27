@@ -1,0 +1,394 @@
+# [mjoin.sk] 로비: 준비/관전 선택, 준비 완료 시 자동 시작, 시작(직업 배정, 이동, 직업 안내), 게임 중 퇴장/재접속(자리비움), 탭리스트 이름 색.
+# 규칙은 ROLES.md, 구조는 DESIGN.md, 변수는 mcore.sk 맨 위 목록. PvP 서버(andornot)의 ready.sk 와 같은 방식이다.
+# 동작:
+#   - 로비 상태(mState 가 lobby)에서 핫바 8번째(인덱스 7)에 준비 블록(녹색=준비됨, 붉은색=준비되지 않음), 7번째(인덱스 6)에 관전 선택 블록(흰색=게임 참여, 회색=게임 관전). 우클릭하면 토글, 버리기/옮기기는 막는다.
+#   - 준비 상태는 탭리스트 이름 색: 준비됨 녹색, 준비 안 됨 붉은색, 게임 관전 회색. 게임 중에는 생존 흰색, 사망/관전 짙은 회색, 자리비움 회색.
+#   - 접속 중인 참가자(관전 제외)가 모두 준비됨이면 5초 카운트다운 후 시작. 인원(6~16), 켜진 직업 수, 게임 월드 위치 검사에 걸리면 이유를 액션바로 알리고 시작하지 않는다.
+#   - 시작하면 직업 배정, 준비 블록 제거, 참가자를 게임 월드 위치로 이동, 각자 직업 안내(제목 + 채팅). 관전자는 스펙테이터 모드로 같은 곳에 둔다.
+#   - 게임 중 접속을 끊은 참가자는 자리비움(생존 유지). 재접속하면 같은 자리로 계속한다. 참가자가 아니었던 사람이 게임 중에 들어오면 관전자(스펙테이터)가 된다(중간 참가 불가).
+#   - 관리자: /mstart (준비와 상관없이 지금 시작, 검사는 같이 한다), /mstop (게임 강제 종료 후 로비로).
+# 정해야 할 것(DESIGN.md): 광인의 가짜 직업을 무엇으로 보여 줄지(지금은 켜진 시민 팀 직업 중 무작위로 가정), 시작할 때 마피아끼리 서로 알려 줄지(지금은 알리지 않음).
+# 미검증: 전체(서버 실행 불가). 특히 우클릭/인벤토리 클릭 취소, 탭 이름 색(playerListName), 스펙테이터/어드벤처 전환, 월드 이동.
+
+import:
+	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+	java.util.UUID
+
+function mReadyOn(p: player) :: boolean:
+	if {-m::ready::%uuid of {_p}%} is true:
+		return true
+	return false
+
+function mSpecOn(p: player) :: boolean:
+	if {-m::spec::%uuid of {_p}%} is true:
+		return true
+	return false
+
+# 로비에서 준비/관전 블록이 나오는 때
+function mLobbyActive() :: boolean:
+	if mState() is "lobby":
+		return true
+	return false
+
+function mReadyName(on: boolean) :: text:
+	if {_on} is true:
+		return "&a준비됨"
+	return "&c준비되지 않음"
+
+function mReadyItem(on: boolean) :: itemtype:
+	if {_on} is true:
+		set {_i} to lime concrete named mReadyName(true)
+		set lore of {_i} to "&7준비를 해제합니다.", "&7모두 준비되면 5초 뒤 게임이 시작됩니다."
+		return {_i}
+	set {_i} to red concrete named mReadyName(false)
+	set lore of {_i} to "&7준비합니다.", "&7모두 준비되면 5초 뒤 게임이 시작됩니다."
+	return {_i}
+
+function mSpecName(on: boolean) :: text:
+	if {_on} is true:
+		return "&7게임 관전"
+	return "&f게임 참여"
+
+function mSpecItem(on: boolean) :: itemtype:
+	if {_on} is true:
+		set {_i} to gray concrete named mSpecName(true)
+		set lore of {_i} to "&7게임 관전 중입니다.", "&7우클릭하면 게임에 참여합니다."
+		return {_i}
+	set {_i} to white concrete named mSpecName(false)
+	set lore of {_i} to "&7게임에 참여합니다.", "&7우클릭하면 게임 관전으로 바꿉니다."
+	return {_i}
+
+# 이 이름이 로비 블록(준비/관전)의 이름인지
+function mLobbyItemName(n: text) :: boolean:
+	if {_n} is mReadyName(true):
+		return true
+	if {_n} is mReadyName(false):
+		return true
+	if {_n} is mSpecName(true):
+		return true
+	if {_n} is mSpecName(false):
+		return true
+	return false
+
+# 8번 칸(인덱스 7)과 7번 칸(인덱스 6)에 지금 상태의 블록을 고정하고, 왼손에 들어간 블록은 치운다.
+function mLobbyEnsure(p: player):
+	set {_want} to mReadyName(mReadyOn({_p}))
+	set {_n} to name of slot 7 of {_p}'s inventory
+	set {_ok} to false
+	if {_n} is set:
+		if {_n} is {_want}:
+			set {_ok} to true
+	if {_ok} is false:
+		set slot 7 of {_p}'s inventory to mReadyItem(mReadyOn({_p}))
+	set {_want} to mSpecName(mSpecOn({_p}))
+	set {_n} to name of slot 6 of {_p}'s inventory
+	set {_ok} to false
+	if {_n} is set:
+		if {_n} is {_want}:
+			set {_ok} to true
+	if {_ok} is false:
+		set slot 6 of {_p}'s inventory to mSpecItem(mSpecOn({_p}))
+	set {_o} to name of slot 40 of {_p}'s inventory
+	if {_o} is set:
+		if mLobbyItemName({_o}) is true:
+			clear slot 40 of {_p}'s inventory
+
+# 로비 블록을 치운다(게임이 시작될 때)
+function mLobbyClear(p: player):
+	loop 3 times:
+		set {_s} to 7
+		if loop-value is 2:
+			set {_s} to 6
+		if loop-value is 3:
+			set {_s} to 40
+		set {_n} to name of slot {_s} of {_p}'s inventory
+		if {_n} is set:
+			if mLobbyItemName({_n}) is true:
+				clear slot {_s} of {_p}'s inventory
+
+# 탭리스트 이름 색. 로비: 관전 회색 / 준비됨 녹색 / 준비 안 됨 붉은색. 게임 중: 자리비움 회색 / 생존 흰색 / 사망 또는 관전 짙은 회색.
+function mTabColor(p: player) :: text:
+	set {_id} to "%uuid of {_p}%"
+	if mState() is "lobby":
+		if mSpecOn({_p}) is true:
+			return "#aaaaaa"
+		if mReadyOn({_p}) is true:
+			return "#55ff55"
+		return "#ff5555"
+	if {-m::away::%{_id}%} is true:
+		return "#aaaaaa"
+	if {-m::alive::%{_id}%} is true:
+		return "#ffffff"
+	return "#555555"
+
+function mTabUpdate(p: player):
+	set {_nm} to name of {_p}
+	set {_c} to mTabColor({_p})
+	set {_json} to "{""text"":""%{_nm}%"",""color"":""%{_c}%""}"
+	{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
+
+function mTabUpdateAll():
+	loop all players:
+		mTabUpdate(loop-player)
+
+# 이 uuid 문자열의 온라인 플레이어(없으면 값 없음)
+function mPlayerOf(id: text) :: player:
+	return Bukkit.getPlayer(UUID.fromString({_id}))
+
+# 참가자 uuid 목록에 들어 있는지
+function mIsPlayer(p: player) :: boolean:
+	if {-m::players::*} contains "%uuid of {_p}%":
+		return true
+	return false
+
+# 로비에서 참가할 사람(접속 중이고 관전을 고르지 않은 사람)의 uuid 목록
+function mLobbyPlayers() :: texts:
+	loop all players:
+		if mSpecOn(loop-player) is not true:
+			add "%uuid of loop-player%" to {_l::*}
+	return {_l::*}
+
+function mLobbyBar(p: player) :: text:
+	if mSpecOn({_p}) is true:
+		return "&7게임 관전"
+	if mReadyOn({_p}) is true:
+		return "&f게임 참여 &8| &a준비됨"
+	return "&f게임 참여 &8| &c준비되지 않음"
+
+# 광인에게 보여 줄 가짜 직업(켜진 시민 팀 직업 중 무작위, 광인 제외). 정해지지 않은 규칙이라 임시값.
+function mFakeRole() :: text:
+	loop mCandidates("citizen"):
+		if loop-value is not "madman":
+			add loop-value to {_c::*}
+	return random element of {_c::*}
+
+# 시작할 때 각자에게 직업 안내(제목 + 채팅)
+function mRoleReveal(p: player):
+	set {_id} to "%uuid of {_p}%"
+	set {_r} to {-m::role::%{_id}%}
+	if {_r} is not set:
+		stop
+	set {_shown} to {_r}
+	if {_r} is "madman":
+		set {_shown} to mFakeRole()
+	set {_nm} to mRoleName({_shown})
+	set {_ds} to mRoleDesc({_shown})
+	send title "&e당신의 직업" with subtitle "&f%{_nm}%" to {_p} for 4 seconds with fadein 5 ticks and fade out 10 ticks
+	send "&6[마피아] &7당신의 직업은 &f%{_nm}%&7입니다." to {_p}
+	send "&7%{_ds}%" to {_p}
+	set {_pool} to mRolePool({_shown})
+	if {_pool} is "support":
+		send "&7마피아와 접선하기 전에는 어느 팀도 아니지만, 승패는 마피아 팀을 따릅니다." to {_p}
+	else if {_pool} is "mafia":
+		send "&c마피아 팀입니다." to {_p}
+	else if {_pool} is "citizen":
+		send "&a시민 팀입니다." to {_p}
+	else:
+		send "&e중립입니다. 혼자 남으면 승리합니다." to {_p}
+
+# 게임을 시작한다. 성공하면 true, 검사에 걸리면 이유를 보내고 false. by 는 결과를 받을 사람(없으면 전체 알림 없음).
+function mStart(by: object) :: boolean:
+	if mState() is not "lobby":
+		return false
+	set {-m::players::*} to mLobbyPlayers()
+	set {_n} to size of {-m::players::*}
+	set {_why} to mStartCheck({_n})
+	if {_why} is "":
+		set {_why} to mWorldCheck()
+	if {_why} is not "":
+		delete {-m::players::*}
+		if {_by} is a player:
+			send "&c%{_why}%" to {_by}
+		return false
+	if mAssign() is not true:
+		delete {-m::players::*}
+		return false
+	loop {-m::players::*}:
+		set {-m::alive::%loop-value%} to true
+	delete {-m::ready::*}
+	delete {-m::cd}
+	set {_gl} to mGameLoc()
+	loop all players:
+		set {_p} to loop-player
+		mLobbyClear({_p})
+		if mIsPlayer({_p}) is true:
+			if {_p} is not op:
+				set {_p}'s gamemode to adventure
+			mTp({_p}, {_gl})
+			mRoleReveal({_p})
+		else:
+			set {_p}'s gamemode to spectator
+			mTp({_p}, {_gl})
+			send "&6[마피아] &7게임이 시작되었습니다. 관전 중입니다." to {_p}
+	mBegin()
+	mTabUpdateAll()
+	return true
+
+# 접속: 로비면 로비로 이동하고 블록을 받는다. 게임 중이면 참가자는 같은 자리로 복귀, 아니면 관전자.
+on join:
+	set {_p} to player
+	set {_id} to "%uuid of {_p}%"
+	if mState() is "lobby":
+		delete {-m::ready::%{_id}%}
+		if {_p} is not op:
+			clear {_p}'s inventory
+			set {_p}'s gamemode to adventure
+		mTp({_p}, mLobbyLoc())
+		mLobbyEnsure({_p})
+	else:
+		if mIsPlayer({_p}) is true:
+			delete {-m::away::%{_id}%}
+			send "&6[마피아] &7게임에 다시 참여했습니다." to {_p}
+		else:
+			set {_p}'s gamemode to spectator
+			send "&6[마피아] &7게임이 진행 중이라 관전자로 들어왔습니다." to {_p}
+	mTabUpdateAll()
+
+# 퇴장: 로비면 준비 상태를 지운다. 게임 중 참가자는 자리비움.
+on quit:
+	set {_id} to "%uuid of player%"
+	if mState() is "lobby":
+		delete {-m::ready::%{_id}%}
+		delete {-m::spec::%{_id}%}
+	else:
+		if mIsPlayer(player) is true:
+			set {-m::away::%{_id}%} to true
+	delete {-m::cd}
+
+# 준비/관전 블록 우클릭
+on right click:
+	if mLobbyActive() is not true:
+		stop
+	set {_h} to event.getHand()
+	if {_h} is not set:
+		stop
+	if {_h}.name() is not "HAND":
+		stop
+	set {_tn} to name of player's tool
+	if {_tn} is not set:
+		stop
+	if mLobbyItemName({_tn}) is not true:
+		stop
+	cancel the event
+	if {_tn} is mReadyName(true):
+		delete {-m::ready::%uuid of player%}
+		play sound "block.note_block.bass" with volume 0.6 and pitch 1 to player
+	else if {_tn} is mReadyName(false):
+		if mSpecOn(player) is true:
+			send "&c게임 관전 중에는 준비할 수 없습니다." to player
+			stop
+		set {-m::ready::%uuid of player%} to true
+		play sound "block.note_block.chime" with volume 0.6 and pitch 1.4 to player
+	else if {_tn} is mSpecName(false):
+		set {-m::spec::%uuid of player%} to true
+		delete {-m::ready::%uuid of player%}
+		play sound "block.note_block.bass" with volume 0.6 and pitch 1 to player
+	else:
+		delete {-m::spec::%uuid of player%}
+		play sound "block.note_block.chime" with volume 0.6 and pitch 1.4 to player
+	delete {-m::cd}
+	mLobbyEnsure(player)
+	mTabUpdate(player)
+
+# 준비/관전 블록은 버리거나 인벤토리에서 옮길 수 없다
+on drop:
+	set {_dn} to name of event-item
+	if {_dn} is not set:
+		stop
+	if mLobbyItemName({_dn}) is true:
+		cancel the event
+
+on inventory click:
+	if mLobbyActive() is not true:
+		stop
+	set {_cn} to name of event-item
+	if {_cn} is set:
+		if mLobbyItemName({_cn}) is true:
+			cancel the event
+			stop
+	set {_cu} to name of cursor item of player
+	if {_cu} is set:
+		if mLobbyItemName({_cu}) is true:
+			cancel the event
+
+# 1초마다: 로비에서 블록 고정, 액션바, 전원 준비 시 자동 시작 카운트다운
+every second:
+	if mLobbyActive() is not true:
+		delete {-m::cd}
+		stop
+	set {_n} to 0
+	set {_all} to true
+	loop all players:
+		mLobbyEnsure(loop-player)
+		if mSpecOn(loop-player) is not true:
+			add 1 to {_n}
+			if mReadyOn(loop-player) is not true:
+				set {_all} to false
+	if {_n} < mMinPlayers():
+		delete {-m::cd}
+		set {_need} to mMinPlayers()
+		loop all players:
+			send action bar colored "&7인원 대기 중 %{_n}%/%{_need}% &8| %mLobbyBar(loop-player)%" to loop-player
+		stop
+	if {_all} is not true:
+		delete {-m::cd}
+		loop all players:
+			send action bar colored mLobbyBar(loop-player) to loop-player
+		stop
+	set {_why} to mStartCheck({_n})
+	if {_why} is "":
+		set {_why} to mWorldCheck()
+	if {_why} is not "":
+		delete {-m::cd}
+		loop all players:
+			send action bar colored "&c%{_why}%" to loop-player
+		stop
+	if {-m::cd} is not set:
+		set {-m::cd} to 5
+	else:
+		subtract 1 from {-m::cd}
+	if {-m::cd} <= 0:
+		delete {-m::cd}
+		mStart({_none})
+		stop
+	set {_c} to {-m::cd}
+	loop all players:
+		send action bar colored "&b게임 시작까지 %{_c}%초 &8| %mLobbyBar(loop-player)%" to loop-player
+		play sound "block.comparator.click" with volume 1 and pitch 1.5 to loop-player
+
+command /mstart:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 게임을 지금 시작 (관리자 전용)
+	trigger:
+		if sender is a player:
+			if player is not op:
+				send "&c관리자만 사용할 수 있습니다."
+				stop
+			if mState() is not "lobby":
+				send "&c게임이 이미 진행 중입니다."
+				stop
+			mStart(player)
+			stop
+		send "&c게임 안에서 사용해 주세요."
+
+command /mstop:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 게임을 강제 종료하고 로비로 (관리자 전용)
+	trigger:
+		if sender is a player:
+			if player is not op:
+				send "&c관리자만 사용할 수 있습니다."
+				stop
+		mReset()
+		set {_lb} to mLobbyLoc()
+		loop all players:
+			if loop-player is not op:
+				set loop-player's gamemode to adventure
+			else if gamemode of loop-player is spectator:
+				set loop-player's gamemode to creative
+			mTp(loop-player, {_lb})
+			mLobbyEnsure(loop-player)
+		mTabUpdateAll()
+		broadcast "&6[마피아] &7게임이 종료되어 로비로 돌아왔습니다."
