@@ -1,6 +1,6 @@
 # ==============================================================================
 # [mvote.sk] 투표, 처형, 테러리스트 길동무, 승리 판정. 규칙은 ROLES.md, 구조는 DESIGN.md. 단계 진행은 mday.sk 의 진행 루프가 부른다.
-# 함수: mVoteStart() 투표 시작 / mVoteCast(투표자, 대상) 투표(바꾸면 덮어씀, 해석 - 확인 필요) / mTally() 집계·처형 / mTakeStart(테러리스트) / mTakePick(테러리스트, 대상)
+# 함수: mVoteStart() 투표 시작 / mVoteCast(투표자, 대상) 투표(한 번만, 바꿀 수 없음 - 확정) / mTally() 집계·처형 / mTakeStart(테러리스트) / mTakePick(테러리스트, 대상)
 #       mWeight(id) 표 수(정치인 2) / mWinCheck() "" 진행, "draw", "mafia", "citizen", "neutral:uuid" / mEnd(승자) 종료 처리(mday.sk 의 mToLobby 로 복귀)
 # 변수: {-m::vote::uuid}(투표 대상), {-m::votes::uuid}(받은 표), {-m::exe}(처형된 테러리스트 uuid, 길동무 선택 대기 중)
 # 시험용 명령: /mvote <닉네임>, /mtake <닉네임>(테러리스트 길동무). GUI 는 나중에 연결한다.
@@ -29,11 +29,10 @@ function mVoteCast(v: text, t: text) :: text:
 		return "자리비움 상태입니다."
 	if {-m::novote::%{_v}%} is true:
 		return "건달에게 협박당해 오늘은 투표할 수 없습니다."
+	if {-m::vote::%{_v}%} is set:
+		return "이미 투표했습니다. 투표한 뒤에는 대상을 바꿀 수 없습니다."
 	if {-m::alive::%{_t}%} is not true:
 		return "살아 있는 참가자에게만 투표할 수 있습니다."
-	set {_old} to {-m::vote::%{_v}%}
-	if {_old} is set:
-		subtract mWeight({_v}) from {-m::votes::%{_old}%}
 	set {-m::vote::%{_v}%} to {_t}
 	add mWeight({_v}) to {-m::votes::%{_t}%}
 	set {_n} to mNameOf({_t})
