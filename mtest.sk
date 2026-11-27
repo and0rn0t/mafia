@@ -976,8 +976,13 @@ function mBotLlmTest(p: player):
 		if {_bd}.length() > 200:
 			set {_bd} to {_bd}.substring(0, 200)
 		send "&cHTTP %{_res}.statusCode()%: &7%{_bd}%" to {_p}
+		Bukkit.getConsoleSender().sendMessage("[mafia] AI 시험 HTTP %{_res}.statusCode()%: %{_bd}%")
 		stop
-	send "&a답: &f%mBotLlmText({_res}.body())%" to {_p}
+	set {_ans} to mBotLlmText({_res}.body())
+	send "&a답: &f%{_ans}%" to {_p}
+	Bukkit.getConsoleSender().sendMessage("[mafia] AI 시험 성공(%{_w} / 2%초 안): %{_ans}%")
+	if {_ans} is "":
+		send "&e답이 비어 있습니다. 생각에 토큰을 다 쓴 것일 수 있어요. /mtest llm effort none(또는 low)을 써 보세요." to {_p}
 
 # 사람 채팅 듣기(살아 있는 참가자가 낮·투표 시간에 한 말)
 on chat:
