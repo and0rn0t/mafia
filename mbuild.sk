@@ -3,16 +3,18 @@
 #             게임 월드 위치와 연출 장소 6곳(mscene.sk), 원탁 반지름 등 숫자 설정까지 정한다.
 # 명령: /mbuild        맵을 짓는다(이미 있으면 같은 자리에 다시 덮어 짓는다. 예전 버전 건물도 지운다). 짓는 동안 서버가 잠깐 멈출 수 있다.
 #       /mbuild tp     원탁 광장으로 이동
+# 카메라/연출 위치(mBSaveSpots)는 스크립트를 불러올 때마다 자동으로 다시 저장된다(/sk reload 만으로 적용. /madmin 에서 바꾼 값도 이때 코드 값으로 돌아간다).
+# 건물 배치를 바꾸면 mBVer() 를 올린다. 서버 맵이 낮은 버전이면 관리자에게 접속/리로드 때 /mbuild 를 다시 하라고 알린다.
 # 배경 분리: 세 공간은 100칸씩 떨어져 있고, 각 카메라는 다른 공간을 등지는 방향을 본다(시야 거리 8청크 안이라 화면 전환 때 청크를 다시 받지 않는다).
 # 낮/밤: 서버 시간은 밤(18000)으로 고정(스켈레톤 더미가 타지 않게). 화면의 하늘은 mscene.sk 가 플레이어별로 바꾼다(낮 정오, 밤은 달이 동쪽 낮게 뜬 13800).
 # 배치(월드 mafia_map, 바닥 블록 y=64, 바닥 위 y=65):
 #   낮 광장   (0,0) 둘레 풀밭. 반지름 14 돌 광장(가운데 붉은 카펫 원과 원탁), 가로등 8개, 꽃밭, 벤치. 둘레 사방에 집 16채(±20~27), 나무 8그루, 장터 가판대 6개,
 #             맨 바깥(±30)에 잎 울타리 벽. 투표 선택 화면(원탁 안에서 바깥을 보는 얼굴 클로즈업)의 어느 방향 배경에도 광장만 보이고 다른 공간이나 빈 지평선이 안 보인다.
-#             카메라는 북쪽에서 원탁 가까이(눈 y=68.2, z=-6.2) 남쪽으로 원탁을 크게, 뒤로 집과 하늘을 본다. 더미 자리 반지름 3.2
+#             카메라는 북쪽에서 원탁 가까이(눈 y=67.6, z=-5) 남쪽으로 원탁을 크게, 뒤로 집과 하늘을 본다. 더미 자리 반지름 3.2
 #   밤 방     x 100~107, z -4~4, 천장 y=71. 동쪽 벽에 큰 유리창(z -1~1, y 66~70)으로 달이 보인다. 창 앞에 탁자(반 블록)와 꽃병, 촛불,
 #             창 옆(남쪽) 의자에 자기 더미가 카메라를 보고 앉는다. 카메라는 방 가운데쯤(x 103.3)에서 동쪽 창을 꽉 차게 본다
 #   침대      (0, -100) 둘레 풀밭. 붉은 침대 3개(x -2, 0, 2, 머리 남쪽), 뒤에 잎 울타리, 조명 없음(달빛만).
-#             가운데 = 지금 후보, 화면 왼쪽(x=2) = 이전, 오른쪽(x=-2) = 다음(카메라가 남쪽을 보므로). 카메라는 가운데 침대 발치(북쪽) 위에서 침대 전체를 내려다본다(베개와 얼굴이 화면 위쪽, 양옆 침대는 화면 가장자리에 반쯤 걸친다)
+#             가운데 = 지금 후보, 화면 왼쪽(x=2) = 이전, 오른쪽(x=-2) = 다음(카메라가 남쪽을 보므로). 카메라는 가운데 침대 바로 위에서 거의 수직으로 내려다본다(베개와 얼굴이 화면 위쪽, 양옆 침대는 화면 가장자리에 반쯤 걸친다)
 # 월드 설정: 몹 생성 끔, 시간/날씨 고정, 구조물 없음. world.sk 의 자동 불러오기 목록({worldlist::mafia_map})에 넣는다.
 # 미검증: 전체(서버 실행 불가). 마네킹 누운 방향: 시험 화면 두 번(yaw 180 = 머리 동쪽, yaw 270 = 머리 북쪽, 위치 = 발끝)을 보고 yaw 90(머리 남쪽 베개)과 발끝 위치(침대 북쪽 끝 z=-100.1)로 맞췄다.
 #   앉은 높이(의자 위 y+0.5), 달이 창에 걸리는지는 실제로 보고 조정해야 한다(/madmin 장소·카메라 메뉴, /mbuild 를 다시 하면 여기 값으로 돌아간다).
@@ -233,18 +235,53 @@ function mBuild():
 		mBSet({_w}, loop-value, 65, -99, "minecraft:red_bed[part=head,facing=south]")
 		mBSet({_w}, loop-value, 65, -100, "minecraft:red_bed[part=foot,facing=south]")
 	mBFill({_w}, -5, 65, -103, 5, 66, -103, "minecraft:oak_leaves[persistent=true]")
-	# ---- 위치와 설정
-	mBSaveYaw("game", {_w}, 0.5, 65, -8.5, 0)
+	# ---- 위치와 설정(맵 버전 기록)
+	mBSaveSpots({_w})
+	set {mcfg::mapver} to mBVer()
+
+# 맵 구조 버전. 블록 배치(건물)를 바꾸면 이 숫자를 올린다. 서버 맵이 이 버전보다 낮으면 관리자에게 /mbuild 를 다시 하라고 알린다.
+function mBVer() :: number:
+	return 5
+
+# 게임 위치, 연출 장소 6곳, 숫자 설정을 저장한다. 블록은 건드리지 않는다.
+# 스크립트를 불러올 때(on load)도 자동으로 다시 저장하므로, 카메라 위치만 바꾼 경우에는 /sk reload 만 하면 적용된다.
+function mBSaveSpots(w: world):
+	mBSaveYaw("game", {_w}, 0.5, 65, -5, 0)
 	mBSaveYaw("table", {_w}, 0.5, 65, 0.5, 0)
-	mBSaveLook("daycam", {_w}, 0.5, 68.2, -6.2, 0.5, 65.5, 0.5)
+	# 낮: 원탁 가까이(원탁 가운데까지 약 6칸)에서 남쪽으로 내려다본다
+	mBSaveLook("daycam", {_w}, 0.5, 67.6, -5, 0.5, 65.4, 0.5)
 	mBSaveYaw("room", {_w}, 107.5, 65.5, 2.5, 90)
 	mBSaveLook("nightcam", {_w}, 103.3, 66.7, 0.9, 108, 67.6, 0.9)
+	# 침대 더미: 위치 = 발끝(침대 북쪽 끝), yaw 90 = 머리가 남쪽 베개
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)
-	mBSaveLook("bedcam", {_w}, 0.5, 67.1, -100.2, 0.5, 65.6, -99.1)
+	# 침대 카메라: 가운데 침대 바로 위에서 거의 수직으로 내려다본다. 화면 위쪽 = 남쪽(베개와 얼굴), 양옆 침대는 화면 가장자리에 반쯤
+	mBSaveLook("bedcam", {_w}, 0.5, 67.4, -99.05, 0.5, 65.6, -98.95)
 	set {mcfg::scene::radius} to 3.2
 	set {mcfg::scene::facedist} to 1.4
 	set {mcfg::scene::faceh} to 1.1
 	set {mcfg::scene::bedgap} to 2
+
+# 맵이 있으면 연출 위치를 지금 코드 값으로 다시 저장하고, 맵 버전이 낮으면 관리자에게 알린다(월드는 world.sk 의 on load 가 불러온다)
+on load:
+	wait 2 seconds
+	set {_w} to Bukkit.getWorld("mafia_map")
+	if {_w} is not set:
+		stop
+	mBSaveSpots({_w})
+	mBVerWarn()
+
+function mBVerWarn():
+	if {mcfg::mapver} is mBVer():
+		stop
+	loop all players:
+		if loop-player is op:
+			send "&6[마피아] &e맵 구조가 바뀌었습니다. /mbuild 를 다시 실행해 주세요." to loop-player
+
+on join:
+	if player is op:
+		if Bukkit.getWorld("mafia_map") is set:
+			wait 1 second
+			mBVerWarn()
 
 command /mbuild [<text>]:
 	permission: minecraft.command.op
