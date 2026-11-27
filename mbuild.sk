@@ -123,7 +123,6 @@ function mBuild():
 	set {mcfg::scene::radius} to 3.2
 	set {mcfg::scene::facedist} to 1.4
 	set {mcfg::scene::faceh} to 1.1
-	set {mcfg::scene::eye} to 1.62
 
 command /mbuild [<text>]:
 	permission: minecraft.command.op

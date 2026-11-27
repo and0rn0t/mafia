@@ -43,7 +43,7 @@ function mCheckEnd() :: boolean:
 	mPickCloseAll()
 	mEnd({_w})
 	loop {-m::players::*}:
-		mViewAuto(loop-value, false)
+		mViewAuto(loop-value)
 	return true
 
 every second:

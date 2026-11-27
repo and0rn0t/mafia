@@ -56,11 +56,9 @@ function mAdmOpen(p: player, menu: text):
 		set {_r} to mScNum("radius", 3)
 		set {_fd} to mScNum("facedist", 1.4)
 		set {_fh} to mScNum("faceh", 1.1)
-		set {_ey} to mScNum("eye", 1.62)
 		set slot 9 of {_inv} to mAdmItem(oak fence, "&f원탁 반지름: &e%{_r}%", "&7좌클릭 +0.25 / 우클릭 -0.25")
 		set slot 10 of {_inv} to mAdmItem(player head, "&f얼굴 클로즈업 거리: &e%{_fd}%", "&7좌클릭 +0.1 / 우클릭 -0.1")
 		set slot 11 of {_inv} to mAdmItem(armor stand, "&f앉은 더미 얼굴 높이: &e%{_fh}%", "&7좌클릭 +0.05 / 우클릭 -0.05")
-		set slot 12 of {_inv} to mAdmItem(ender eye, "&f카메라 눈 높이 보정: &e%{_ey}%", ("&7카메라 탈것과 눈 사이 높이", "&7좌클릭 +0.05 / 우클릭 -0.05"))
 		set {_miss} to mSceneMissing()
 		if {_miss} is "":
 			set slot 14 of {_inv} to mAdmItem(lime concrete, "&a연출 사용 가능", "&7장소가 모두 정해졌습니다.")
@@ -216,8 +214,6 @@ on inventory click:
 			mAdmNum("facedist", 0.1 * {_sign}, 1.4)
 		else if {_s} is 11:
 			mAdmNum("faceh", 0.05 * {_sign}, 1.1)
-		else if {_s} is 12:
-			mAdmNum("eye", 0.05 * {_sign}, 1.62)
 		else:
 			stop
 		mAdmOpen(player, "scene")
