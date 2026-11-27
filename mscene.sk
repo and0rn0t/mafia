@@ -944,7 +944,7 @@ on load:
 	mFxClear()
 	delete {-ms::stage}
 	loop indices of {-ms::hold::*}:
-		add loop-index to {_held::*}
+		add loop-value to {_held::*}
 	loop {_held::*}:
 		mStgRelease(loop-value)
 	loop {-m::players::*}:
