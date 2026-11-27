@@ -24,6 +24,7 @@
 
 import:
 	java.util.UUID
+	org.bukkit.Bukkit
 	java.util.ArrayList
 	java.util.EnumSet
 	com.comphenix.protocol.ProtocolLibrary
@@ -843,6 +844,18 @@ function mBotLlmSend(b: text, intent: text) :: boolean:
 	set {-mtllm::t::%{_b}%} to {-mau::sec}
 	return true
 
+# 실패한 요청의 이유(예외 이름과 메시지, 원인까지). 콘솔에도 남긴다
+function mBotLlmErr(f: object) :: text:
+	set {_ex} to {_f}.exceptionNow()
+	set {_t} to {_ex}.toString()
+	set {_c} to {_ex}.getCause()
+	if {_c} is set:
+		set {_t} to "%{_t}% / 원인: %{_c}.toString()%"
+	Bukkit.getConsoleSender().sendMessage("[mafia] AI 요청 실패: %{_t}%")
+	if {_t}.length() > 220:
+		set {_t} to {_t}.substring(0, 220)
+	return {_t}
+
 # 답 꺼내기: 첫 번째 답의 내용 한 줄(실패하면 "")
 function mBotLlmText(body: text) :: text:
 	set {_o} to JsonParser.parseString({_body}).getAsJsonObject()
@@ -882,7 +895,7 @@ function mBotLlmPoll():
 		if {_f}.isDone() is true:
 			set {_done} to true
 			if {_f}.isCompletedExceptionally() is true:
-				set {-mtllm::err} to "요청 실패(주소나 네트워크를 확인)"
+				set {-mtllm::err} to "요청 실패: %mBotLlmErr({_f})%"
 			else:
 				set {_res} to {_f}.get()
 				if {_res}.statusCode() is 200:
@@ -941,7 +954,10 @@ function mBotLlmTest(p: player):
 			send "&c13초 안에 답이 없습니다." to {_p}
 			stop
 	if {_f}.isCompletedExceptionally() is true:
-		send "&c요청 실패: 주소나 네트워크를 확인해 주세요." to {_p}
+		set {_why} to mBotLlmErr({_f})
+		send "&c요청 실패: &7%{_why}%" to {_p}
+		set {_us} to {mcfg::llm::url}
+		send "&7보낸 주소: &f[%{_us}%] &8(대괄호 안에 공백이나 꺾쇠가 없어야 합니다)" to {_p}
 		stop
 	set {_res} to {_f}.get()
 	if {_res}.statusCode() is not 200:
