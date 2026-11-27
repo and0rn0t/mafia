@@ -32,7 +32,9 @@ function mStgViewers() :: texts:
 function mStgTitle(vid: text, t: text, s: text, ticks: number):
 	set {_p} to mPlayerOf({_vid})
 	if {_p} is set:
-		send title {_t} with subtitle {_s} to {_p} for {_ticks} ticks with fadein 5 ticks and fade out 5 ticks
+		# 표시 시간은 변수로 "N ticks" 를 쓸 수 없어서 글자를 시간으로 바꿔 넘긴다
+		set {_ts} to "%{_ticks}% ticks" parsed as timespan
+		send title {_t} with subtitle {_s} to {_p} for {_ts} with fadein 5 ticks and fade out 5 ticks
 
 function mStgSoundAll(s: text, v: number, pi: number):
 	loop mStgViewers():
@@ -140,8 +142,13 @@ function mStgBurn(x: text):
 		loop -1, 0, 1:
 			set {_dx} to loop-value-1
 			loop -1, 0, 1:
-				if {_dx} is not 0 or loop-value-2 is not 0:
-					set {_l} to new Location({_s}.getWorld(), {_s}.getBlockX() + {_dx}, {_s}.getBlockY(), {_s}.getBlockZ() + loop-value-2)
+				set {_dz} to loop-value-2
+				set {_mid} to false
+				if {_dx} is 0:
+					if {_dz} is 0:
+						set {_mid} to true
+				if {_mid} is false:
+					set {_l} to new Location({_s}.getWorld(), {_s}.getBlockX() + {_dx}, {_s}.getBlockY(), {_s}.getBlockZ() + {_dz})
 					add {_l} to {_fl::*}
 		loop mStgViewers():
 			set {_p} to mPlayerOf(loop-value-1)

@@ -87,6 +87,14 @@ function mRunning() :: boolean:
 # 위치 저장/읽기. key 는 "lobby" 또는 "game".
 function mLocSave(key: text, l: location):
 	set {_w} to {_l}.getWorld()
+	# 이미 같은 값이면 다시 쓰지 않는다(스크립트를 불러올 때마다 연출 자리 수백 개를 다시 쓰면 변수 저장이 밀려 리로드가 느려졌다)
+	if {mcfg::loc::%{_key}%::world} is {_w}.getName():
+		if {mcfg::loc::%{_key}%::x} is {_l}.getX():
+			if {mcfg::loc::%{_key}%::y} is {_l}.getY():
+				if {mcfg::loc::%{_key}%::z} is {_l}.getZ():
+					if {mcfg::loc::%{_key}%::yaw} is {_l}.getYaw():
+						if {mcfg::loc::%{_key}%::pitch} is {_l}.getPitch():
+							stop
 	set {mcfg::loc::%{_key}%::world} to {_w}.getName()
 	set {mcfg::loc::%{_key}%::x} to {_l}.getX()
 	set {mcfg::loc::%{_key}%::y} to {_l}.getY()

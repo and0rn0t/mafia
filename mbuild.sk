@@ -171,7 +171,8 @@ function mBHomeSpots(w: world, i: number):
 	set {_oz} to ({_dl::5} parsed as number)
 	set {_ix} to ({_dl::6} parsed as number)
 	set {_iz} to ({_dl::7} parsed as number)
-	set {mcfg::house::%{_i}%::face} to {_dl::3}
+	if {mcfg::house::%{_i}%::face} is not {_dl::3}:
+		set {mcfg::house::%{_i}%::face} to {_dl::3}
 	set {_k} to "h%{_i}%"
 	mBSaveYaw("%{_k}%seat", {_w}, {_x1} + 5.5, 65.5, {_z1} + 4.5, 90)
 	mBSaveLook("%{_k}%cam", {_w}, {_x1} + 1.4, 66.3, {_z1} + 2.4, {_x1} + 6, 67.4, {_z1} + 3.6)
