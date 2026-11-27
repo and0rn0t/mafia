@@ -1,0 +1,181 @@
+# [mnight.sk] 밤 능력의 "대상 고르기" 규칙과 입력 저장. GUI/연출은 만들지 않았다(나중에 대상 선택 연출과 이 함수들을 연결한다).
+# 규칙은 ROLES.md, 구조는 DESIGN.md. 이 파일은 "누가 누구를 고를 수 있는지" 검사하고 선택을 변수에 저장하는 것까지만 한다. 처리(결과 계산)는 mresolve.sk.
+# 연결할 때 쓰는 함수(전부 행위자/대상을 uuid 문자열로 받는다):
+#   mActCheck(행위자)             지금 이 사람이 능력을 쓸 수 있는지. 문제가 없으면 "", 있으면 이유 문장
+#   mTargets(행위자)              고를 수 있는 대상 uuid 목록(GUI 에 보여 줄 후보)
+#   mTargetCheck(행위자, 대상)     그 대상을 고를 수 있는지. 문제가 없으면 "", 있으면 이유 문장
+#   mSetAct(행위자, 대상)          대상을 고른다(바꾸면 덮어씀). 성공하면 "", 아니면 이유 문장
+#   mSetIgnite(행위자)             방화범의 점화(대상 없음). 성공하면 "", 아니면 이유 문장
+#   mClearAct(행위자)              선택을 취소한다
+#   mActOf(행위자), mModeOf(행위자)  고른 대상 uuid(없으면 ""), 모드("target"/"ignite"/"")
+#   mActRole(행위자)              입력 규칙에 쓰는 직업(광인은 시작 때 받은 가짜 직업, 나머지는 실제 직업)
+#   mNightStart()                  새 밤을 시작할 때 입력을 비운다(mBegin 이 부른다)
+# 선택 규칙:
+#   - 밤(mState 가 night)이고, 살아 있고, 자리비움이 아니고, 밤에 쓰는 직업(nightly)이거나 아직 쓰지 않은 1회 직업(once)이어야 한다. 마담에게 지목당한 사람({-m::sealed})은 못 쓴다(시도 자체가 없음).
+#   - 대상은 살아 있는 참가자. 자기 자신은 의사만 고를 수 있다(수호자는 불가). 마피아는 마피아를 고를 수 없다(스파이, 마담, 마녀, 중립은 고를 수 있음).
+#   - 선택은 밤이 끝날 때까지 바꿀 수 있다(마지막 선택이 적용). 보조 직업이 마피아를 고르면 처리 단계에서 접선으로 바뀐다.
+#   - 방화범은 "기름 뿌리기"(대상 선택)와 "점화"(대상 없음, mSetIgnite) 중 하나만 고른다.
+#   - 광인은 가짜 직업의 규칙대로 입력할 수 있지만 처리 단계에서 아무 효과가 없다.
+# 정해야 할 것: 의사 외 직업의 자기 대상 가능 여부는 지금 불가로 가정(ROLES.md 에 의사 가능/수호자 불가만 정해져 있음). 1회 직업을 쓴 것으로 표시하는 시점은 처리 단계(mresolve.sk).
+# 변수: {-m::act::uuid}(고른 대상 uuid), {-m::actmode::uuid}(target/ignite), {-m::used::uuid}(1회 능력 사용 여부), {-m::sealed::uuid}(봉인), {-m::fake::uuid}(광인의 가짜 직업)
+# 시험용: /mact (관리자 전용, 나중에 지운다) - /mact <닉네임> | ignite | clear | list
+# 미검증: 전체(서버 실행 불가).
+
+# 입력 규칙에 쓰는 직업(광인은 가짜 직업)
+function mActRole(id: text) :: text:
+	set {_r} to {-m::role::%{_id}%}
+	if {_r} is "madman":
+		set {_f} to {-m::fake::%{_id}%}
+		if {_f} is set:
+			return {_f}
+	return {_r}
+
+# 자기 자신을 고를 수 있는 직업
+function mSelfOk(role: text) :: boolean:
+	if {_role} is "doctor":
+		return true
+	return false
+
+# 새 밤: 입력을 비우고 남은 시간을 채운다. (봉인은 처리 단계에서 지운다)
+function mNightStart():
+	delete {-m::act::*}
+	delete {-m::actmode::*}
+	set {-m::left} to mTimeNight()
+
+function mActOf(id: text) :: text:
+	if {-m::act::%{_id}%} is not set:
+		return ""
+	return {-m::act::%{_id}%}
+
+function mModeOf(id: text) :: text:
+	if {-m::actmode::%{_id}%} is not set:
+		return ""
+	return {-m::actmode::%{_id}%}
+
+function mClearAct(id: text):
+	delete {-m::act::%{_id}%}
+	delete {-m::actmode::%{_id}%}
+
+# 지금 이 사람이 능력을 쓸 수 있는지. 문제가 없으면 "".
+function mActCheck(id: text) :: text:
+	if mState() is not "night":
+		return "밤에만 능력을 쓸 수 있습니다."
+	if {-m::players::*} does not contain {_id}:
+		return "게임 참가자가 아닙니다."
+	if {-m::alive::%{_id}%} is not true:
+		return "사망한 플레이어는 능력을 쓸 수 없습니다."
+	if {-m::away::%{_id}%} is true:
+		return "자리비움 상태입니다."
+	if {-m::sealed::%{_id}%} is true:
+		return "마담에게 지목당해 이번 밤에는 능력을 쓸 수 없습니다."
+	set {_role} to mActRole({_id})
+	set {_tm} to mRoleTiming({_role})
+	if {_tm} is "nightly":
+		return ""
+	if {_tm} is "once":
+		if {-m::used::%{_id}%} is true:
+			return "이미 능력을 사용했습니다."
+		return ""
+	return "밤에 쓰는 능력이 없습니다."
+
+# 그 대상을 고를 수 있는지(능력 사용 가능 여부는 mActCheck 에서 따로 검사한다).
+function mTargetCheck(id: text, t: text) :: text:
+	if {-m::players::*} does not contain {_t}:
+		return "참가자만 고를 수 있습니다."
+	if {-m::alive::%{_t}%} is not true:
+		return "살아 있는 플레이어만 고를 수 있습니다."
+	set {_role} to mActRole({_id})
+	if {_t} is {_id}:
+		if mSelfOk({_role}) is not true:
+			return "자기 자신은 고를 수 없습니다."
+	if {_role} is "mafia":
+		if {-m::role::%{_t}%} is "mafia":
+			return "같은 마피아는 고를 수 없습니다."
+	return ""
+
+# 고를 수 있는 대상 uuid 목록(능력을 못 쓰는 상태면 비어 있음)
+function mTargets(id: text) :: texts:
+	if mActCheck({_id}) is not "":
+		return {_none::*}
+	loop {-m::players::*}:
+		if mTargetCheck({_id}, loop-value) is "":
+			add loop-value to {_l::*}
+	return {_l::*}
+
+# 대상을 고른다. 성공하면 "", 아니면 이유 문장.
+function mSetAct(id: text, t: text) :: text:
+	set {_why} to mActCheck({_id})
+	if {_why} is not "":
+		return {_why}
+	set {_role} to mActRole({_id})
+	if {_role} is "arsonist":
+		# 방화범의 기름 뿌리기: 대상 선택 모드
+		set {_why} to mTargetCheck({_id}, {_t})
+		if {_why} is not "":
+			return {_why}
+		set {-m::act::%{_id}%} to {_t}
+		set {-m::actmode::%{_id}%} to "target"
+		return ""
+	set {_why} to mTargetCheck({_id}, {_t})
+	if {_why} is not "":
+		return {_why}
+	set {-m::act::%{_id}%} to {_t}
+	set {-m::actmode::%{_id}%} to "target"
+	return ""
+
+# 방화범의 점화(대상 없음). 성공하면 "", 아니면 이유 문장.
+function mSetIgnite(id: text) :: text:
+	set {_why} to mActCheck({_id})
+	if {_why} is not "":
+		return {_why}
+	if mActRole({_id}) is not "arsonist":
+		return "점화는 방화범만 할 수 있습니다."
+	delete {-m::act::%{_id}%}
+	set {-m::actmode::%{_id}%} to "ignite"
+	return ""
+
+# 시험용 명령(관리자 전용). 연출/GUI 와 연결하면 지운다.
+command /mact [<text>]:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 밤 능력 대상 고르기 시험 (관리자 전용)
+	executable by: players
+	trigger:
+		if player is not op:
+			send "&c관리자만 사용할 수 있습니다."
+			stop
+		set {_me} to "%uuid of player%"
+		if arg-1 is not set:
+			send "&7사용법: /mact <닉네임> | ignite | clear | list"
+			stop
+		if arg-1 is "clear":
+			mClearAct({_me})
+			send "&7선택을 취소했습니다."
+			stop
+		if arg-1 is "ignite":
+			set {_why} to mSetIgnite({_me})
+			if {_why} is "":
+				send "&a점화를 골랐습니다."
+			else:
+				send "&c%{_why}%"
+			stop
+		if arg-1 is "list":
+			set {_why} to mActCheck({_me})
+			if {_why} is not "":
+				send "&c%{_why}%"
+				stop
+			loop mTargets({_me}):
+				set {_o} to mPlayerOf(loop-value)
+				if {_o} is set:
+					add name of {_o} to {_nm::*}
+			send "&7고를 수 있는 대상: &f%{_nm::*}%"
+			stop
+		set {_tp} to arg-1 parsed as player
+		if {_tp} is not set:
+			send "&c그런 플레이어가 없습니다."
+			stop
+		set {_why} to mSetAct({_me}, "%uuid of {_tp}%")
+		if {_why} is "":
+			send "&a%name of {_tp}% 님을 골랐습니다."
+		else:
+			send "&c%{_why}%"

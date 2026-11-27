@@ -17,7 +17,12 @@
 #   {mcfg::discuss}, {mcfg::vote}, {mcfg::night}   낮 토론 / 투표 / 밤 능력 선택 시간(초). 기본 200/30/30        mcore.sk(/mtime)
 #   {mcfg::loc::lobby::world|x|y|z|yaw|pitch}   로비 위치(없으면 서버 기본 월드 스폰)                          mcore.sk(/mloc)
 #   {mcfg::loc::game::world|x|y|z|yaw|pitch}    게임 월드 위치(게임 시작 때 참가자가 이동하는 곳)                mcore.sk(/mloc)
-# (아래 변수는 DESIGN.md 3번 참고, 해당 파일을 만들 때 이 목록에 옮긴다: act, used, sealed, nocht, novote, oil, soldier, votes, tadj, ev, away)
+#   {-m::act::uuid}          이 밤에 고른 대상 uuid                                                        mnight.sk
+#   {-m::actmode::uuid}      target(대상 선택) / ignite(방화범 점화)                                        mnight.sk
+#   {-m::used::uuid}         1회 능력(기자, 자경단, 도둑) 사용 여부                                         mnight.sk(읽기), mresolve.sk(쓰기)
+#   {-m::sealed::uuid}       마담에게 지목당해 이번 밤 능력 불가                                           mnight.sk(읽기), mvote.sk/mresolve.sk
+#   {-m::fake::uuid}         광인에게 보여 준 가짜 직업                                                      mjoin.sk, mnight.sk
+# (아래 변수는 DESIGN.md 3번 참고, 해당 파일을 만들 때 이 목록에 옮긴다: nocht, novote, oil, soldier, votes, tadj, ev)
 #
 # 위치 저장은 PvP 서버(andornot)의 gcSaveLoc/gcLoadLoc 와 같은 방식이다(월드 이름 + 좌표). 월드는 world.sk 의 /world create 로 먼저 만들어 둔다.
 # 명령(관리자 전용): /mloc lobby|game set|tp|info , /mtime discuss|vote|night <초> , /mtime (현재 값)
@@ -189,7 +194,7 @@ command /mtime [<text>] [<number>]:
 function mBegin():
 	set {-m::day} to 1
 	set {-m::state} to "night"
-	set {-m::left} to mTimeNight()
+	mNightStart()
 	broadcast "&6[마피아] &71일차 밤이 시작됩니다. (밤 단계는 아직 구현되지 않았습니다. /mstop 으로 로비로 돌아갑니다.)"
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).
@@ -203,5 +208,10 @@ function mReset():
 	delete {-m::orig::*}
 	delete {-m::team::*}
 	delete {-m::away::*}
+	delete {-m::act::*}
+	delete {-m::actmode::*}
+	delete {-m::used::*}
+	delete {-m::sealed::*}
+	delete {-m::fake::*}
 	delete {-m::ready::*}
 	delete {-m::cd}
