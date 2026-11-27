@@ -703,7 +703,7 @@ every second:
 	if mSceneOn() is true:
 		mHideHands()
 
-on item held:
+on tool change:
 	if mSceneOn() is not true:
 		stop
 	if mIsPlayer(player) is not true:
