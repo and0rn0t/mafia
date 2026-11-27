@@ -149,3 +149,30 @@ every 5 seconds:
 		stop
 	if ProtocolLibrary.getProtocolManager().getPacketListeners().contains({-mbody::l}) is false:
 		mBodyRegister()
+
+# 안전한 다시 불러오기(관리자): Skript 로 만든 ProtocolLib 리스너(이 파일, uuidmask.sk)를 먼저 떼고 /sk reload all 을 한다.
+# 그냥 /sk reload 하면 함수가 먼저 내려가 그사이 패킷에서 "getSendingWhitelist() is null" 오류가 콘솔에 찍힌다(게임에는 영향 없음).
+# 리스너는 각 파일의 on load 가 다시 붙인다(이 파일은 5초마다 확인도 한다).
+command /mreload:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 마피아 스크립트 안전하게 다시 불러오기 (관리자 전용)
+	trigger:
+		if sender is a player:
+			if player is not op:
+				send "&c관리자만 사용할 수 있습니다."
+				stop
+		if Bukkit.getPluginManager().isPluginEnabled("ProtocolLib") is true:
+			set {_pm} to ProtocolLibrary.getProtocolManager()
+			if {-mbody::l} is set:
+				{_pm}.removePacketListener({-mbody::l})
+			if {-umlistener} is set:
+				{_pm}.removePacketListener({-umlistener})
+			{_pm}.removePacketListeners(SkriptMain.getInstance())
+			set {_rf} to Bukkit.getPluginManager().getPlugin("skript-reflect")
+			if {_rf} is set:
+				{_pm}.removePacketListeners({_rf})
+			delete {-mbody::l}
+			delete {-umlistener}
+		send "&7패킷 리스너를 떼고 스크립트를 다시 불러옵니다..."
+		make console execute command "sk reload all"
