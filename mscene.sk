@@ -192,17 +192,40 @@ function mCamPlace(id: text, x: number, y: number, z: number, fx: number, fy: nu
 		stop
 	set {_l} to new Location({_cam}.getWorld(), {_x}, {_y}, {_z})
 	{_l}.setDirection(new Vector({_fx} - {_x}, {_fy} - {_y}, {_fz} - {_z}))
-	{_cam}.teleport({_l})
+	mCamCut({_id}, {_l})
 
 # 저장된 카메라 장소(눈 위치 + 방향)로 컷
 function mCamTo(id: text, key: text):
-	set {_cam} to {-ms::cam::%{_id}%}
-	if {_cam} is not set:
-		stop
 	set {_l} to mLocLoad({_key})
 	if {_l} is not set:
 		stop
+	mCamCut({_id}, {_l})
+
+# 카메라 엔티티를 l 로 바로 옮긴다. 멀리(8칸 넘게) 옮기면 클라이언트가 카메라 엔티티를 추적 범위 밖으로 놓쳐
+# 서버는 붙어 있다고 여기는데 화면은 예전 자리에 멈춘다(첫 시험에서 확인: 침대 화면에 고정됨).
+# 그래서 멀리 옮길 때는 관전을 풀고 플레이어를 같은 자리/방향으로 순간이동시킨 뒤, 카메라가 다시 전송되면(getTrackedBy) mCamKeep 이 다시 건다.
+function mCamCut(id: text, l: location):
+	set {_cam} to {-ms::cam::%{_id}%}
+	if {_cam} is not set:
+		stop
+	set {_old} to {_cam}.getLocation()
 	{_cam}.teleport({_l})
+	set {_far} to false
+	if {_old}.getWorld() is not {_l}.getWorld():
+		set {_far} to true
+	else if distance between {_old} and {_l} > 8:
+		set {_far} to true
+	if {_far} is false:
+		stop
+	set {_p} to mPlayerOf({_id})
+	if {_p} is not set:
+		stop
+	if gamemode of {_p} is spectator:
+		set {-ms::force} to true
+		{_p}.setSpectatorTarget(null)
+		delete {-ms::force}
+	{_p}.teleport({_l})
+	set {-ms::att::%{_id}%} to -1
 
 # 원탁에 앉은 대상(t)의 얼굴을 가까이서 보는 카메라
 function mCamFace(id: text, t: text):
