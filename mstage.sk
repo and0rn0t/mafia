@@ -20,6 +20,10 @@ import:
 	org.bukkit.entity.EntityType
 	org.bukkit.util.Vector
 	org.bukkit.Color
+	org.bukkit.Material
+	org.bukkit.inventory.ItemStack
+	org.bukkit.potion.PotionEffect
+	org.bukkit.potion.PotionEffectType
 	org.bukkit.entity.Display$Billboard as StgBillboard
 	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 
@@ -519,3 +523,88 @@ function mStgFanfare(w: text):
 				{_pl}.spawnParticle(Particle.FIREWORK, {_l}, 60, 0.6, 0.6, 0.6, 0.15)
 				{_pl}.spawnParticle(Particle.END_ROD, {_l}, 20, 0.8, 0.8, 0.8, 0.05)
 		wait 6 ticks
+
+# ------------------------------------------------------------------ 광대 승리 컷신
+
+# 광대 컷신 길이(초). 연출이 없으면 1초 뒤 바로 종료
+function mStgJesterLen() :: number:
+	if mSceneOn() is not true:
+		return 1
+	return 8
+
+function mStgBlindAll(t: number):
+	loop mStgViewers():
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			{_p}.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, {_t}, 0, false, false))
+
+# 투표로 당선된 광대: 화형 대신 "어라...?"(얼굴 클로즈업) → 암전(그동안 호박 머리로 변신) → 서커스 팡파르와 광대 승리 → 게임 종료 화면(mday.sk 처형 단계가 끝나면 mCheckEnd)
+function mStgJester(x: text):
+	if mSceneOn() is not true:
+		stop
+	set {-ms::stage} to true
+	set {_xn} to mNameOf({_x})
+	set {_m} to {-ms::dummy::%{_x}%}
+	# 1) 어라...? (0~40틱): 얼굴 클로즈업, 갸웃하는 소리
+	loop mStgViewers():
+		mCamFace(loop-value, {_x})
+		mStgTitle(loop-value, "&e어라...?", "", 45)
+	mStgSoundAll("entity.villager.ambient", 1, 1.5)
+	wait 6 ticks
+	mStgSoundAll("block.note_block.bit", 0.8, mStgNote(14))
+	wait 4 ticks
+	mStgSoundAll("block.note_block.bit", 0.8, mStgNote(11))
+	wait 4 ticks
+	mStgSoundAll("block.note_block.bit", 0.8, mStgNote(7))
+	wait 16 ticks
+	mStgSoundAll("block.note_block.basedrum", 1, 0.8)
+	wait 5 ticks
+	mStgSoundAll("block.note_block.basedrum", 1, 0.8)
+	wait 5 ticks
+	if mSceneOn() is not true:
+		stop
+	# 2) 암전 (40~75틱): 화면이 꺼지고 그 사이 광대 더미가 호박 머리를 쓴다
+	mStgBlindAll(38)
+	mStgSoundAll("block.beacon.deactivate", 1, 0.8)
+	if {_m} is set:
+		{_m}.getEquipment().setHelmet(new ItemStack(Material.JACK_O_LANTERN))
+	wait 15 ticks
+	mStgSoundAll("block.note_block.snare", 0.8, 1)
+	wait 4 ticks
+	mStgSoundAll("block.note_block.snare", 0.8, 1)
+	wait 4 ticks
+	mStgSoundAll("block.note_block.snare", 0.8, 1.2)
+	wait 12 ticks
+	if mSceneOn() is not true:
+		stop
+	# 3) 팡파르와 광대 승리 (75틱~): 서커스풍 플링 → 화음 + 발전과제 소리, 토템·음표·불꽃 파티클, 흔들림, 더미가 팔을 흔든다
+	loop mStgViewers():
+		mStgTitle(loop-value, "&d&l광대 승리!", "&f%{_xn}%&7 님은 처형당하길 원했습니다", 70)
+	mStgShakeAll(8, 0.08)
+	mStgSoundAll("entity.firework_rocket.large_blast", 1, 1)
+	mStgSeatPart({_x}, "TOTEM_OF_UNDYING", 80, 1.2)
+	mStgSeatPart({_x}, "NOTE", 15, 2)
+	loop 18, 20, 22, 18:
+		mStgSoundAll("block.note_block.pling", 0.9, mStgNote(loop-value))
+		mStgSoundAll("block.note_block.bit", 0.6, mStgNote(loop-value))
+		if {_m} is set:
+			{_m}.swingMainHand()
+		wait 3 ticks
+	mStgSoundAll("block.note_block.bell", 1, mStgNote(22))
+	mStgSoundAll("block.note_block.pling", 1, mStgNote(18))
+	mStgSoundAll("block.note_block.pling", 1, mStgNote(13))
+	mStgSoundAll("block.note_block.bass", 0.9, mStgNote(6))
+	mStgSoundAll("ui.toast.challenge_complete", 0.8, 1)
+	loop 3 times:
+		mStgSoundAll("entity.firework_rocket.launch", 0.7, 1.1)
+		wait 6 ticks
+		mStgSoundAll("entity.firework_rocket.twinkle", 0.7, 1)
+		mStgSeatPart({_x}, "FIREWORK", 40, 2.5)
+		mStgSeatPart({_x}, "NOTE", 6, 2)
+		if {_m} is set:
+			{_m}.swingOffHand()
+		wait 4 ticks
+		if {_m} is set:
+			{_m}.swingMainHand()
+		wait 4 ticks
+	delete {-ms::stage}

@@ -49,11 +49,13 @@ function mRoleRow(id: text) :: text:
 		return "암살자|neutral|nightly|밤마다 플레이어 한 명을 죽일 수 있습니다. 군인에게 무효화당하지 않습니다."
 	if {_id} is "arsonist":
 		return "방화범|neutral|nightly|밤마다 다른 플레이어에게 기름을 뿌리거나, 불을 붙일 수 있습니다. 불을 붙이면 기름에 젖은 플레이어들을 불태웁니다. 방화는 모든 능력을 무시합니다."
+	if {_id} is "jester":
+		return "광대|neutral|passive|투표로 처형당하면 승리합니다. 낮은 확률로 등장합니다."
 	return ""
 
 # 모든 직업 id(표시 순서: 마피아 팀, 시민 팀, 중립)
 function mRoleIds() :: texts:
-	return "mafia", "spy", "madam", "witch", "police", "doctor", "soldier", "reporter", "terrorist", "detective", "politician", "thug", "guardian", "shaman", "vigilante", "madman", "thief", "assassin" and "arsonist"
+	return "mafia", "spy", "madam", "witch", "police", "doctor", "soldier", "reporter", "terrorist", "detective", "politician", "thug", "guardian", "shaman", "vigilante", "madman", "thief", "assassin", "arsonist" and "jester"
 
 # 직업 id 가 존재하는지
 function mRoleExists(id: text) :: boolean:
@@ -185,9 +187,7 @@ function mDraw(n: number) :: texts:
 	set {_sup::*} to shuffled mCandidates("support")
 	set {_pick::*} to first {_k::2} elements of {_sup::*}
 	add {_pick::*} to {_out::*}
-	set {_neu::*} to shuffled mCandidates("neutral")
-	set {_pick::*} to first {_k::3} elements of {_neu::*}
-	add {_pick::*} to {_out::*}
+	add mDrawNeutral({_k::3}) to {_out::*}
 	add "police" and "doctor" to {_out::*}
 	loop mCandidates("citizen"):
 		if loop-value is not "police":
@@ -199,6 +199,36 @@ function mDraw(n: number) :: texts:
 		set {_pick::*} to first {_left} elements of {_rest::*}
 		add {_pick::*} to {_out::*}
 	set {_out::*} to shuffled {_out::*}
+	return {_out::*}
+
+# 중립 직업 등장 비율(켜진 중립끼리 비율로 뽑는다, 확정): 도둑·암살자·방화범 각 30, 광대 10
+function mNeuWeight(id: text) :: number:
+	if {_id} is "jester":
+		return 10
+	return 30
+
+# 중립 k 명을 비율대로 겹치지 않게 뽑는다
+function mDrawNeutral(k: number) :: texts:
+	set {_c::*} to mCandidates("neutral")
+	set {_i} to 0
+	while {_i} < {_k}:
+		set {_tot} to 0
+		loop {_c::*}:
+			add mNeuWeight(loop-value) to {_tot}
+		if {_tot} <= 0:
+			return {_out::*}
+		set {_r} to random number between 0 and {_tot}
+		delete {_pk}
+		loop {_c::*}:
+			if {_pk} is not set:
+				subtract mNeuWeight(loop-value) from {_r}
+				if {_r} <= 0:
+					set {_pk} to loop-value
+		if {_pk} is not set:
+			set {_pk} to last element of {_c::*}
+		add {_pk} to {_out::*}
+		remove {_pk} from {_c::*}
+		add 1 to {_i}
 	return {_out::*}
 
 # 직업 id 의 시작 팀: 마피아 mafia / 시민 팀 citizen / 중립 neutral / 보조 none(접선 전)

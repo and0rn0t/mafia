@@ -1190,6 +1190,8 @@ function mFxRoleIcon(role: text) :: object:
 		return new ItemStack(Material.POPPY)
 	if {_role} is "madman":
 		return new ItemStack(Material.PUFFERFISH)
+	if {_role} is "jester":
+		return new ItemStack(Material.CARVED_PUMPKIN)
 	return new ItemStack(Material.BARRIER)
 
 # 대상 머리 위에 떠 있는 물건(보는 사람에게만)
