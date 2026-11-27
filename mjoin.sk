@@ -295,20 +295,20 @@ on right click:
 	cancel the event
 	if {_tn} is mReadyName(true):
 		delete {-m::ready::%uuid of player%}
-		play sound "block.note_block.bass" with volume 0.6 and pitch 1 to player
+		mSound(player, "block.note_block.bass", 0.6, 1)
 	else if {_tn} is mReadyName(false):
 		if mSpecOn(player) is true:
 			send "&c게임 관전 중에는 준비할 수 없습니다." to player
 			stop
 		set {-m::ready::%uuid of player%} to true
-		play sound "block.note_block.chime" with volume 0.6 and pitch 1.4 to player
+		mSound(player, "block.note_block.chime", 0.6, 1.4)
 	else if {_tn} is mSpecName(false):
 		set {-m::spec::%uuid of player%} to true
 		delete {-m::ready::%uuid of player%}
-		play sound "block.note_block.bass" with volume 0.6 and pitch 1 to player
+		mSound(player, "block.note_block.bass", 0.6, 1)
 	else:
 		delete {-m::spec::%uuid of player%}
-		play sound "block.note_block.chime" with volume 0.6 and pitch 1.4 to player
+		mSound(player, "block.note_block.chime", 0.6, 1.4)
 	delete {-m::cd}
 	mLobbyEnsure(player)
 	mTabUpdate(player)
@@ -378,7 +378,7 @@ every second:
 	set {_c} to {-m::cd}
 	loop all players:
 		send action bar colored "&b게임 시작까지 %{_c}%초 &8| %mLobbyBar(loop-player)%" to loop-player
-		play sound "block.comparator.click" with volume 1 and pitch 1.5 to loop-player
+		mSound(loop-player, "block.comparator.click", 1, 1.5)
 
 command /mstart:
 	permission: minecraft.command.op

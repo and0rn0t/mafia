@@ -731,7 +731,7 @@ function mPickMove(id: text, d: number):
 	set {-ms::idx::%{_id}%} to {_i}
 	set {_p} to mPlayerOf({_id})
 	if {_p} is set:
-		play sound "ui.button.click" with volume 0.4 and pitch 1.6 to {_p}
+		mSound({_p}, "ui.button.click", 0.4, 1.6)
 	mPickShow({_id})
 
 function mPickConfirm(id: text):
@@ -759,7 +759,7 @@ function mPickConfirm(id: text):
 			send "&c%{_why}%" to {_p}
 			stop
 		send {_ok} to {_p}
-		play sound "block.note_block.chime" with volume 0.6 and pitch 1.2 to {_p}
+		mSound({_p}, "block.note_block.chime", 0.6, 1.2)
 	mPickClose({_id})
 
 function mPickSkip(id: text):

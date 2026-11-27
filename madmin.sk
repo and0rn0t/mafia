@@ -151,7 +151,7 @@ on inventory click:
 	set {_sign} to 1
 	if {_right} is true:
 		set {_sign} to -1
-	play sound "ui.button.click" with volume 0.4 and pitch 1.4 to player
+	mSound(player, "ui.button.click", 0.4, 1.4)
 	if {_m} is "main":
 		if {_s} is 10:
 			mAdmTime("discuss", 10 * {_sign})

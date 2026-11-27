@@ -36,6 +36,12 @@
 
 import:
 	org.bukkit.Bukkit
+	org.bukkit.SoundCategory
+
+# 소리는 모두 플레이어 자신에게 붙여서 재생한다(Player#playSound(Entity, ...)). 위치에 재생하면 관전 카메라로 시점이 옮겨진 동안
+# 서버의 플레이어 위치와 실제 화면 위치가 어긋나 소리가 씹혔다. 분류는 MASTER(마스터 음량만 따름). s 는 "ui.button.click" 같은 소리 이름.
+function mSound(p: player, s: text, v: number, pi: number):
+	{_p}.playSound({_p}, "minecraft:%{_s}%", SoundCategory.MASTER, {_v}, {_pi})
 
 function mTimeDiscuss() :: number:
 	if {mcfg::discuss} is set:
