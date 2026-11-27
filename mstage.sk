@@ -138,8 +138,12 @@ function mStgMorning():
 		if mSceneOn() is not true:
 			stop
 	delete {-ms::stage}
-	loop mStgViewers():
-		mViewAuto(loop-value)
+	# 사망자·특종 화면으로 옮겼을 때만 원래 화면으로 돌린다(아무 일 없던 아침에는 카메라를 다시 움직이지 않는다)
+	set {_moved} to size of {_dead::*}
+	add size of {_rep::*} to {_moved}
+	if {_moved} > 0:
+		loop mStgViewers():
+			mViewAuto(loop-value)
 
 # ------------------------------------------------------------------ 화형
 

@@ -106,12 +106,14 @@ function mStartNight():
 	delete {-m::diedsince}
 	add 1 to {-m::day}
 	set {-m::state} to "night"
+	mAuUpdate()
 	mNightStart()
 	mBc("&7%{-m::day}%일차 밤이 시작됩니다. (%{-m::left}%초)")
 	mSceneNight()
 
 function mStartDay():
 	set {-m::state} to "day"
+	mAuUpdate()
 	# 아침 발표(사망자, 기자 특종) 연출 시간만큼 토론 시간을 늘려 둔다(발표가 토론 시간을 잡아먹지 않게)
 	set {-m::left} to mTimeDiscuss() + mStgMorningLen()
 	delete {-m::tadj::*}
@@ -153,6 +155,7 @@ every second:
 	else if {_s} is "night":
 		mPickCloseAll()
 		set {-m::state} to "resolve"
+		mAuUpdate()
 		mResolve()
 		set {-m::left} to mSceneResolve()
 	else if {_s} is "resolve":
@@ -213,3 +216,7 @@ command /mdisc <text>:
 			send "&7사용법: /mdisc up|down"
 			stop
 		set {-m::tadj::%{_id}%} to true
+		# 0초가 되면 다음 초를 기다리지 않고 바로 투표로
+		if {-m::left} <= 0:
+			if mState() is "day":
+				mVoteStart()

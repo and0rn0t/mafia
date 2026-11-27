@@ -277,8 +277,15 @@ function mCamCut(id: text, l: location):
 		set {-ms::force} to true
 		{_p}.setSpectatorTarget(null)
 		delete {-ms::force}
-	{_p}.teleport({_l})
+	# 몸의 눈높이(발 + 1.62)가 카메라 자리에 오게 둔다: 카메라에 다시 붙기 전 잠깐 몸 시점이 보여도 화면이 튀지 않는다
+	{_p}.teleport(mCamBodyLoc({_l}))
 	set {-ms::att::%{_id}%} to -1
+
+# 카메라 자리 l 에 눈이 오도록 한 몸 위치(같은 방향)
+function mCamBodyLoc(l: location) :: location:
+	set {_b} to {_l}.clone()
+	{_b}.subtract(0, 1.62, 0)
+	return {_b}
 
 # 원탁에 앉은 대상(t)의 얼굴을 가까이서 보는 카메라
 function mCamFace(id: text, t: text):
@@ -502,7 +509,7 @@ function mCamMount(id: text):
 	else:
 		mViewAuto({_id})
 	set gamemode of {_p} to spectator
-	mTp({_p}, {_cam}.getLocation())
+	mTp({_p}, mCamBodyLoc({_cam}.getLocation()))
 	set {-ms::att::%{_id}%} to -1
 
 # 매 틱: 카메라 고정 유지

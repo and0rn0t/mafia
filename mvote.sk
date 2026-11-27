@@ -19,6 +19,7 @@ function mVoteStart():
 	delete {-m::votes::*}
 	set {-m::state} to "vote"
 	set {-m::left} to mTimeVote()
+	mAuUpdate()
 	mBc("&7투표 시간입니다. 핫바의 대상 고르기(또는 /mvote <닉네임>)로 투표하세요. (%{-m::left}%초)")
 	mSceneVote()
 
@@ -88,6 +89,7 @@ function mTally():
 	mDie({_x})
 	mBc("&f%{_xn}%&7 님이 투표로 처형되었습니다.")
 	set {-m::state} to "execute"
+	mAuUpdate()
 	set {-m::left} to mStgBurnLen()
 	if {-m::role::%{_x}%} is "terrorist":
 		set {-m::exe} to {_x}
@@ -229,6 +231,7 @@ function mStalemate() :: boolean:
 
 function mEnd(w: text):
 	set {-m::state} to "end"
+	mAuUpdate()
 	set {-m::left} to 10
 	if {_w} is "draw":
 		set {_why} to {-m::drawwhy}

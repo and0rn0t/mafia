@@ -65,9 +65,13 @@ function mAuPlay(p: player, k: text):
 	{_p}.playSound({_p}, "mafia:bgm.%{_k}%", mAuCat({_k}), {_v}, 1)
 
 every second:
+	add 1 to {-mau::sec}
+	mAuUpdate()
+
+# 단계에 맞춰 소리를 바꾸고(바뀌었으면 바로), 끝난 곡을 다시 튼다. 단계가 바뀌는 순간 mday.sk 진행 루프도 부른다(1초 늦게 바뀌지 않게).
+function mAuUpdate():
 	if size of mAuKeys() is 0:
 		stop
-	add 1 to {-mau::sec}
 	set {_w} to mAuWant()
 	if {-mau::phase} is not {_w}:
 		mAuStopAll()

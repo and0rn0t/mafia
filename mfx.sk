@@ -573,7 +573,7 @@ function mSceneResolve() :: number:
 					set {_max} to {_sum}
 				set {-msq::%{_id}%::*} to {_q::*}
 				mFxRun({_id})
-	set {_sec} to ceil({_max} / 20) + 1
+	set {_sec} to ceil({_max} / 20) + 2
 	if {_sec} < 3:
 		set {_sec} to 3
 	return {_sec}
@@ -593,6 +593,13 @@ function mFxRun(vid: text):
 			wait 1 tick
 			if mSceneOn() is not true:
 				stop
+			# 낮이 시작됐는데 장면이 남아 있으면 접는다(토론 중에 장면 카메라가 끼어들지 않게)
+			if mState() is not "resolve":
+				mFxCleanup({_vid})
+				delete {-msq::%{_vid}%::*}
+				if {-m::alive::%{_vid}%} is true:
+					mFxSelf({_vid}, true)
+				stop
 			# 보던 사람이 나가면 장면을 접는다(다시 들어오면 mSceneRejoin 이 평소 화면으로)
 			if mPlayerOf({_vid}) is not set:
 				mFxCleanup({_vid})
@@ -603,7 +610,11 @@ function mFxRun(vid: text):
 		mFxCleanup({_vid})
 		wait 5 ticks
 	mFxSelf({_vid}, true)
-	mViewAuto({_vid})
+	# 장면이 밤 처리 시간을 넘겨 낮이 이미 시작됐으면 카메라는 아침 발표가 정한 화면 그대로 둔다(토론 중 갑자기 바뀌지 않게)
+	if mState() is "resolve":
+		mViewAuto({_vid})
+	else if mState() is "night":
+		mViewAuto({_vid})
 	delete {-msq::%{_vid}%::*}
 
 function mFxSetup(vid: text, spec: text):
