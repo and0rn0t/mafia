@@ -1444,7 +1444,7 @@ command /mtest [<text>] [<text>] [<text>]:
 				set {_id} to "%{_u}%"
 				add {_id} to {-mt::bots::*}
 				# 사람 같은 이름(겹치지 않게)
-				set {_bn::*} to "하늘", "민준", "서연", "지호", "수아", "도윤", "하린", "예준", "지우", "시우", "유나" and "건우"
+				set {_bn::*} to "Alex", "Mia", "Leo", "Emma", "Noah", "Lily", "Ethan", "Chloe", "Ryan", "Zoe", "Owen" and "Ruby"
 				set {-mt::name::%{_id}%} to {_bn::%loop-value%}
 				set {-mt::skin::%{_id}%} to {_k}
 			if mStart(player) is not true:
