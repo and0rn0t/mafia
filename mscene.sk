@@ -438,12 +438,12 @@ function mSceneStart():
 	loop {-m::players::*}:
 		mCamMount(loop-value)
 
-# 침대 k 번째 자리의 이름표 위치: 더미 발끝(bed 장소)에서 머리 쪽(침대 카메라 화면의 위쪽 방향)으로 2.25칸, 0.4칸 위
+# 침대 k 번째 자리의 이름표 위치: 더미 발끝(bed 장소)에서 머리 쪽(침대 카메라 화면의 위쪽 방향)으로 1.9칸(머리 바로 위), 0.4칸 위
 function mScBedNameLoc(k: number) :: location:
 	set {_b} to mScBedLoc({_k})
 	set {_yaw} to mLocLoad("bedcam").getYaw()
-	set {_x} to {_b}.getX() - sin({_yaw}) * 2.25
-	set {_z} to {_b}.getZ() + cos({_yaw}) * 2.25
+	set {_x} to {_b}.getX() - sin({_yaw}) * 1.9
+	set {_z} to {_b}.getZ() + cos({_yaw}) * 1.9
 	set {_l} to new Location({_b}.getWorld(), {_x}, {_b}.getY() + 0.4, {_z})
 	return {_l}
 
