@@ -1,0 +1,273 @@
+# ==============================================================================
+# [mresolve.sk] 밤 동시 처리. 규칙은 ROLES.md, 구조는 DESIGN.md 4번. 입력은 mnight.sk 가 저장한 {-m::act::uuid}, {-m::actmode::uuid}.
+# 함수:
+#   mResolve()     밤 입력을 한꺼번에 처리해서 사망/접선/훔침/상태를 반영하고, 결과를 {-m::ev::*} 와 {-m::info::uuid::*} 에 남긴다.
+#                  (실제 출력과 연출은 mscene.sk 가 이 목록을 읽어서 한다. 지금은 mResolveShow() 가 채팅으로 간단히 보여 준다)
+#   mDie(id)       사망 처리(alive=false). 마피아 승패 판정은 호출하는 쪽에서 한다.
+# 결과 변수:
+#   {-m::ev::*}            사건 목록 문자열 "종류|행위자uuid|대상uuid" (kill, heal_fail, soldier, contact, steal, burn, oil, die, guard ...)
+#   {-m::info::uuid::*}    그 사람 본인에게만 보낼 문장(경찰/스파이/탐정 결과, 접선 안내 등)
+#   {-m::pub::*}           다음 날 낮에 모두에게 공개할 문장(기자, 사망 알림)
+#   {-m::dead::*}          이번 밤에 사망한 uuid 목록
+#   {-m::contact::uuid}    접선 여부(true)
+#   {-m::soldier::uuid}    군인 방어 소모 여부(true)
+#   {-m::oil::uuid}        방화범의 기름에 젖음(점화 전까지 유지)
+#   {-m::nocht::uuid}      마녀에게 저주받음(다음 낮 토론 동안 채팅 불가)
+#   {-m::novote::uuid}     건달에게 협박받음(다음 낮 투표 불가)
+# 규칙 요약(ROLES.md 확정): 봉인된 사람은 입력 자체가 없다(mActCheck). 광인은 처리에서 제외. 접선은 보조 직업(스파이/마녀)이 마피아 직업을 고른 경우.
+#   주술은 그 대상을 겨냥한 다른 능력 중 무작위 1개 무효(시도는 탐정에게 남음). 치료>수호>군인 순. 군인은 마피아/도둑 공격만 하나 막음(암살자/자경단 못 막음, 해석 - 확인 필요).
+#   치료한 군인을 공격해도 방어 소모. 도둑은 공격이 성립해 실제 사망자가 있을 때만 그 사망자의 직업을 훔침(군인에게 막혀도 1회 소모). 자경단은 시민 팀을 실제로 죽이면 자신도 사망.
+#   방화는 모든 것을 무시하고 기름에 젖은 사람을 전부 죽인다. 정보 계열은 밤 시작 직업 기준.
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+function mNameOf(id: text) :: text:
+	set {_p} to mPlayerOf({_id})
+	if {_p} is set:
+		return name of {_p}
+	set {_o} to Bukkit.getOfflinePlayer(UUID.fromString({_id}))
+	set {_n} to {_o}.getName()
+	if {_n} is set:
+		return "%{_n}%"
+	return "알 수 없음"
+
+# 쉼표로 구분한 목록에 값이 들어 있는지 (조건식의 or 를 피하려고 쓴다)
+function mHas(list: text, v: text) :: boolean:
+	set {_a::*} to split {_list} at ","
+	if {_a::*} contains {_v}:
+		return true
+	return false
+
+function mDie(id: text):
+	set {-m::alive::%{_id}%} to false
+	add {_id} to {-m::dead::*}
+
+function mAddInfo(id: text, msg: text):
+	add {_msg} to {-m::info::%{_id}%::*}
+
+# 경찰에게 "마피아"로 보이는지: 마피아 직업이거나, 마피아 직업을 훔친 도둑
+function mLooksMafia(id: text) :: boolean:
+	if {-m::role::%{_id}%} is "mafia":
+		return true
+	if {-m::orig::%{_id}%} is "thief":
+		if {-m::stolen::%{_id}%} is "mafia":
+			return true
+	return false
+
+function mResolve():
+	delete {-m::ev::*}
+	delete {-m::info::*}
+	delete {-m::pub::*}
+	delete {-m::dead::*}
+	# ---- 0. 행위자 수집(밤 시작 직업 기준, 광인 제외)
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		if {-m::alive::%{_id}%} is not true:
+			continue
+		set {_r::%{_id}%} to {-m::role::%{_id}%}
+		if {_r::%{_id}%} is "madman":
+			continue
+		if {-m::actmode::%{_id}%} is "ignite":
+			set {_ign::%{_id}%} to true
+		else if {-m::act::%{_id}%} is set:
+			set {_act::%{_id}%} to {-m::act::%{_id}%}
+			set {_try::%{_id}%} to {-m::act::%{_id}%}
+	# ---- 2. 접선: 접선 전 보조 직업(스파이/마녀)이 마피아 직업을 고르면 능력 대신 접선
+	loop indices of {_act::*}:
+		set {_id} to loop-value
+		if mHas("spy,witch", {_r::%{_id}%}) is true:
+			if {-m::contact::%{_id}%} is not true:
+				set {_t} to {_act::%{_id}%}
+				if {-m::role::%{_t}%} is "mafia":
+					set {_cont::%{_id}%} to true
+					delete {_act::%{_id}%}
+					add "contact|%{_id}%|%{_t}%" to {-m::ev::*}
+	# ---- 3. 주술: 주술사의 대상을 겨냥한 능력 중 무작위 1개 무효
+	loop indices of {_act::*}:
+		if {_r::%{loop-value}%} is "shaman":
+			set {_s} to {_act::%{loop-value}%}
+			set {_sh} to loop-value
+			loop indices of {_act::*}:
+				if loop-value-2 is not {_sh}:
+					if {_act::%{loop-value-2}%} is {_s}:
+						add loop-value-2 to {_cand::*}
+			if size of {_cand::*} > 0:
+				set {_x} to random element of {_cand::*}
+				delete {_act::%{_x}%}
+				add "null|%{_sh}%|%{_x}%" to {-m::ev::*}
+			delete {_cand::*}
+	# ---- 4. 살해 계열
+	loop indices of {_act::*}:
+		set {_id} to loop-value
+		set {_t} to {_act::%{_id}%}
+		set {_ro} to {_r::%{_id}%}
+		if {_ro} is "doctor":
+			set {_heal::%{_t}%} to true
+		else if {_ro} is "guardian":
+			set {_guard::%{_t}%} to {_id}
+		else if mHas("mafia,assassin,thief,vigilante", {_ro}) is true:
+			add {_id} to {_atk::%{_t}%::*}
+	loop indices of {_atk::*}:
+		set {_t} to loop-value
+		set {_blk} to 0
+		set {_hasblockable} to false
+		loop {_atk::%{_t}%::*}:
+			if mHas("mafia,thief", {_r::%loop-value%}) is true:
+				set {_hasblockable} to true
+		if {-m::role::%{_t}%} is "soldier":
+			if {_hasblockable} is true:
+				if {-m::soldier::%{_t}%} is not true:
+					set {-m::soldier::%{_t}%} to true
+					set {_blk} to 1
+					add "soldier|%{_t}%|%{_t}%" to {-m::ev::*}
+		# 치료: 모든 공격 무효(군인 방어는 위에서 이미 소모)
+		if {_heal::%{_t}%} is true:
+			loop {_atk::%{_t}%::*}:
+				add "healed|%loop-value%|%{_t}%" to {-m::ev::*}
+				if {_r::%loop-value%} is "thief":
+					set {_usedthief::%loop-value%} to true
+			continue
+		# 수호: 대신 사망(치료/군인 효과 없음)
+		set {_victim} to {_t}
+		set {_g} to {_guard::%{_t}%}
+		if {_g} is set:
+			set {_victim} to {_g}
+			add "guard|%{_g}%|%{_t}%" to {-m::ev::*}
+		else if {_blk} is 1:
+			# 군인이 마피아/도둑 공격 하나를 막는다. 남은 공격이 있으면 죽는다.
+			set {_left} to 0
+			set {_skipped} to false
+			loop {_atk::%{_t}%::*}:
+				set {_ra} to {_r::%loop-value%}
+				if {_skipped} is false:
+					if mHas("mafia,thief", {_ra}) is true:
+						set {_skipped} to true
+						add "blocked|%loop-value%|%{_t}%" to {-m::ev::*}
+						if {_ra} is "thief":
+							set {_usedthief::%loop-value%} to true
+						continue
+				add 1 to {_left}
+			if {_left} is 0:
+				continue
+		set {_killed::%{_victim}%} to true
+		loop {_atk::%{_t}%::*}:
+			add "kill|%loop-value%|%{_victim}%" to {-m::ev::*}
+			if {_r::%loop-value%} is "vigilante":
+				set {_usedvig::%loop-value%} to true
+				if {-m::team::%{_victim}%} is "citizen":
+					set {_vigdie::%loop-value%} to true
+			if {_r::%loop-value%} is "thief":
+				set {_steal::%loop-value%} to {_victim}
+	# ---- 5. 방화: 항상 별도, 모든 방어 무시
+	loop indices of {_ign::*}:
+		loop {-m::players::*}:
+			if {-m::oil::%loop-value-2%} is true:
+				if {-m::alive::%loop-value-2%} is true:
+					set {_killed::%loop-value-2%} to true
+					add "burn|%loop-value-1%|%loop-value-2%" to {-m::ev::*}
+		set {_burned} to true
+	# 기름 뿌리기(밤 시작 직업 기준, 무효화되지 않은 것만)
+	loop indices of {_act::*}:
+		if {_r::%loop-value%} is "arsonist":
+			set {_t} to {_act::%loop-value%}
+			set {_oiled::%{_t}%} to true
+			add "oil|%loop-value%|%{_t}%" to {-m::ev::*}
+	# ---- 6. 정보 계열(밤 시작 직업 기준; 주술로 무효화된 것은 결과 없음)
+	loop indices of {_act::*}:
+		set {_id} to loop-value
+		set {_t} to {_act::%{_id}%}
+		set {_ro} to {_r::%{_id}%}
+		set {_tn} to mNameOf({_t})
+			if {_ro} is "police":
+			if mLooksMafia({_t}) is true:
+				mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님은 &c마피아&b입니다.")
+			else:
+				mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님은 &a마피아가 아닙니다.")
+		else if {_ro} is "spy":
+			set {_rn} to mRoleName({-m::role::%{_t}%})
+			mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님의 직업은 &f%{_rn}%&b입니다.")
+		else if {_ro} is "reporter":
+			set {_rn} to mRoleName({-m::role::%{_t}%})
+			add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
+			set {_usedrep::%{_id}%} to true
+		else if {_ro} is "witch":
+			set {_noch::%{_t}%} to true
+		else if {_ro} is "thug":
+			set {_nov::%{_t}%} to true
+	# 탐정: 시도(_try)로 계산한다(주술 무효/접선도 표시, 봉인은 시도 자체가 없음)
+	loop indices of {_act::*}:
+		if {_r::%loop-value%} is "detective":
+			set {_t} to {_act::%loop-value%}
+			set {_tt} to {_try::%{_t}%}
+			set {_tn} to mNameOf({_t})
+			if {_tt} is set:
+				set {_ttn} to mNameOf({_tt})
+				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 &f%{_ttn}%&b 님을 대상으로 능력을 사용했습니다.")
+			else if {_ign::%{_t}%} is true:
+				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 대상 없이 능력을 사용했습니다.")
+			else:
+				mAddInfo(loop-value, "&b조사 결과: &f%{_tn}%&b 님은 아무에게도 능력을 사용하지 않았습니다.")
+	# ---- 7. 반영
+	loop indices of {_cont::*}:
+		set {-m::contact::%loop-value%} to true
+		set {-m::team::%loop-value%} to "mafia"
+	loop indices of {_usedthief::*}:
+		set {-m::used::%loop-value%} to true
+	loop indices of {_steal::*}:
+		set {-m::used::%loop-value%} to true
+	loop indices of {_usedvig::*}:
+		set {-m::used::%loop-value%} to true
+	loop indices of {_usedrep::*}:
+		set {-m::used::%loop-value%} to true
+	loop indices of {_oiled::*}:
+		set {-m::oil::%loop-value%} to true
+	delete {-m::nocht::*}
+	delete {-m::novote::*}
+	loop indices of {_noch::*}:
+		set {-m::nocht::%loop-value%} to true
+	loop indices of {_nov::*}:
+		set {-m::novote::%loop-value%} to true
+	delete {-m::sealed::*}
+	# 도둑: 죽은 사람의 직업을 훔침(사망 처리 전 직업 기준). 훔친 직업이 일회성이면 능력 새로.
+	loop indices of {_steal::*}:
+		set {_th} to loop-value
+		set {_v} to {_steal::%{_th}%}
+		set {_nr} to {-m::role::%{_v}%}
+		set {-m::role::%{_th}%} to {_nr}
+		set {-m::stolen::%{_th}%} to {_nr}
+		delete {-m::used::%{_th}%}
+		set {_pool} to mRolePool({_nr})
+		if {_pool} is "neutral":
+			set {-m::team::%{_th}%} to "neutral"
+		else if {_pool} is "mafia":
+			set {-m::team::%{_th}%} to "mafia"
+		else if {_pool} is "citizen":
+			set {-m::team::%{_th}%} to "citizen"
+		else:
+			set {-m::team::%{_th}%} to "none"
+		add "steal|%{_th}%|%{_v}%" to {-m::ev::*}
+		set {_nrn} to mRoleName({_nr})
+		mAddInfo({_th}, "&e도둑: &f%{_nrn}%&e 직업을 훔쳤습니다.")
+		if {_nr} is "madman":
+			set {-m::fake::%{_th}%} to mFakeRole()
+	loop indices of {_vigdie::*}:
+		set {_killed::%loop-value%} to true
+		add "vigdie|%loop-value%|%loop-value%" to {-m::ev::*}
+	loop indices of {_killed::*}:
+		mDie(loop-value)
+		add "die|%loop-value%|%loop-value%" to {-m::ev::*}
+
+# 임시 표시: 채팅으로 사망 알림과 본인 결과를 보낸다. mscene.sk 가 만들어지면 연출로 교체한다.
+function mResolveShow():
+	loop {-m::dead::*}:
+		set {_n} to mNameOf(loop-value)
+		broadcast "&6[마피아] &f%{_n}%&7 님이 사망했습니다."
+	if size of {-m::dead::*} is 0:
+		broadcast "&6[마피아] &7지난 밤에는 아무도 사망하지 않았습니다."
+	loop {-m::pub::*}:
+		broadcast loop-value
+	loop {-m::players::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			loop {-m::info::%loop-value-1%::*}:
+				send loop-value-2 to {_p}

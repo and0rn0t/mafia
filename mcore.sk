@@ -22,6 +22,7 @@
 #   {-m::used::uuid}         1회 능력(기자, 자경단, 도둑) 사용 여부                                         mnight.sk(읽기), mresolve.sk(쓰기)
 #   {-m::sealed::uuid}       마담에게 지목당해 이번 밤 능력 불가                                           mnight.sk(읽기), mvote.sk/mresolve.sk
 #   {-m::fake::uuid}         광인에게 보여 준 가짜 직업                                                      mjoin.sk, mnight.sk
+#   {-m::contact/soldier/oil/nocht/novote/stolen::uuid}, {-m::ev/info/pub/dead::*}   밤 처리 결과·상태 (자세한 뜻은 mresolve.sk 머리말)
 # (아래 변수는 DESIGN.md 3번 참고, 해당 파일을 만들 때 이 목록에 옮긴다: nocht, novote, oil, soldier, votes, tadj, ev)
 #
 # 위치 저장은 PvP 서버(andornot)의 gcSaveLoc/gcLoadLoc 와 같은 방식이다(월드 이름 + 좌표). 월드는 world.sk 의 /world create 로 먼저 만들어 둔다.
@@ -213,5 +214,15 @@ function mReset():
 	delete {-m::used::*}
 	delete {-m::sealed::*}
 	delete {-m::fake::*}
+	delete {-m::contact::*}
+	delete {-m::soldier::*}
+	delete {-m::oil::*}
+	delete {-m::nocht::*}
+	delete {-m::novote::*}
+	delete {-m::stolen::*}
+	delete {-m::ev::*}
+	delete {-m::info::*}
+	delete {-m::pub::*}
+	delete {-m::dead::*}
 	delete {-m::ready::*}
 	delete {-m::cd}
