@@ -64,7 +64,11 @@ function mStgRelease(id: text):
 function mStgMorningLen() :: number:
 	if mSceneOn() is not true:
 		return 0
-	return 2 + size of {-m::dead::*} * 2 + size of {-m::rep::*} * 4
+	set {_r} to size of {-m::dead::*}
+	set {_r} to {_r} * 2
+	set {_q} to size of {-m::rep::*}
+	set {_q} to {_q} * 4
+	return 2 + {_r} + {_q}
 
 function mStgMorning():
 	if mSceneOn() is not true:
@@ -148,7 +152,13 @@ function mStgBurn(x: text):
 					if {_dz} is 0:
 						set {_mid} to true
 				if {_mid} is false:
-					set {_l} to new Location({_s}.getWorld(), {_s}.getBlockX() + {_dx}, {_s}.getBlockY(), {_s}.getBlockZ() + {_dz})
+					set {_fx2} to {_s}.getBlockX()
+					add {_dx} to {_fx2}
+					set {_fz2} to {_s}.getBlockZ()
+					add {_dz} to {_fz2}
+					set {_fy2} to {_s}.getBlockY()
+					set {_sw} to {_s}.getWorld()
+					set {_l} to new Location({_sw}, {_fx2}, {_fy2}, {_fz2})
 					add {_l} to {_fl::*}
 		loop mStgViewers():
 			set {_p} to mPlayerOf(loop-value-1)
@@ -200,7 +210,16 @@ function mStgTnt(t: text, v: text):
 	set {_b} to mScSeatLoc({-ms::seat::%{_v}%})
 	set {_w} to {_a}.getWorld()
 	wait 10 ticks
-	set {_tnt} to {_w}.spawnEntity(new Location({_w}, {_a}.getX(), {_a}.getY() + 1.5, {_a}.getZ()), EntityType.TNT)
+	set {_ax} to {_a}.getX()
+	set {_az} to {_a}.getZ()
+	set {_ay} to {_a}.getY()
+	add 1.5 to {_ay}
+	set {_ddx} to {_b}.getX()
+	subtract {_ax} from {_ddx}
+	set {_ddz} to {_b}.getZ()
+	subtract {_az} from {_ddz}
+	set {_tl} to new Location({_w}, {_ax}, {_ay}, {_az})
+	set {_tnt} to {_w}.spawnEntity({_tl}, EntityType.TNT)
 	{_tnt}.setGravity(false)
 	{_tnt}.setFuseTicks(400)
 	{_tnt}.setPersistent(false)
@@ -212,12 +231,21 @@ function mStgTnt(t: text, v: text):
 		wait 1 tick
 		add 1 to {_k}
 		set {_f} to {_k} / 25
-		set {_x} to {_a}.getX() + ({_b}.getX() - {_a}.getX()) * {_f}
-		set {_z} to {_a}.getZ() + ({_b}.getZ() - {_a}.getZ()) * {_f}
-		set {_y} to {_a}.getY() + 1.5 + 3 * {_f} * (1 - {_f}) * 4
+		set {_x} to {_ddx} * {_f}
+		add {_ax} to {_x}
+		set {_z} to {_ddz} * {_f}
+		add {_az} to {_z}
+		set {_arc} to 1 - {_f}
+		set {_arc} to {_arc} * {_f}
+		set {_arc} to {_arc} * 12
+		set {_y} to {_ay} + {_arc}
 		{_tnt}.teleport(new Location({_w}, {_x}, {_y}, {_z}))
 	{_tnt}.remove()
-	set {_bl} to new Location({_w}, {_b}.getX(), {_b}.getY() + 1, {_b}.getZ())
+	set {_bx2} to {_b}.getX()
+	set {_by2} to {_b}.getY()
+	add 1 to {_by2}
+	set {_bz2} to {_b}.getZ()
+	set {_bl} to new Location({_w}, {_bx2}, {_by2}, {_bz2})
 	mStgSoundAll("entity.generic.explode", 1, 1)
 	mStgPartAll("EXPLOSION_EMITTER", {_bl}, 1)
 	mStgPartAll("LARGE_SMOKE", {_bl}, 20)
@@ -273,16 +301,34 @@ function mStgLineup(w: text):
 	set {_i} to 0
 	loop {_win::*}:
 		add 1 to {_i}
-		set {_o} to ({_i} - ({_n} + 1) / 2) * 1.2
-		set {_l} to new Location({_c}.getWorld(), {_c}.getX() + {_rx} * {_o}, {_c}.getY(), {_c}.getZ() + {_rz} * {_o}, {_yaw}, 0)
+		set {_half} to {_n} + 1
+		set {_half} to {_half} / 2
+		set {_o} to {_i} - {_half}
+		set {_o} to {_o} * 1.2
+		set {_lx} to {_rx} * {_o}
+		add {_c}.getX() to {_lx}
+		set {_lz} to {_rz} * {_o}
+		add {_c}.getZ() to {_lz}
+		set {_ly} to {_c}.getY()
+		set {_lw} to {_c}.getWorld()
+		set {_l} to new Location({_lw}, {_lx}, {_ly}, {_lz}, {_yaw}, 0)
 		set {_m} to {_l}.getWorld().spawnEntity({_l}, EntityType.MANNEQUIN)
 		mScDummySetup({_m}, loop-value)
 		{_m}.setCustomNameVisible(true)
 		{_m}.setRotation({_yaw}, 0)
 	# 카메라: 줄 앞 5칸, 눈높이에서 줄 가운데를 본다
 	set {_d} to 5 + {_n} * 0.3
-	set {_cam} to new Location({_c}.getWorld(), {_c}.getX() + {_fx} * {_d}, {_c}.getY() + 1.6, {_c}.getZ() + {_fz} * {_d})
-	{_cam}.setDirection(new Vector(-1 * {_fx}, -0.1, -1 * {_fz}))
+	set {_cx} to {_fx} * {_d}
+	add {_c}.getX() to {_cx}
+	set {_cz} to {_fz} * {_d}
+	add {_c}.getZ() to {_cz}
+	set {_cy} to {_c}.getY()
+	add 1.6 to {_cy}
+	set {_cw} to {_c}.getWorld()
+	set {_cam} to new Location({_cw}, {_cx}, {_cy}, {_cz})
+	set {_nfx} to 0 - {_fx}
+	set {_nfz} to 0 - {_fz}
+	{_cam}.setDirection(new Vector({_nfx}, -0.1, {_nfz}))
 	loop mStgViewers():
 		mCamCut(loop-value, {_cam})
 

@@ -56,16 +56,39 @@ function mBFill(w: world, x1: number, y1: number, z1: number, x2: number, y2: nu
 				{_w}.getBlockAt({_x}, {_y}, loop-value-3).setBlockData({_bd}, false)
 
 # 방 하나: 바닥(y0), 벽, 천장(y1), 안은 비운다. 안쪽 범위는 x1~x2, z1~z2.
+# (리로드가 느려지지 않게, 함수 호출 인자 안에 계산을 넣지 않고 먼저 변수로 계산한다. 아래 함수들도 같음)
 function mBRoom(w: world, x1: number, z1: number, x2: number, z2: number, y0: number, y1: number, floor: text, wall: text, ceil: text):
-	mBFill({_w}, {_x1} - 1, {_y0}, {_z1} - 1, {_x2} + 1, {_y1}, {_z2} + 1, {_wall})
-	mBFill({_w}, {_x1}, {_y0} + 1, {_z1}, {_x2}, {_y1} - 1, {_z2}, "minecraft:air")
+	set {_ax} to {_x1} - 1
+	set {_az} to {_z1} - 1
+	set {_bx} to {_x2} + 1
+	set {_bz} to {_z2} + 1
+	set {_iy} to {_y0} + 1
+	set {_jy} to {_y1} - 1
+	mBFill({_w}, {_ax}, {_y0}, {_az}, {_bx}, {_y1}, {_bz}, {_wall})
+	mBFill({_w}, {_x1}, {_iy}, {_z1}, {_x2}, {_jy}, {_z2}, "minecraft:air")
 	mBFill({_w}, {_x1}, {_y0}, {_z1}, {_x2}, {_y0}, {_z2}, {_floor})
 	mBFill({_w}, {_x1}, {_y1}, {_z1}, {_x2}, {_y1}, {_z2}, {_ceil})
+
+# 기준점(ox, oz)에서 상대 좌표로 채우기/놓기(호출하는 줄에는 숫자만 쓴다)
+function mBFillR(w: world, ox: number, oz: number, x1: number, y1: number, z1: number, x2: number, y2: number, z2: number, d: text):
+	set {_ax} to {_ox} + {_x1}
+	set {_az} to {_oz} + {_z1}
+	set {_bx} to {_ox} + {_x2}
+	set {_bz} to {_oz} + {_z2}
+	mBFill({_w}, {_ax}, {_y1}, {_az}, {_bx}, {_y2}, {_bz}, {_d})
+
+function mBSetR(w: world, ox: number, oz: number, x: number, y: number, z: number, d: text):
+	set {_ax} to {_ox} + {_x}
+	set {_az} to {_oz} + {_z}
+	mBSet({_w}, {_ax}, {_y}, {_az}, {_d})
 
 # 위치 저장: (x,y,z)에서 (tx,ty,tz)를 바라보는 방향으로
 function mBSaveLook(key: text, w: world, x: number, y: number, z: number, tx: number, ty: number, tz: number):
 	set {_l} to new Location({_w}, {_x}, {_y}, {_z})
-	{_l}.setDirection(new Vector({_tx} - {_x}, {_ty} - {_y}, {_tz} - {_z}))
+	set {_dx} to {_tx} - {_x}
+	set {_dy} to {_ty} - {_y}
+	set {_dz} to {_tz} - {_z}
+	{_l}.setDirection(new Vector({_dx}, {_dy}, {_dz}))
 	mLocSave({_key}, {_l})
 
 # 위치 저장: 정한 방향(yaw)으로
@@ -73,10 +96,16 @@ function mBSaveYaw(key: text, w: world, x: number, y: number, z: number, yaw: nu
 	set {_l} to new Location({_w}, {_x}, {_y}, {_z}, {_yaw}, 0)
 	mLocSave({_key}, {_l})
 
+# 기준점(ox, oz)에서 상대 좌표로 위치 저장
+function mBSaveYawR(key: text, w: world, ox: number, oz: number, x: number, y: number, z: number, yaw: number):
+	set {_ax} to {_ox} + {_x}
+	set {_az} to {_oz} + {_z}
+	mBSaveYaw({_key}, {_w}, {_ax}, {_y}, {_az}, {_yaw})
+
 # 나무 하나(줄기 4칸 + 잎)
 function mBTree(w: world, x: number, z: number):
-	mBFill({_w}, {_x} - 2, 68, {_z} - 2, {_x} + 2, 69, {_z} + 2, "minecraft:oak_leaves[persistent=true]")
-	mBFill({_w}, {_x} - 1, 70, {_z} - 1, {_x} + 1, 71, {_z} + 1, "minecraft:oak_leaves[persistent=true]")
+	mBFillR({_w}, {_x}, {_z}, -2, 68, -2, 2, 69, 2, "minecraft:oak_leaves[persistent=true]")
+	mBFillR({_w}, {_x}, {_z}, -1, 70, -1, 1, 71, 1, "minecraft:oak_leaves[persistent=true]")
 	mBFill({_w}, {_x}, 65, {_z}, {_x}, 69, {_z}, "minecraft:oak_log")
 
 # 가로등(울타리 3칸 + 랜턴)
@@ -84,124 +113,127 @@ function mBLamp(w: world, x: number, z: number):
 	mBFill({_w}, {_x}, 65, {_z}, {_x}, 67, {_z}, "minecraft:dark_oak_fence")
 	mBSet({_w}, {_x}, 68, {_z}, "minecraft:lantern")
 
-# ---- 플레이어 집 12채(광장 둘레). 각 참가자가 한 채씩 쓴다(mscene.sk 가 자리 순서대로 배정, 13명 이상이면 1번 집부터 다시 같이 씀).
-# 집 = 바깥 7x7(x1~x1+6, z1~z1+6), 안 5x5, 바닥 y=64, 안 높이 65~68, 지붕은 y=69부터.
-# 안 배치(모든 집 같음, 달이 동쪽에 뜨므로 창은 항상 동쪽 벽): 동쪽 벽 큰 창(z1+2~4, y66~68), 창 앞 탁자(x1+5, z1+2~3 반 블록) 위 꽃병과 촛불,
-#   창 옆 의자(x1+5, z1+4)에 자기 더미가 서쪽(카메라)을 보고 앉는다. 책장 2개, 카펫. 카메라는 서쪽에서 창을 본다.
-# 문(side): n = 북쪽 벽 가운데, s = 남쪽 벽 가운데, w = 서쪽 벽 남쪽 끝, e = 동쪽 벽 북쪽 끝(서쪽 줄 집, 창 옆). 광장 쪽이나 옆 골목으로 난다.
+# ---- 플레이어 집 12채(광장 둘레, 바깥 장면용). 각 참가자가 한 채씩 쓴다(mscene.sk 가 자리 순서대로 배정, 최대 12명).
+# 집 = 바깥 7x7(x1~x1+6, z1~z1+6), 바닥 y=64, 벽 65~68, 지붕은 y=69부터. 안쪽 화면은 모든 집이 밤 방을 쓴다(안은 꾸며 두었지만 연출에 쓰지 않음).
+# 문(side): n = 북쪽 벽 가운데, s = 남쪽 벽 가운데, w = 서쪽 벽 남쪽 끝, e = 동쪽 벽 북쪽 끝.
 function mBHomeDef(i: number) :: text:
 	if {_i} <= 4:
 		set {_xs::*} to -17, -8, 1, 10
 		return "%{_xs::%{_i}%}%|20|n|minecraft:white_terracotta"
 	if {_i} <= 8:
 		set {_xs::*} to -17, -8, 1, 10
-		return "%{_xs::%{_i} - 4%}%|-27|s|minecraft:birch_planks"
+		set {_k} to {_i} - 4
+		return "%{_xs::%{_k}%}%|-27|s|minecraft:birch_planks"
 	if {_i} <= 10:
 		set {_zs::*} to -8, 2
-		return "21|%{_zs::%{_i} - 8%}%|w|minecraft:bricks"
+		set {_k} to {_i} - 8
+		return "21|%{_zs::%{_k}%}%|w|minecraft:bricks"
 	set {_zs::*} to -8, 2
-	return "-27|%{_zs::%{_i} - 10%}%|e|minecraft:bricks"
+	set {_k} to {_i} - 10
+	return "-27|%{_zs::%{_k}%}%|e|minecraft:bricks"
 
 function mBHomeBuild(w: world, i: number):
 	set {_d::*} to split mBHomeDef({_i}) at "|"
-	set {_x1} to ({_d::1} parsed as number)
-	set {_z1} to ({_d::2} parsed as number)
-	set {_side} to {_d::3}
+	set {_x} to ({_d::1} parsed as number)
+	set {_z} to ({_d::2} parsed as number)
 	set {_wall} to {_d::4}
-	set {_x2} to {_x1} + 6
-	set {_z2} to {_z1} + 6
-	mBFill({_w}, {_x1}, 64, {_z1}, {_x2}, 64, {_z2}, "minecraft:dark_oak_planks")
-	mBFill({_w}, {_x1}, 65, {_z1}, {_x2}, 68, {_z2}, {_wall})
-	mBFill({_w}, {_x1} + 1, 65, {_z1} + 1, {_x2} - 1, 68, {_z2} - 1, "minecraft:air")
-	loop {_x1}, {_x2}:
-		set {_x} to loop-value-1
-		loop {_z1}, {_z2}:
-			mBFill({_w}, {_x}, 65, loop-value-2, {_x}, 68, loop-value-2, "minecraft:dark_oak_log")
+	mBFillR({_w}, {_x}, {_z}, 0, 64, 0, 6, 64, 6, "minecraft:dark_oak_planks")
+	mBFillR({_w}, {_x}, {_z}, 0, 65, 0, 6, 68, 6, {_wall})
+	mBFillR({_w}, {_x}, {_z}, 1, 65, 1, 5, 68, 5, "minecraft:air")
+	mBFillR({_w}, {_x}, {_z}, 0, 65, 0, 0, 68, 0, "minecraft:dark_oak_log")
+	mBFillR({_w}, {_x}, {_z}, 6, 65, 0, 6, 68, 0, "minecraft:dark_oak_log")
+	mBFillR({_w}, {_x}, {_z}, 0, 65, 6, 0, 68, 6, "minecraft:dark_oak_log")
+	mBFillR({_w}, {_x}, {_z}, 6, 65, 6, 6, 68, 6, "minecraft:dark_oak_log")
 	# 작은 창(문 자리는 아래에서 문으로 덮는다)
-	loop {_z1}, {_z2}:
-		mBSet({_w}, {_x1} + 1, 66, loop-value, "minecraft:glass")
-		mBSet({_w}, {_x1} + 5, 66, loop-value, "minecraft:glass")
-	mBSet({_w}, {_x1}, 66, {_z1} + 2, "minecraft:glass")
-	# 동쪽 큰 창(달)
-	mBFill({_w}, {_x2}, 66, {_z1} + 2, {_x2}, 68, {_z1} + 4, "minecraft:glass")
-	# 지붕(맨 아래 판자층이 안쪽 천장)
-	mBFill({_w}, {_x1} - 1, 69, {_z1} - 1, {_x2} + 1, 69, {_z2} + 1, "minecraft:dark_oak_planks")
-	mBFill({_w}, {_x1}, 70, {_z1}, {_x2}, 70, {_z2}, "minecraft:dark_oak_planks")
-	mBFill({_w}, {_x1} + 1, 71, {_z1} + 1, {_x2} - 1, 71, {_z2} - 1, "minecraft:dark_oak_planks")
-	mBFill({_w}, {_x1} + 2, 72, {_z1} + 2, {_x2} - 2, 72, {_z2} - 2, "minecraft:dark_oak_slab[type=bottom]")
+	mBSetR({_w}, {_x}, {_z}, 1, 66, 0, "minecraft:glass")
+	mBSetR({_w}, {_x}, {_z}, 5, 66, 0, "minecraft:glass")
+	mBSetR({_w}, {_x}, {_z}, 1, 66, 6, "minecraft:glass")
+	mBSetR({_w}, {_x}, {_z}, 5, 66, 6, "minecraft:glass")
+	mBSetR({_w}, {_x}, {_z}, 0, 66, 2, "minecraft:glass")
+	# 동쪽 큰 창
+	mBFillR({_w}, {_x}, {_z}, 6, 66, 2, 6, 68, 4, "minecraft:glass")
+	# 지붕
+	mBFillR({_w}, {_x}, {_z}, -1, 69, -1, 7, 69, 7, "minecraft:dark_oak_planks")
+	mBFillR({_w}, {_x}, {_z}, 0, 70, 0, 6, 70, 6, "minecraft:dark_oak_planks")
+	mBFillR({_w}, {_x}, {_z}, 1, 71, 1, 5, 71, 5, "minecraft:dark_oak_planks")
+	mBFillR({_w}, {_x}, {_z}, 2, 72, 2, 4, 72, 4, "minecraft:dark_oak_slab[type=bottom]")
 	# 가구
-	mBSet({_w}, {_x1} + 5, 65, {_z1} + 2, "minecraft:oak_slab[type=top]")
-	mBSet({_w}, {_x1} + 5, 65, {_z1} + 3, "minecraft:oak_slab[type=top]")
-	mBSet({_w}, {_x1} + 5, 66, {_z1} + 3, "minecraft:potted_poppy")
-	mBSet({_w}, {_x1} + 5, 66, {_z1} + 2, "minecraft:candle[candles=2,lit=true]")
-	mBSet({_w}, {_x1} + 5, 65, {_z1} + 4, "minecraft:spruce_stairs[facing=east]")
-	mBFill({_w}, {_x1} + 1, 65, {_z1} + 1, {_x1} + 1, 66, {_z1} + 2, "minecraft:bookshelf")
-	mBFill({_w}, {_x1} + 2, 65, {_z1} + 3, {_x1} + 3, 65, {_z1} + 4, "minecraft:brown_carpet")
+	mBSetR({_w}, {_x}, {_z}, 5, 65, 2, "minecraft:oak_slab[type=top]")
+	mBSetR({_w}, {_x}, {_z}, 5, 65, 3, "minecraft:oak_slab[type=top]")
+	mBSetR({_w}, {_x}, {_z}, 5, 66, 3, "minecraft:potted_poppy")
+	mBSetR({_w}, {_x}, {_z}, 5, 66, 2, "minecraft:candle[candles=2,lit=true]")
+	mBSetR({_w}, {_x}, {_z}, 5, 65, 4, "minecraft:spruce_stairs[facing=east]")
+	mBFillR({_w}, {_x}, {_z}, 1, 65, 1, 1, 66, 2, "minecraft:bookshelf")
+	mBFillR({_w}, {_x}, {_z}, 2, 65, 3, 3, 65, 4, "minecraft:brown_carpet")
 	# 문
 	set {_dl::*} to split mBHomeDoor({_i}) at "|"
 	set {_dx} to ({_dl::1} parsed as number)
 	set {_dz} to ({_dl::2} parsed as number)
 	set {_face} to {_dl::3}
-	mBSet({_w}, {_dx}, 65, {_dz}, "minecraft:oak_door[half=lower,facing=%{_face}%,hinge=left,open=false]")
-	mBSet({_w}, {_dx}, 66, {_dz}, "minecraft:oak_door[half=upper,facing=%{_face}%,hinge=left,open=false]")
+	mBSetR({_w}, {_x}, {_z}, {_dx}, 65, {_dz}, "minecraft:oak_door[half=lower,facing=%{_face}%,hinge=left,open=false]")
+	mBSetR({_w}, {_x}, {_z}, {_dx}, 66, {_dz}, "minecraft:oak_door[half=upper,facing=%{_face}%,hinge=left,open=false]")
 
-# 문 블록 x|z|문 방향(안쪽)|바깥 방향 x|바깥 방향 z|문 안쪽 한 칸 x|z
+# 문(집 기준 상대 좌표): 문 블록 x|z|문 방향(안쪽)|바깥 방향 x|바깥 방향 z
 function mBHomeDoor(i: number) :: text:
 	set {_d::*} to split mBHomeDef({_i}) at "|"
-	set {_x1} to ({_d::1} parsed as number)
-	set {_z1} to ({_d::2} parsed as number)
 	set {_s} to {_d::3}
 	if {_s} is "n":
-		return "%{_x1} + 3%|%{_z1}%|south|0|-1|%{_x1} + 3.5%|%{_z1} + 1.5%"
+		return "3|0|south|0|-1"
 	if {_s} is "s":
-		return "%{_x1} + 3%|%{_z1} + 6%|north|0|1|%{_x1} + 3.5%|%{_z1} + 5.5%"
+		return "3|6|north|0|1"
 	if {_s} is "w":
-		return "%{_x1}%|%{_z1} + 5%|east|-1|0|%{_x1} + 1.5%|%{_z1} + 5.5%"
-	return "%{_x1} + 6%|%{_z1} + 1%|west|1|0|%{_x1} + 5.5%|%{_z1} + 1.5%"
+		return "0|5|east|-1|0"
+	return "6|1|west|1|0"
 
-# 집 i 의 연출 자리를 저장한다(블록은 건드리지 않음). 키: h<i>seat, cam, door, in, mid, out, ext, visit, guard, fireA, fireB
+# 집 i 의 바깥 연출 자리를 저장한다(블록은 건드리지 않음). 키: h<i>door(문 아래 블록), out(문 바깥 한 칸, 바깥을 봄), ext(바깥 카메라, 문을 봄)
 function mBHomeSpots(w: world, i: number):
 	set {_d::*} to split mBHomeDef({_i}) at "|"
-	set {_x1} to ({_d::1} parsed as number)
-	set {_z1} to ({_d::2} parsed as number)
+	set {_x} to ({_d::1} parsed as number)
+	set {_z} to ({_d::2} parsed as number)
 	set {_dl::*} to split mBHomeDoor({_i}) at "|"
-	set {_dx} to ({_dl::1} parsed as number)
-	set {_dz} to ({_dl::2} parsed as number)
+	set {_rx} to ({_dl::1} parsed as number)
+	set {_rz} to ({_dl::2} parsed as number)
 	set {_ox} to ({_dl::4} parsed as number)
 	set {_oz} to ({_dl::5} parsed as number)
-	set {_ix} to ({_dl::6} parsed as number)
-	set {_iz} to ({_dl::7} parsed as number)
 	if {mcfg::house::%{_i}%::face} is not {_dl::3}:
 		set {mcfg::house::%{_i}%::face} to {_dl::3}
 	set {_k} to "h%{_i}%"
-	mBSaveYaw("%{_k}%seat", {_w}, {_x1} + 5.5, 65.5, {_z1} + 4.5, 90)
-	mBSaveLook("%{_k}%cam", {_w}, {_x1} + 1.4, 66.3, {_z1} + 2.4, {_x1} + 6, 67.4, {_z1} + 3.6)
-	mBSaveYaw("%{_k}%door", {_w}, {_dx}, 65, {_dz}, 0)
-	mBSaveYaw("%{_k}%in", {_w}, {_ix}, 65, {_iz}, 0)
-	mBSaveYaw("%{_k}%mid", {_w}, {_x1} + 3.5, 65, {_z1} + 3.2, 0)
-	mBSaveYaw("%{_k}%visit", {_w}, {_x1} + 4.2, 65, {_z1} + 3.9, 0)
-	mBSaveYaw("%{_k}%guard", {_w}, {_x1} + 4.3, 65, {_z1} + 5.4, 0)
-	mBSaveYaw("%{_k}%fireA", {_w}, {_x1} + 1, 65, {_z1} + 1, 0)
-	mBSaveYaw("%{_k}%fireB", {_w}, {_x1} + 4, 65, {_z1} + 5, 0)
-	# 문 바깥 한 칸(바깥을 봄)과 바깥 카메라(문 앞 4칸, 옆으로 1.6칸, 문을 봄)
-	set {_px} to {_dx} + 0.5 + {_ox}
-	set {_pz} to {_dz} + 0.5 + {_oz}
-	mBSaveLook("%{_k}%out", {_w}, {_px}, 65, {_pz}, {_px} + {_ox}, 65, {_pz} + {_oz})
-	# 옆으로 비킬 방향: 남북으로 난 문은 동쪽(+x), 동서로 난 문은 남쪽(+z). 장터 가판대를 피한다
-	set {_sx} to abs({_oz})
-	set {_sz} to abs({_ox})
-	mBSaveLook("%{_k}%ext", {_w}, {_px} + {_ox} * 4 + {_sx} * 1.6, 66.9, {_pz} + {_oz} * 4 + {_sz} * 1.6, {_dx} + 0.5, 66.2, {_dz} + 0.5)
+	mBSaveYawR("%{_k}%door", {_w}, {_x}, {_z}, {_rx}, 65, {_rz}, 0)
+	# 문 바깥 한 칸: 문 블록 가운데 + 바깥 방향 1칸
+	set {_px} to {_x} + {_rx}
+	add 0.5 to {_px}
+	add {_ox} to {_px}
+	set {_pz} to {_z} + {_rz}
+	add 0.5 to {_pz}
+	add {_oz} to {_pz}
+	set {_qx} to {_px} + {_ox}
+	set {_qz} to {_pz} + {_oz}
+	mBSaveLook("%{_k}%out", {_w}, {_px}, 65, {_pz}, {_qx}, 65, {_qz})
+	# 바깥 카메라: 문 바깥에서 4칸 더 나가고 옆으로 1.6칸(남북 문은 동쪽, 동서 문은 남쪽으로 비켜 장터 가판대를 피함), 문 가운데를 본다
+	set {_cx} to {_ox} * 4
+	add {_px} to {_cx}
+	set {_cz} to {_oz} * 4
+	add {_pz} to {_cz}
+	if {_ox} is 0:
+		add 1.6 to {_cx}
+	else:
+		add 1.6 to {_cz}
+	set {_lx} to {_x} + {_rx}
+	add 0.5 to {_lx}
+	set {_lz} to {_z} + {_rz}
+	add 0.5 to {_lz}
+	mBSaveLook("%{_k}%ext", {_w}, {_cx}, 66.9, {_cz}, {_lx}, 66.2, {_lz})
 
 # 장터 가판대(통 3개 + 울타리 기둥 + 천막). 가운데 (x, z), 천막 색 wool
 function mBStall(w: world, x: number, z: number, wool: text):
-	mBFill({_w}, {_x} - 1, 65, {_z}, {_x} + 1, 65, {_z}, "minecraft:barrel[facing=up]")
-	mBSet({_w}, {_x} - 1, 66, {_z}, "minecraft:pumpkin")
-	mBSet({_w}, {_x} + 1, 66, {_z}, "minecraft:melon")
-	loop -1, 1:
-		set {_dx} to loop-value-1
-		loop -1, 1:
-			mBFill({_w}, {_x} + {_dx}, 66, {_z} + loop-value-2, {_x} + {_dx}, 67, {_z} + loop-value-2, "minecraft:oak_fence")
-	mBFill({_w}, {_x} - 1, 68, {_z} - 1, {_x} + 1, 68, {_z} + 1, {_wool})
+	mBFillR({_w}, {_x}, {_z}, -1, 65, 0, 1, 65, 0, "minecraft:barrel[facing=up]")
+	mBSetR({_w}, {_x}, {_z}, -1, 66, 0, "minecraft:pumpkin")
+	mBSetR({_w}, {_x}, {_z}, 1, 66, 0, "minecraft:melon")
+	mBFillR({_w}, {_x}, {_z}, -1, 66, -1, -1, 67, -1, "minecraft:oak_fence")
+	mBFillR({_w}, {_x}, {_z}, 1, 66, -1, 1, 67, -1, "minecraft:oak_fence")
+	mBFillR({_w}, {_x}, {_z}, -1, 66, 1, -1, 67, 1, "minecraft:oak_fence")
+	mBFillR({_w}, {_x}, {_z}, 1, 66, 1, 1, 67, 1, "minecraft:oak_fence")
+	mBFillR({_w}, {_x}, {_z}, -1, 68, -1, 1, 68, 1, {_wool})
 
 function mBuild():
 	set {_w} to mBWorld()
@@ -221,7 +253,8 @@ function mBuild():
 		set {_x} to loop-value-1
 		loop integers between -14 and 14:
 			set {_z} to loop-value-2
-			set {_d2} to {_x} * {_x} + {_z} * {_z}
+			set {_d2} to {_x} * {_x}
+			add {_z} * {_z} to {_d2}
 			if {_d2} <= 196:
 				if {_d2} > 100:
 					mBSet({_w}, {_x}, 64, {_z}, "minecraft:stone_bricks")
@@ -236,7 +269,9 @@ function mBuild():
 		set {_x} to loop-value-1
 		loop integers between -2 and 2:
 			set {_z} to loop-value-2
-			if {_x} * {_x} + {_z} * {_z} <= 5:
+			set {_e2} to {_x} * {_x}
+			add {_z} * {_z} to {_e2}
+			if {_e2} <= 5:
 				mBSet({_w}, {_x}, 65, {_z}, "minecraft:dark_oak_slab[type=bottom]")
 	# 가로등 8개(반지름 11), 꽃밭, 벤치
 	mBLamp({_w}, 0, 11)
@@ -249,14 +284,14 @@ function mBuild():
 	mBLamp({_w}, -8, -8)
 	loop -6, 6:
 		set {_x} to loop-value
-		mBFill({_w}, {_x} - 1, 64, 12, {_x} + 1, 64, 13, "minecraft:grass_block")
-		mBSet({_w}, {_x} - 1, 65, 12, "minecraft:poppy")
+		mBFillR({_w}, {_x}, 0, -1, 64, 12, 1, 64, 13, "minecraft:grass_block")
+		mBSetR({_w}, {_x}, 0, -1, 65, 12, "minecraft:poppy")
 		mBSet({_w}, {_x}, 65, 12, "minecraft:dandelion")
-		mBSet({_w}, {_x} + 1, 65, 12, "minecraft:cornflower")
-		mBSet({_w}, {_x} - 1, 65, 13, "minecraft:oxeye_daisy")
+		mBSetR({_w}, {_x}, 0, 1, 65, 12, "minecraft:cornflower")
+		mBSetR({_w}, {_x}, 0, -1, 65, 13, "minecraft:oxeye_daisy")
 		mBSet({_w}, {_x}, 65, 13, "minecraft:allium")
-		mBSet({_w}, {_x} + 1, 65, 13, "minecraft:poppy")
-		mBFill({_w}, {_x} - 1, 65, 9, {_x} + 1, 65, 9, "minecraft:spruce_stairs[facing=south]")
+		mBSetR({_w}, {_x}, 0, 1, 65, 13, "minecraft:poppy")
+		mBFillR({_w}, {_x}, 0, -1, 65, 9, 1, 65, 9, "minecraft:spruce_stairs[facing=south]")
 	mBFill({_w}, 12, 64, -2, 13, 64, 2, "minecraft:grass_block")
 	mBFill({_w}, 12, 65, -2, 13, 65, 2, "minecraft:azure_bluet")
 	mBFill({_w}, -13, 64, -2, -12, 64, 2, "minecraft:grass_block")

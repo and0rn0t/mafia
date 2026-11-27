@@ -214,7 +214,10 @@ function mCamPlace(id: text, x: number, y: number, z: number, fx: number, fy: nu
 	if {_cam} is not set:
 		stop
 	set {_l} to new Location({_cam}.getWorld(), {_x}, {_y}, {_z})
-	{_l}.setDirection(new Vector({_fx} - {_x}, {_fy} - {_y}, {_fz} - {_z}))
+	set {_vx} to {_fx} - {_x}
+	set {_vy} to {_fy} - {_y}
+	set {_vz} to {_fz} - {_z}
+	{_l}.setDirection(new Vector({_vx}, {_vy}, {_vz}))
 	mCamCut({_id}, {_l})
 
 # 저장된 카메라 장소(눈 위치 + 방향)로 컷
@@ -283,8 +286,12 @@ function mCamSeatOf(id: text, owner: text) :: boolean:
 	set {_a} to 360 * ({_i} - 1) / {-ms::seatn}
 	set {_bd} to mScNum("backdist", 1.6)
 	set {_sd} to mScNum("sidedist", 0.9)
-	set {_px} to {_s}.getX() + cos({_a}) * {_bd} - sin({_a}) * {_sd}
-	set {_pz} to {_s}.getZ() + sin({_a}) * {_bd} + cos({_a}) * {_sd}
+	set {_px} to cos({_a}) * {_bd}
+	subtract sin({_a}) * {_sd} from {_px}
+	add {_s}.getX() to {_px}
+	set {_pz} to sin({_a}) * {_bd}
+	add cos({_a}) * {_sd} to {_pz}
+	add {_s}.getZ() to {_pz}
 	set {_py} to {_t}.getY() + mScNum("camh", 1.9)
 	mCamPlace({_id}, {_px}, {_py}, {_pz}, {_t}.getX(), {_t}.getY() + 0.3, {_t}.getZ())
 	return true
