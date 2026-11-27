@@ -115,12 +115,13 @@ function mBodyInfo(e: object):
 		if {_hasdn} is true:
 			if {_dn} is set:
 				set {_tag} to mMemoTag({_vs}, "%{_pid}%")
-				# 같은 패킷이 리스너를 두 번 지나가도 한 번만 붙인다(표시 앞의 보이지 않는 글자 U+200B 로 확인)
+				# 같은 패킷이 리스너를 두 번 지나가도 한 번만 붙인다(메모 부분에 화면에 안 보이는 insertion 표식 mafia_memo 를 달아 확인)
 				set {_dj} to {_dn}.getJson()
-				if {_dj} contains "​" or "​":
+				if {_dj} contains "mafia_memo":
 					set {_tag} to ""
 				if {_tag} is not "":
-					set {_tj} to GsonComponentSerializer.gson().serialize(LegacyComponentSerializer.legacyAmpersand().deserialize("​ %{_tag}%"))
+					set {_tc} to LegacyComponentSerializer.legacyAmpersand().deserialize(" %{_tag}%").insertion("mafia_memo")
+					set {_tj} to GsonComponentSerializer.gson().serialize({_tc})
 					set {_ndn} to WrappedChatComponent.fromJson("[%{_dn}.getJson()%,%{_tj}%]")
 					set {_ch} to true
 		if {_ch} is true:
