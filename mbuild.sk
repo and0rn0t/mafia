@@ -327,12 +327,20 @@ function mBSaveSpots(w: world):
 	mBSaveYaw("table", {_w}, 0.5, 65, 0.5, 0)
 	# 낮: 원탁 가까이(원탁 가운데까지 약 6칸)에서 남쪽으로 내려다본다
 	mBSaveLook("daycam", {_w}, 0.5, 67.6, -5, 0.5, 65.4, 0.5)
-	# 플레이어 집 12채의 연출 자리(밤 배경, 문, 방문, 바깥 카메라). room/nightcam 은 예전 키라 1번 집을 가리키게 둔다
+	# 플레이어 집 12채의 바깥 연출 자리(문, 문 바깥, 바깥 카메라). 집 안 화면은 모든 집이 아래의 밤 방(x 100~107)을 같이 쓴다
 	loop 12 times:
 		mBHomeSpots({_w}, loop-value)
 	set {mcfg::house::n} to 12
-	mBSaveYaw("room", {_w}, -11.5, 65.5, 24.5, 90)
-	mBSaveLook("nightcam", {_w}, -15.6, 66.3, 22.4, -11, 67.4, 23.6)
+	# 밤 방(모든 집의 안쪽 화면): 자기 더미 자리, 카메라, 문 안쪽(방문자가 나타남), 문 블록, 방 가운데(돌아 걷는 점), 대상 앞, 수호자 자리, 불타는 바닥 범위
+	mBSaveYaw("room", {_w}, 107.5, 65.5, 2.5, 90)
+	mBSaveLook("nightcam", {_w}, 103.3, 66.7, 0.9, 108, 67.6, 0.9)
+	mBSaveYaw("fxdoor", {_w}, 107.5, 65, -3, 90)
+	mBSaveYaw("fxdoorblock", {_w}, 108, 65, -3, 0)
+	mBSaveYaw("fxmid", {_w}, 106.6, 65, -1.5, 0)
+	mBSaveYaw("fxvisit", {_w}, 106.2, 65, 1.6, 0)
+	mBSaveYaw("fxguard", {_w}, 106.2, 65, 3.6, 180)
+	mBSaveYaw("fxfireA", {_w}, 100, 65, -3, 0)
+	mBSaveYaw("fxfireB", {_w}, 106, 65, 3, 0)
 	# 침대 더미: 위치 = 발끝(침대 북쪽 끝), yaw 90 = 머리가 남쪽 베개
 	mBSaveYaw("bed", {_w}, 0.5, 65.5625, -100.1, 90)
 	# 침대 카메라: 가운데 침대 바로 위에서 거의 수직으로 내려다본다. 화면 위쪽 = 남쪽(베개와 얼굴), 양옆 침대는 화면 가장자리에 반쯤

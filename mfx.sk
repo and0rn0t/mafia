@@ -1,6 +1,7 @@
 # ==============================================================================
 # [mfx.sk] 밤 처리(resolve) 연출: 집 나서기 → 이동 → 대상 집 방문(킬, 방어, 주술, 기름, 방화, 일반 방문) → 귀가. 규칙은 ROLES.md "화면 연출".
-# 무대: 광장 둘레 플레이어 집 12채(mbuild.sk). 각 참가자는 자기 집이 있다(mscene.sk 의 mScHouse). 밤 배경은 자기 집 안이다.
+# 무대: 광장 둘레 플레이어 집 12채(mbuild.sk, 바깥 장면). 각 참가자는 자기 집이 있다(mscene.sk 의 mScHouse).
+#   집 안 화면은 모든 집이 같은 밤 방(room/nightcam/fx* 장소, 확정)을 쓴다. 장면 더미는 보는 사람에게만 보여서 겹치지 않는다.
 # 흐름: mday.sk 가 밤이 끝나면 mResolve() 다음에 mSceneResolve() 를 부른다(이 파일). 사건 목록({-m::ev::*})으로 장면 목록을 만들고,
 #   보는 사람마다 자기 차례대로 혼자 재생한다(mFxRun, 사람마다 따로 돌고 1틱마다 mFxTick). 돌려주는 값 = 가장 긴 사람의 연출 시간(초).
 # 능력을 쓴 사람(행동한 사람)이 보는 순서(확정):
@@ -21,7 +22,7 @@
 #   무기: 마피아 구리 검, 자경단 다이아몬드 검, 암살자 네더라이트 검, 방화범 부싯돌과 부시, 도둑 철 검(임시, 정해지지 않음).
 # 장면 더미와 문 열림/불은 그 장면을 보는 사람에게만 보인다(sendBlockChange). 보는 동안 그 사람의 자기 더미(밤 배경)는 숨긴다.
 # 기름 발광: 기름에 젖은 생존자의 원탁 더미와 집 더미는 모두에게 노란색으로 빛난다(팀 mafia_oil). 죽으면 더미가 해골로 바뀌어 사라진다.
-# 장소 키(mbuild.sk 의 mBHomeSpots, 집 번호 i): h<i>seat cam door in mid visit guard fireA fireB out ext, {mcfg::house::i::face}(문 방향)
+# 장소 키: 집 바깥 = h<i>door out ext, {mcfg::house::i::face}(문 방향) / 집 안(밤 방) = room nightcam fxdoor fxdoorblock fxmid fxvisit fxguard fxfireA fxfireB (mFxL 의 h=0)
 # 변수(임시): {-msq::...}(장면 목록) {-msc::uuid::...}(지금 재생 중인 장면의 엔티티와 값). mFxClear 가 지운다.
 # 미검증: 전체(서버 실행 불가). 마네킹 startUsingItem(방패 들기), 서명 없는 스킨 속성, 걷는 모습, 시간 배분은 실제로 보고 조정해야 한다.
 # ==============================================================================
@@ -43,13 +44,26 @@ import:
 	net.kyori.adventure.text.format.NamedTextColor
 
 function mFxOn() :: boolean:
-	loop "seat", "cam", "door", "in", "mid", "visit", "guard", "fireA", "fireB", "out", "ext":
+	loop "room", "nightcam", "fxdoor", "fxdoorblock", "fxmid", "fxvisit", "fxguard", "fxfireA", "fxfireB":
+		if mLocSet(loop-value) is false:
+			return false
+	loop "door", "out", "ext":
 		if mLocSet("h1%loop-value%") is false:
 			return false
 	return true
 
-# 집 h 의 장소
+# 장소. h 가 0 이면 밤 방(모든 집의 안쪽 화면, 확정), 1~12 면 그 집 바깥(door/out/ext).
 function mFxL(h: number, k: text) :: location:
+	if {_h} is 0:
+		if {_k} is "seat":
+			return mLocLoad("room")
+		if {_k} is "cam":
+			return mLocLoad("nightcam")
+		if {_k} is "door":
+			return mLocLoad("fxdoorblock")
+		if {_k} is "in":
+			return mLocLoad("fxdoor")
+		return mLocLoad("fx%{_k}%")
 	return mLocLoad("h%{_h}%%{_k}%")
 
 # ------------------------------------------------------------------ 도구
@@ -167,6 +181,8 @@ function mFxDoor(vid: text, h: number, open: boolean):
 		stop
 	set {_u} to new Location({_l}.getWorld(), {_l}.getX(), {_l}.getY() + 1, {_l}.getZ())
 	set {_face} to {mcfg::house::%{_h}%::face}
+	if {_h} is 0:
+		set {_face} to "west"
 	set {_o} to "false"
 	if {_open} is true:
 		set {_o} to "true"
@@ -471,7 +487,7 @@ function mFxSetup(vid: text, spec: text):
 	set {-msc::%{_vid}%::ht} to {_ht}
 	# 카메라: 집 안 장면은 대상 집 안, 바깥 장면은 그 집 바깥(out/home = 자기 집, arrive/back = 대상 집)
 	if mFxInside({_k}) is true:
-		mCamTo({_vid}, "h%{_ht}%cam")
+		mCamTo({_vid}, "nightcam")
 	else if {_k} is "out" or "home":
 		mCamTo({_vid}, "h%{_ha}%ext")
 	else:
@@ -479,7 +495,7 @@ function mFxSetup(vid: text, spec: text):
 	if mFxInside({_k}) is false:
 		stop
 	# 대상 더미: 대상 집 의자(보이지 않는 디스플레이)에 앉힌다
-	set {_r} to mFxL({_ht}, "seat")
+	set {_r} to mFxL(0, "seat")
 	set {_seat} to {_r}.getWorld().spawnEntity({_r}, EntityType.ITEM_DISPLAY)
 	mFxOnly({_seat}, {_vid})
 	set {_v} to mFxDummy({_vid}, {_r}, {_f::3})
@@ -503,7 +519,7 @@ function mFxSkull(vid: text, wither: boolean):
 	set {_v} to {-msc::%{_vid}%::vic}
 	if {_v} is set:
 		{_v}.remove()
-	set {_r} to mFxL({-msc::%{_vid}%::ht}, "seat")
+	set {_r} to mFxL(0, "seat")
 	set {_type} to EntityType.SKELETON
 	if {_wither} is true:
 		set {_type} to EntityType.WITHER_SKELETON
@@ -526,7 +542,7 @@ function mFxFire(vid: text):
 	set {_p} to mPlayerOf({_vid})
 	if {_p} is not set:
 		stop
-	set {_h} to {-msc::%{_vid}%::ht}
+	set {_h} to 0
 	set {_a} to mFxL({_h}, "fireA")
 	set {_b} to mFxL({_h}, "fireB")
 	set {_fire} to Bukkit.createBlockData("minecraft:fire")
@@ -549,6 +565,7 @@ function mFxCleanup(vid: text):
 			{_p}.sendBlockChange({_l}, {_l}.getBlock().getBlockData())
 		mFxDoorReset({_vid}, {-msc::%{_vid}%::ha})
 		mFxDoorReset({_vid}, {-msc::%{_vid}%::ht})
+		mFxDoorReset({_vid}, 0)
 	delete {-msc::%{_vid}%::*}
 
 # 바깥 이동 장면(out/arrive/back/home). 걷는 거리 7칸, 방향은 두 집의 문 바깥 자리를 잇는 쪽.
@@ -615,7 +632,7 @@ function mFxTick(vid: text, t: number):
 		mFxTickTravel({_vid}, {_k}, {_t})
 		stop
 	set {_g} to {-msc::%{_vid}%::g}
-	set {_h} to {-msc::%{_vid}%::ht}
+	set {_h} to 0
 	set {_in} to mFxL({_h}, "in")
 	set {_mid} to mFxL({_h}, "mid")
 	set {_visit} to mFxL({_h}, "visit")

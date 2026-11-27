@@ -141,8 +141,8 @@ command /mtest [<text>] [<text>] [<text>]:
 					stop
 			if {_n} < 0:
 				set {_n} to 0
-			if {_n} > 15:
-				set {_n} to 15
+			if {_n} > 11:
+				set {_n} to 11
 			delete {-mt::*}
 			loop {_n} times:
 				set {_u} to UUID.randomUUID()

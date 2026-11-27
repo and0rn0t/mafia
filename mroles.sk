@@ -113,8 +113,9 @@ function mCandidates(pool: text) :: texts:
 function mMinPlayers() :: number:
 	return 6
 
+# 최대 인원 12명(확정: 광장 집이 12채)
 function mMaxPlayers() :: number:
-	return 16
+	return 12
 
 # 인원별 팀 구성. 반환: 1 마피아, 2 보조, 3 중립, 4 시민 팀 (직업 수). 지원 인원이 아니면 빈 목록.
 function mCompo(n: number) :: numbers:
