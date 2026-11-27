@@ -406,6 +406,7 @@ function mSceneStart():
 		# 원탁 더미는 닉네임 이름표를 띄우지 않는다(대상 선택 때 닉네임은 서브타이틀로)
 		{-ms::dummy::%{_id}%}.setCustomNameVisible(false)
 		set {_self} to mScSeated(mLocLoad("room"), {_id})
+		{_self}.setCustomNameVisible(false)
 		# 의자(보이지 않는 디스플레이)도 같이 본인에게만 보이게 한다. 더미만 숨기고 의자는 모두에게 보이면 첫 시험에서 더미가 안 보였다.
 		set {_seat} to {_self}.getVehicle()
 		if {_seat} is set:
