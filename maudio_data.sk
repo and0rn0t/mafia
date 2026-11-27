@@ -1,7 +1,7 @@
 # [maudio_data.sk] tools/BuildPack.java 가 만든 파일(손으로 고치지 말 것). 리소스팩 소리 키, 길이(초), 팩 SHA-1.
 
 function mAuKeys() :: texts:
-	return "day1", "day2", "day3", "day4", "day5", "day6", "day7", "vote"
+	return "day1", "day2", "day3", "day4", "day5", "day6", "day7", "night", "vote"
 
 function mAuLen(k: text) :: number:
 	if {_k} is "day1":
@@ -18,9 +18,11 @@ function mAuLen(k: text) :: number:
 		return 157
 	if {_k} is "day7":
 		return 99
+	if {_k} is "night":
+		return 11
 	if {_k} is "vote":
 		return 34
 	return 0
 
 function mAuSha1() :: text:
-	return "1685a61140cbf42e5cb4b5f951947bd06d031743"
+	return "0226837432d48f9421ae85bd18d2cc83a787ada0"
