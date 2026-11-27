@@ -23,7 +23,7 @@
 #
 # 조작(관전 모드에서는 클릭/F/핫바가 서버로 오지 않아서 이동 키로 받는다, PlayerInputEvent):
 #   대상 선택 중: A 이전 후보 / D 다음 후보 / 스페이스 확정 / Shift 선택하지 않음
-#   대상 선택이 아닐 때: 밤·투표·길동무 시간에는 W 로 대상 선택 화면을 다시 연다. 낮 토론에는 W 토론 +15초 / S 토론 -15초(낮마다 한 번)
+#   대상 선택이 아닐 때: 밤·투표·길동무 시간에는 W 로 대상 선택 화면을 연다(밤은 밤 방 화면으로 시작하고 자동으로 열지 않는다. 투표·길동무는 시작할 때 자동으로 열린다). 낮 토론에는 W 토론 +15초 / S 토론 -15초(낮마다 한 번)
 #   방화범은 밤 후보 맨 끝에 "점화"가 있다.
 #
 # 변수(전부 임시):
@@ -489,13 +489,15 @@ function mSceneNight():
 	if mSceneOn() is not true:
 		stop
 	mScSky(true)
+	# 밤은 밤 방 화면으로 시작한다. 대상 선택 화면은 자동으로 열지 않고 W 로 연다(키 안내에 "W: 대상 고르기").
 	loop {-m::players::*}:
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:
-			send title "&8%{-m::day}%일차 밤" with subtitle "&7능력을 쓸 대상을 고르세요" to {_p} for 2 seconds with fadein 10 ticks and fade out 10 ticks
+			set {_sub} to ""
+			if mPickCanOpen(loop-value) is "night":
+				set {_sub} to "&7W: 능력을 쓸 대상 고르기"
+			send title "&8%{-m::day}%일차 밤" with subtitle {_sub} to {_p} for 2 seconds with fadein 10 ticks and fade out 10 ticks
 		mViewAuto(loop-value)
-		if mActCheck(loop-value) is "":
-			mPickOpen(loop-value, "night")
 
 function mSceneDay():
 	if mSceneOn() is not true:
