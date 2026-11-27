@@ -534,7 +534,6 @@ function mBotSay(b: text, msg: text):
 		send colored {_line} to loop-player
 	mLogAdd("*", {_line})
 	add 1 to {-mt::said::%{_b}%}
-	mBotHear({_b}, {_msg})
 
 # 조금 뒤에 할 말을 예약한다(spec = "종류|대상|두 번째|직업", 초 뒤)
 function mBotQueue(b: text, spec: text, sec: number):
@@ -565,6 +564,8 @@ function mBotSayQueued(b: text):
 function mBotClaim(s: text, t: text, kind: text):
 	if {_t} is {_s}:
 		stop
+	# 맞장구는 한 번에 한 봇만(우르르 몰아가지 않게)
+	set {_ag} to false
 	loop {-m::players::*}:
 		set {_b} to loop-value
 		if mIsBot({_b}) is true:
@@ -576,7 +577,9 @@ function mBotClaim(s: text, t: text, kind: text):
 							if {-m::team::%{_t}%} is "mafia":
 								mBotAddSus({_b}, {_s}, 60)
 							else if chance of 15%:
-								mBotQueue({_b}, "agree|%{_t}%", random integer between 2 and 6)
+								if {_ag} is false:
+									set {_ag} to true
+									mBotQueue({_b}, "agree|%{_t}%", random integer between 3 and 8)
 					else if mBotK({_b}, {_s}) is "mafia":
 						# 아는 마피아의 말은 거꾸로 받아들인다
 						if {_kind} is "mafia":
@@ -598,7 +601,9 @@ function mBotClaim(s: text, t: text, kind: text):
 								mBotAddSus({_b}, {_t}, {_w})
 								if mBotSus({_b}, {_t}) >= 60:
 									if chance of 20%:
-										mBotQueue({_b}, "agree|%{_t}%", random integer between 2 and 6)
+										if {_ag} is false:
+											set {_ag} to true
+											mBotQueue({_b}, "agree|%{_t}%", random integer between 3 and 8)
 						else:
 							if {_kt} is "mafia":
 								mBotAddSus({_b}, {_s}, 60)
@@ -626,7 +631,11 @@ function mBotHear(s: text, msg: text):
 				if loop-value is not "mafia":
 					mBotSetClaim({_s}, loop-value)
 	set {_kind} to ""
-	if {_m} contains "마피아":
+	set {_nm} to {_m}.replaceAll(" ", "")
+	# 부정("노마피아", "마피아 아님/아니", "마피아가 아닌") 은 변호
+	if {_nm} contains "노마피아" or "마피아아님" or "마피아아니" or "마피아가아" or "마피아는아":
+		set {_kind} to "town"
+	else if {_m} contains "마피아":
 		set {_kind} to "mafia"
 	else if {_m} contains "시민" or "아니" or "믿으셔도":
 		set {_kind} to "town"
@@ -780,9 +789,9 @@ function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 	if {_kind} is "police_town":
 		return "너는 경찰이다. 어젯밤 조사한 %{_tn}% 은(는) 마피아가 아니었다고 밝혀라."
 	if {_kind} is "accuse":
-		return "%{_tn}% 이(가) 가장 수상하다고 의심을 말해라. 지금까지 채팅에서 근거를 짚어도 좋다."
+		return "대화 흐름을 보고 지금 가장 자연스러운 말을 해라. 참고: 너는 %{_tn}% 을(를) 가장 의심한다. 근거(누가 무슨 말을 했는지, 말이 바뀐 점, 투표)를 들어 말하되, 근거가 약하면 의심을 말하지 않고 다른 사람 말에 반응해도 된다. 이미 나온 말을 되풀이하지 마라."
 	if {_kind} is "mafia_push":
-		return "너는 마피아 팀이다(절대 밝히지 마라). 시민인 %{_tn}% 에게 의심을 돌려라. 자연스럽게."
+		return "너는 마피아 팀이다(절대 밝히지 마라). 대화 흐름에 맞춰, 시민인 %{_tn}% 에게 그럴듯한 근거로 의심을 돌려라. 너무 티 나게 몰지 말고, 이미 의심받는 사람이 있으면 거기에 슬쩍 얹어도 된다."
 	if {_kind} is "defend_role":
 		return "%{_tn}% 이(가) 너를 마피아로 몰았다. 네 직업 %{_rn}% 을(를) 밝히며 해명해라."
 	if {_kind} is "defend":
@@ -790,7 +799,7 @@ function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 	if {_kind} is "fake_police":
 		return "너는 마피아 팀이다(절대 밝히지 마라). %{_tn}% 이(가) 너를 몰았다. 네가 경찰인 척하며 오히려 %{_tn}% 이(가) 마피아라고 주장해라."
 	if {_kind} is "agree":
-		return "%{_tn}% 이(가) 수상하다는 말에 동의해라."
+		return "누군가 %{_tn}% 을(를) 의심했다. 대화를 보고 동의하면 근거를 덧붙이고, 동의하지 않으면 다른 생각을 말해라."
 	if {_kind} is "conflict":
 		return "%{_tn}% 와(과) %{_un}% 가 둘 다 %{_rn}% 이라고 주장했다. 둘 중 하나는 거짓말이라고 짚어라."
 	if {_kind} is "real_vs_fake":
@@ -799,7 +808,7 @@ function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 		return "너는 광대다(밝히지 마라). 투표로 처형당해야 이긴다. 일부러 살짝 수상하게, 장난스럽게 말해라."
 	if {_kind} is "vote":
 		return "방금 %{_tn}% 에게 투표했다고 짧게 말해라."
-	return "지금 상황에 맞게 가볍게 한마디 해라(누가 경찰인지 묻거나, 생각을 말하거나)."
+	return "대화 흐름을 보고 지금 가장 자연스러운 한마디를 해라(질문에 답하기, 다른 사람 말에 반응하기, 직업을 밝힌 사람이 있으면 그 말을 따져 보기 등). 이미 나온 말을 되풀이하지 마라."
 
 # 봇이 아는 상황(시스템 지시)
 function mBotCtx(b: text) :: text:
@@ -834,6 +843,11 @@ function mBotCtx(b: text) :: text:
 		set {_c} to "%{_c}% 네가 아는 것: %{_kn::*}%."
 	set {_c} to "%{_c}% 살아 있는 다른 사람: %{_al::*}%."
 	set {_c} to "%{_c}% 규칙: 밤에 마피아가 한 명을 죽이고, 낮에 토론한 뒤 투표로 한 명을 처형한다. 경찰은 밤마다 한 명이 마피아인지 조사한다."
+	set {_c} to "%{_c}% 대화를 읽는 법: 대화 전체를 이어서 이해해라. '노마피아', '마피아 아님' 은 그 사람을 변호하는 말이다. 경찰이라고 밝힌 사람의 결과 발표는 무겁게 보되, 경찰 주장이 둘이면 둘 중 하나는 거짓이다. 말이 바뀌거나 근거 없이 몰아가는 사람을 의심해라."
+	if mBotEvilSide({_b}) is true:
+		set {_c} to "%{_c}% 마피아 팀 전략: 시민처럼 추리하는 척하고, 팀원이 의심받으면 티 나지 않게 화제를 돌리고, 진짜 경찰로 보이는 사람의 신뢰를 깎아라."
+	else:
+		set {_c} to "%{_c}% 시민 전략: 근거를 따져 마피아를 찾고, 믿을 만한 경찰 결과는 따르고, 억울하게 몰리는 사람은 변호해라."
 	set {_c} to "%{_c}% 말하는 법: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 써라. 따옴표, 이름표, 설명, 이모지 없이. 사람을 가리킬 때는 번호를 쓴다(예: 3번). 게임 밖 이야기는 하지 마라."
 	return {_c}
 
@@ -917,9 +931,24 @@ function mBotLlmText(body: text) :: text:
 	return {_s}
 
 # 말하기: AI 가 켜져 있으면 요청, 아니면(또는 이미 기다리는 중이면) 정해 둔 문장
+# 의도의 효과: 고발/변호
+function mBotIntentEffect(b: text, kind: text, t: text):
+	if {_t} is "":
+		stop
+	# 분명한 주장(경찰 결과, 사칭 반박, 해명 중 맞고발)만 반영한다. 의심 말하기는 AI 가 실제로 무슨 말을 할지 몰라 반영하지 않는다
+	if {_kind} is "police_mafia" or "fake_police" or "real_vs_fake":
+		mBotClaim({_b}, {_t}, "mafia")
+	else if mBotLlmOn() is false:
+		if {_kind} is "accuse" or "mafia_push" or "defend":
+			mBotClaim({_b}, {_t}, "mafia")
+	else if {_kind} is "police_town":
+		mBotClaim({_b}, {_t}, "town")
+
 function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
+	# 봇이 한 말의 뜻은 글을 다시 읽지 않고 의도로 바로 반영한다(오해가 번지지 않게)
+	mBotIntentEffect({_b}, {_kind}, {_t})
 	set {_fb} to mBotFill(mBotLine({_kind}), {_t}, {_u}, {_r})
 	if mBotLlmOn() is true:
 		if {-mtllm::f::%{_b}%} is not set:
@@ -1099,8 +1128,18 @@ function mBotLlmParse(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "너는 한국어 마피아 게임 채팅을 분석한다. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열."
-	set {_f} to mBotLlmPost({_sys}, {_msg}, 300)
+	set {_sys} to "너는 한국어 마피아 게임 채팅을 분석한다. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
+	# 앞 대화 10줄과 지금 말
+	set {_n} to size of {-mt::chat::*}
+	set {_from} to {_n} - 10
+	set {_i} to 0
+	set {_ctx} to ""
+	loop {-mt::chat::*}:
+		add 1 to {_i}
+		if {_i} >= {_from}:
+			if {_i} < {_n}:
+				set {_ctx} to "%{_ctx}%%loop-value%%nl%"
+	set {_f} to mBotLlmPost({_sys}, "[앞 대화]%nl%%{_ctx}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%", 300)
 	if {_f} is not set:
 		stop
 	add 1 to {-mtllm::pn}
@@ -1228,12 +1267,13 @@ on chat:
 	set {_msg} to uncolored message
 	# 봇의 대화 기억에 남긴다(AI 가 사람 말을 볼 수 있게)
 	mBotChatAdd({_id}, {_msg})
-	mBotHear({_id}, {_msg})
-	# 봇을 불렀으면(번호나 이름) 그 봇이 대답한다
-	mBotAddressed({_id}, {_msg})
-	# AI 로 말 뜻 읽기(고발·변호·직업 주장·질문 상대)
+	# AI 가 켜져 있으면 앞 대화까지 보고 뜻을 읽는다(단어만 보고 오해하지 않게, 단어 해석은 쓰지 않음)
 	if mBotLlmOn() is true:
 		mBotLlmParse({_id}, {_msg})
+		stop
+	# AI 가 꺼져 있으면 단어로 읽고, 봇을 불렀으면 그 봇이 대답한다
+	mBotHear({_id}, {_msg})
+	mBotAddressed({_id}, {_msg})
 
 # ------------------------------------------------------------------ 봇 진행(1초마다)
 
