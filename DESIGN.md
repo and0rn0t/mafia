@@ -160,5 +160,5 @@ ROLES.md 에 없던, 설계하면서 생긴 질문이다.
 - 연출 효과: 화면 흔들림 mCamShake(id, 틱, 세기, 1틱 루프가 처리, 컷하면 멈춤), 휘두르기/맞는 모습(swingMainHand, playHurtAnimation), 발소리 mFxStep, 장면 조명 mFxLight(빛 블록, 보는 사람에게만). 글자 자막은 쓰지 않는다(연출만으로 알 수 있게, 확정).
 - 도움말(mhelp.sk): 안내서 책(로비 핫바 9번 칸, /mhelp 책으로 게임 중에도 열림: 표지, 게임 진행, 조작, 팀과 승리 2쪽, 직업 19쪽)과 채팅 도움말(/mhelp, /mhelp 직업 [이름], /mhelp 내직업). 직업 설명은 mroles.sk 정의표를 그대로 쓴다.
 - 맵 청크 유지(mscene.sk mScChunks): 게임 동안 연출 장소 둘레 청크에 플러그인 티켓을 건다. 저장되지 않는 더미가 청크가 내려갈 때 지워지는 것을 막는다. mScHeal 이 2초마다 원탁·집 더미가 사라졌으면 다시 만들고 콘솔에 "[mafia] ... 다시 만듦" 을 남긴다.
-- 메시지 기록(mcore.sk): 전체 알림은 mBc(문장)로 보내고 기록한다. 본인에게만 간 것은 mLogP(uuid, 문장). 보기: /mlog.
+- 메시지 기록(mcore.sk): 전체 알림은 mBc(문장)로 보내고 기록한다. 본인에게만 간 것은 mLogP(uuid, 문장). 보기: /기록(/mlog), Paper 대화창(dialog)으로 띄운다(채팅에 쓰지 않음).
 - 배경음(maudio.sk, maudio_data.sk, tools/BuildPack.java): ogg 폴더 → `java tools/BuildPack.java <폴더> .` 로 mafia-pack.zip 과 maudio_data.sk(키, 길이, SHA-1)를 만든다. 팩 주소는 저장소 raw(또는 {mcfg::packurl}).

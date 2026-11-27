@@ -42,6 +42,14 @@
 import:
 	org.bukkit.Bukkit
 	org.bukkit.SoundCategory
+	java.util.ArrayList
+	java.util.function.Consumer
+	io.papermc.paper.dialog.Dialog
+	io.papermc.paper.registry.data.dialog.DialogBase
+	io.papermc.paper.registry.data.dialog.DialogBase$DialogAfterAction as DlgAfter
+	io.papermc.paper.registry.data.dialog.body.DialogBody
+	io.papermc.paper.registry.data.dialog.type.DialogType
+	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 
 # 소리는 모두 플레이어 자신에게 붙여서 재생한다(Player#playSound(Entity, ...)). 위치에 재생하면 관전 카메라로 시점이 옮겨진 동안
 # 서버의 플레이어 위치와 실제 화면 위치가 어긋나 소리가 씹혔다. 분류는 MASTER(마스터 음량만 따름). s 는 "ui.button.click" 같은 소리 이름.
@@ -313,43 +321,55 @@ function mBc(t: text):
 function mLogP(id: text, t: text):
 	mLogAdd({_id}, {_t})
 
-command /mlog [<number>]:
+# 기록 창(대화창 dialog). 채팅에 쓰지 않아 채팅이 밀리지 않는다. 최근 것이 아래, 길면 창 안에서 스크롤. ESC 나 확인 버튼으로 닫는다.
+# Paper Dialog API: Dialog.create(Consumer) 는 proxy 로 만든다(받는 함수 mLogDlgAccept 가 {-mlogdlg::base} 를 넣는다).
+function mLogDlgAccept(px: object, f: object):
+	set {_b} to {_f}.empty()
+	{_b}.base({-mlogdlg::base})
+	{_b}.type(DialogType.notice())
+
+function mLogShow(p: player):
+	set {_id} to "%uuid of {_p}%"
+	loop {-m::log::*}:
+		set {_e::*} to split loop-value at "|"
+		if {_e::1} is "*" or {_id}:
+			set {_line} to loop-value
+			replace first "%{_e::1}%|" in {_line} with ""
+			replace first "|" in {_line} with " "
+			add {_line} to {_mine::*}
+	set {_n} to size of {_mine::*}
+	if {_n} is 0:
+		set {_t} to "&7아직 기록이 없습니다."
+	else:
+		# 너무 길면 최근 200줄만
+		set {_first} to 1
+		if {_n} > 200:
+			set {_first} to {_n} - 199
+		set {_t} to ""
+		set {_i} to {_first}
+		while {_i} <= {_n}:
+			if {_t} is "":
+				set {_t} to {_mine::%{_i}%}
+			else:
+				set {_t} to "%{_t}%%nl%%{_mine::%{_i}%}%"
+			add 1 to {_i}
+	replace all "&" in {_t} with "§"
+	set {_body} to new ArrayList()
+	{_body}.add(DialogBody.plainMessage(LegacyComponentSerializer.legacySection().deserialize({_t}), 400))
+	set {_title} to LegacyComponentSerializer.legacySection().deserialize("§6§l게임 기록")
+	set {-mlogdlg::base} to DialogBase.create({_title}, null, true, false, DlgAfter.CLOSE, {_body}, new ArrayList())
+	set {_h::accept} to function reference "mLogDlgAccept"
+	set {_c} to a new proxy of Consumer using {_h::*}
+	set {_d} to Dialog.create({_c})
+	delete {-mlogdlg::base}
+	{_p}.showDialog({_d})
+
+command /mlog:
 	aliases: /기록, /log
-	description: 이번 게임 메시지 기록 보기 (/mlog 2 = 그 전 쪽)
+	description: 이번 게임 메시지 기록 보기(대화창)
 	executable by: players
 	trigger:
-		set {_id} to "%uuid of player%"
-		loop {-m::log::*}:
-			set {_e::*} to split loop-value at "|"
-			if {_e::1} is "*" or {_id}:
-				set {_line} to loop-value
-				replace first "%{_e::1}%|" in {_line} with ""
-				add {_line} to {_mine::*}
-		set {_n} to size of {_mine::*}
-		if {_n} is 0:
-			send "&7아직 기록이 없습니다."
-			stop
-		set {_pg} to arg-1
-		if {_pg} is not set:
-			set {_pg} to 1
-		set {_per} to 12
-		set {_last} to {_n} - ({_pg} - 1) * {_per}
-		if {_last} < 1:
-			send "&7더 이전 기록은 없습니다."
-			stop
-		set {_first} to {_last} - {_per} + 1
-		if {_first} < 1:
-			set {_first} to 1
-		set {_pages} to ceil({_n} / {_per})
-		send "&6&l게임 기록 &7(%{_pg}%/%{_pages}%쪽, 최근 것이 아래)"
-		set {_i} to {_first}
-		while {_i} <= {_last}:
-			set {_l} to {_mine::%{_i}%}
-			replace first "|" in {_l} with " "
-			send colored {_l}
-			add 1 to {_i}
-		if {_first} > 1:
-			send "&8/기록 %{_pg} + 1% 로 그 전 기록"
+		mLogShow(player)
 
 # ------------------------------------------------------------------ 봇 시험(mtest.sk) 연결점
 # 게임 코드는 봇에 대해 이 세 함수만 부른다. 봇 변수({-mt::*})는 mtest.sk 가 채우고, 그 파일이 없으면 늘 비어 있어 봇이 없는 것과 같다.
