@@ -15,7 +15,7 @@
 #   {-m::nocht::uuid}      마녀에게 저주받음(다음 낮 토론 동안 채팅 불가)
 #   {-m::novote::uuid}     건달에게 협박받음(다음 낮 투표 불가)
 # 규칙 요약(ROLES.md 확정): 봉인된 사람은 입력 자체가 없다(mActCheck). 광인은 처리에서 제외. 접선은 보조 직업(스파이/마녀)이 마피아 직업을 고른 경우.
-#   주술은 그 대상을 겨냥한 다른 능력 중 무작위 1개 무효(시도는 탐정에게 남음). 치료>수호>군인 순. 군인은 마피아/도둑 공격만 하나 막음(암살자/자경단 못 막음, 해석 - 확인 필요).
+#   주술은 그 대상을 겨냥한 다른 능력 중 무작위 1개 무효(시도는 탐정에게 남음). 치료>수호>군인 순. 군인은 마피아/도둑/자경단 공격만 하나 막음(암살자와 방화는 못 막음, 확정).
 #   치료한 군인을 공격해도 방어 소모. 도둑은 공격이 성립해 실제 사망자가 있을 때만 그 사망자의 직업을 훔침(군인에게 막혀도 1회 소모). 자경단은 시민 팀을 실제로 죽이면 자신도 사망.
 #   방화는 모든 것을 무시하고 기름에 젖은 사람을 전부 죽인다. 정보 계열은 밤 시작 직업 기준.
 # 미검증: 전체(서버 실행 불가).
@@ -112,7 +112,7 @@ function mResolve():
 		set {_blk} to 0
 		set {_hasblockable} to false
 		loop {_atk::%{_t}%::*}:
-			if mHas("mafia,thief", {_r::%loop-value%}) is true:
+			if mHas("mafia,thief,vigilante", {_r::%loop-value%}) is true:
 				set {_hasblockable} to true
 		if {-m::role::%{_t}%} is "soldier":
 			if {_hasblockable} is true:
@@ -140,7 +140,7 @@ function mResolve():
 			loop {_atk::%{_t}%::*}:
 				set {_ra} to {_r::%loop-value%}
 				if {_skipped} is false:
-					if mHas("mafia,thief", {_ra}) is true:
+					if mHas("mafia,thief,vigilante", {_ra}) is true:
 						set {_skipped} to true
 						add "blocked|%loop-value%|%{_t}%" to {-m::ev::*}
 						if {_ra} is "thief":
