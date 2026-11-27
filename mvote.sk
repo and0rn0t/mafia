@@ -134,6 +134,7 @@ function mTakePick(t: text, v: text) :: text:
 function mWinCheck() :: text:
 	# 광대가 투표로 당선됐으면 광대 승리(다른 판정보다 먼저)
 	if {-m::jwin} is set:
+		set {-m::winwhy} to "광대가 투표로 처형됨"
 		return "neutral:%{-m::jwin}%"
 	set {_w} to mWinBase()
 	if {_w} is not "":
@@ -154,6 +155,7 @@ function mWinBase() :: text:
 	set {_a} to 0
 	set {_m} to 0
 	set {_c} to 0
+	set {_ch} to 0
 	set {_nn} to 0
 	set {_thug} to false
 	loop {-m::players::*}:
@@ -167,6 +169,7 @@ function mWinBase() :: text:
 				add 1 to {_m}
 			else if {_tm} is "citizen":
 				add mWeight(loop-value) to {_c}
+				add 1 to {_ch}
 				if {-m::role::%loop-value%} is "thug":
 					set {_thug} to true
 			else if {_tm} is "neutral":
@@ -182,6 +185,7 @@ function mWinBase() :: text:
 		if {_m} is 0:
 			if {_c} is 0:
 				if {_nn} is 1:
+					set {-m::winwhy} to "중립 혼자 생존"
 					return "neutral:%{_last}%"
 		return ""
 	set {_mv} to {_m}
@@ -189,9 +193,17 @@ function mWinBase() :: text:
 	if {_thug} is true:
 		subtract 1 from {_mv}
 	if {_m} > 0:
-		if {_mv} > {_c}:
+		# 마피아 팀 표가 시민 팀 표 이상이면(같아도) 시민 팀이 표로 이길 수 없으니 마피아 팀 승리(확정)
+		if {_mv} >= {_c}:
+			set {-m::winwhy} to "마피아 팀 표 %{_mv}% ≥ 시민 팀 표 %{_c}%"
 			return "mafia"
+		# 마지막 1:1(마피아 팀 1명, 시민 팀 1명)은 표로 정한다: 시민 쪽 표가 더 많으면(정치인 2표, 건달 협박) 시민 팀 승리(확정)
+		if {_m} is 1:
+			if {_ch} is 1:
+				set {-m::winwhy} to "마지막 1:1, 시민 팀 표 %{_c}% > 마피아 팀 표 %{_mv}%"
+				return "citizen"
 		return ""
+	set {-m::winwhy} to "마피아 팀이 모두 사망"
 	return "citizen"
 
 # 사망자 없이 이만큼의 날(밤+낮)이 지나면 무승부. {mcfg::calm}, 기본 3
@@ -265,6 +277,10 @@ function mEnd(w: text):
 		set {_n} to mNameOf({_id})
 		set {_rn} to mRoleName({-m::role::%{_id}%})
 		mBc("&e중립 %{_rn}% &f%{_n}%&7 님이 승리했습니다.")
+	# 승리 이유(표 계산 등)를 같이 알려 준다(기록과 콘솔에도 남는다)
+	if {_w} is not "draw":
+		if {-m::winwhy} is set:
+			mBc("&8(승리 이유: %{-m::winwhy}%)")
 	mBc("&7최초 직업 공개")
 	loop {-m::players::*}:
 		set {_n} to mNameOf(loop-value)

@@ -431,6 +431,9 @@ function mStgBoard(w: text, win: texts, c: location):
 		set {_nid} to {_w}
 		replace all "neutral:" in {_nid} with ""
 		set {_t} to "&b&l중립 %mRoleName({-m::role::%{_nid}%})% 승리"
+	if {_w} is not "draw":
+		if {-m::winwhy} is set:
+			set {_t} to "%{_t}%|&8%{-m::winwhy}%"
 	set {_t} to "%{_t}%| "
 	loop {-m::players::*}:
 		set {_id} to loop-value

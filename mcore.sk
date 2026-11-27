@@ -263,6 +263,7 @@ function mReset():
 	delete {-m::diedsince}
 	delete {-m::drawwhy}
 	delete {-m::jwin}
+	delete {-m::winwhy}
 	delete {-m::alive::*}
 	delete {-m::role::*}
 	delete {-m::orig::*}
