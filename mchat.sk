@@ -25,6 +25,18 @@ function mChatMafia(p: player) :: boolean:
 		return true
 	return false
 
+# 받는 사람마다 따로 보낸다: 말한 사람 이름 옆에 받는 사람의 메모(mmemo.sk mMemoTag)를 붙인다. 원래 채팅은 받는 사람을 비워 보내지 않는다(콘솔에는 남음).
+function mChatSendTo(r: player, s: player, head: text, body: text, msg: text):
+	set {_sid} to "%uuid of {_s}%"
+	set {_nm} to "&f%name of {_s}%"
+	if mNum({_sid}) is not "":
+		set {_nm} to mNumName({_sid})
+	set {_tag} to mMemoTag("%uuid of {_r}%", {_sid})
+	if {_tag} is not "":
+		set {_nm} to "%{_nm}% %{_tag}%"
+	set {_pre} to colored "%{_head}%&7<%{_nm}%&7> %{_body}%"
+	send "%{_pre}%%{_msg}%" to {_r}
+
 on chat:
 	if mRunning() is not true:
 		stop
@@ -34,11 +46,12 @@ on chat:
 	set {_msg} to message
 	# 죽은 사람 및 관전자 채널
 	if mChatAlive({_p}) is not true:
-		clear chat recipients
 		loop all players:
 			if mChatAlive(loop-player) is not true:
-				add loop-player to chat recipients
-		set message to "&8[관전] &7%{_msg}%"
+				add loop-player to {_to::*}
+		clear chat recipients
+		loop {_to::*}:
+			mChatSendTo(loop-value, {_p}, "&8[관전] ", "&7", {_msg})
 		stop
 	# 밤: 마피아 팀만
 	if {_s} is "night" or "resolve":
@@ -46,14 +59,15 @@ on chat:
 			cancel event
 			send "&7밤에는 말할 수 없습니다." to {_p}
 			stop
-		clear chat recipients
 		loop all players:
 			if mChatMafia(loop-player) is true:
-				add loop-player to chat recipients
+				add loop-player to {_to::*}
 			# 사망자·관전자도 마피아 팀 대화를 본다(말은 못 섞는다)
 			else if mChatAlive(loop-player) is not true:
-				add loop-player to chat recipients
-		set message to "&c[마피아 팀] &f%{_msg}%"
+				add loop-player to {_to::*}
+		clear chat recipients
+		loop {_to::*}:
+			mChatSendTo(loop-value, {_p}, "&c[마피아 팀] ", "&f", {_msg})
 		stop
 	# 낮 토론: 마녀 저주
 	if {_s} is "day":
@@ -64,4 +78,4 @@ on chat:
 	# 생존자 대화는 생존자와 사망자·관전자 모두 본다(사망자·관전자의 말은 위의 관전 채널로만 간다)
 	clear chat recipients
 	loop all players:
-		add loop-player to chat recipients
+		mChatSendTo(loop-player, {_p}, "", "&f", {_msg})

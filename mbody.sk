@@ -25,6 +25,11 @@ import:
 	com.comphenix.protocol.events.ListenerOptions
 	com.comphenix.protocol.wrappers.PlayerInfoData
 	com.comphenix.protocol.wrappers.WrappedChatComponent
+	com.comphenix.protocol.wrappers.WrappedGameProfile
+	com.comphenix.protocol.wrappers.WrappedSignedProperty
+	java.util.EnumSet
+	java.util.UUID
+	java.lang.reflect.Array
 	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
 	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 	com.comphenix.protocol.wrappers.EnumWrappers$PlayerInfoAction as PIAction
@@ -110,8 +115,12 @@ function mBodyInfo(e: object):
 		if {_hasdn} is true:
 			if {_dn} is set:
 				set {_tag} to mMemoTag({_vs}, "%{_pid}%")
+				# 같은 패킷이 리스너를 두 번 지나가도 한 번만 붙인다(표시 앞의 보이지 않는 글자 U+200B 로 확인)
+				set {_dj} to {_dn}.getJson()
+				if {_dj} contains "​" or "​":
+					set {_tag} to ""
 				if {_tag} is not "":
-					set {_tj} to GsonComponentSerializer.gson().serialize(LegacyComponentSerializer.legacyAmpersand().deserialize(" %{_tag}%"))
+					set {_tj} to GsonComponentSerializer.gson().serialize(LegacyComponentSerializer.legacyAmpersand().deserialize("​ %{_tag}%"))
 					set {_ndn} to WrappedChatComponent.fromJson("[%{_dn}.getJson()%,%{_tj}%]")
 					set {_ch} to true
 		if {_ch} is true:
@@ -198,3 +207,86 @@ command /mreload:
 			delete {-umlistener}
 		send "&7패킷 리스너를 떼고 스크립트를 다시 불러옵니다..."
 		make console execute command "sk reload all"
+
+# ------------------------------------------------------------------ 내 탭 항목
+# 클라이언트는 자기 탭 항목의 게임 모드로 "내가 관전 중인지"를 판단해서, 자기 항목은 관전 그대로 둬야 연출 카메라가 안 깨진다.
+# 그래서 게임 중에는 진짜 내 항목을 내 탭에서만 숨기고(unlistPlayer, 정보는 남음), 똑같이 생긴 보통 항목(가짜 UUID, 내 스킨)을 내 탭에만 보여 준다.
+# 게임이 끝나면 되돌린다. 변수: {-mself::on::uuid}(가짜 항목을 보냈는지) {-mself::st::uuid}(마지막으로 보낸 이름)
+function mSelfFakeId(p: player) :: object:
+	set {_s} to "mafia-self-%uuid of {_p}%"
+	return UUID.nameUUIDFromBytes({_s}.getBytes())
+
+function mSelfJson(p: player) :: text:
+	set {_id} to "%uuid of {_p}%"
+	if mNum({_id}) is not "":
+		return mTabJson({_id}, name of {_p})
+	return "[{""text"":""%name of {_p}%"",""color"":""#aaaaaa""},{""text"":"" (관전)"",""color"":""#555555""}]"
+
+function mSelfTabSend(p: player, full: boolean):
+	set {_pm} to ProtocolLibrary.getProtocolManager()
+	set {_pk} to {_pm}.createPacket(PTServer.PLAYER_INFO)
+	if {_full} is true:
+		set {_acts} to EnumSet.of(PIAction.ADD_PLAYER, PIAction.UPDATE_LISTED, PIAction.UPDATE_DISPLAY_NAME, PIAction.UPDATE_GAME_MODE, PIAction.UPDATE_LIST_ORDER)
+	else:
+		set {_acts} to EnumSet.of(PIAction.UPDATE_DISPLAY_NAME, PIAction.UPDATE_LIST_ORDER)
+	{_pk}.getPlayerInfoActions().write(0, {_acts})
+	set {_fid} to mSelfFakeId({_p})
+	set {_gp} to new WrappedGameProfile({_fid}, name of {_p})
+	# 스킨: 닉네임 프로필(nick.sk)의 textures 를 그대로
+	set {_pp} to nickProfile({_p})
+	set {_arr} to {_pp}.getProperties().toArray()
+	set {_n} to Array.getLength({_arr})
+	set {_i} to 0
+	while {_i} < {_n}:
+		set {_pr} to Array.get({_arr}, {_i})
+		if {_pr}.getName() is "textures":
+			{_gp}.getProperties().put("textures", WrappedSignedProperty.fromValues("textures", {_pr}.getValue(), {_pr}.getSignature()))
+		add 1 to {_i}
+	set {_dn} to WrappedChatComponent.fromJson(mSelfJson({_p}))
+	set {_ord} to 0
+	set {_no} to mNum("%uuid of {_p}%")
+	if {_no} is not "":
+		set {_ord} to 100 - ({_no} parsed as integer)
+	set {_list} to new ArrayList()
+	{_list}.add(new PlayerInfoData({_fid}, 0, true, PIGameMode.ADVENTURE, {_gp}, {_dn}, true, {_ord}, null))
+	set {_mods} to {_pk}.getPlayerInfoDataLists()
+	set {_idx} to 0
+	if {_mods}.size() >= 2:
+		set {_idx} to 1
+	{_mods}.write({_idx}, {_list})
+	{_pm}.sendServerPacket({_p}, {_pk})
+
+function mSelfTabRemove(p: player):
+	set {_pm} to ProtocolLibrary.getProtocolManager()
+	set {_pk} to {_pm}.createPacket(PTServer.PLAYER_INFO_REMOVE)
+	set {_list} to new ArrayList()
+	{_list}.add(mSelfFakeId({_p}))
+	{_pk}.getUUIDLists().write(0, {_list})
+	{_pm}.sendServerPacket({_p}, {_pk})
+
+every second:
+	if {-ms::on} is true:
+		loop all players:
+			set {_p} to loop-player
+			set {_id} to "%uuid of {_p}%"
+			if {-ms::cam::%{_id}%} is set:
+				set {_j} to mSelfJson({_p})
+				if {-mself::on::%{_id}%} is not set:
+					{_p}.unlistPlayer({_p})
+					mSelfTabSend({_p}, true)
+					set {-mself::on::%{_id}%} to true
+					set {-mself::st::%{_id}%} to {_j}
+				else if {-mself::st::%{_id}%} is not {_j}:
+					mSelfTabSend({_p}, false)
+					set {-mself::st::%{_id}%} to {_j}
+		stop
+	loop indices of {-mself::on::*}:
+		set {_p} to mPlayerOf(loop-value)
+		if {_p} is set:
+			{_p}.listPlayer({_p})
+			mSelfTabRemove({_p})
+	delete {-mself::*}
+
+on quit:
+	delete {-mself::on::%uuid of player%}
+	delete {-mself::st::%uuid of player%}
