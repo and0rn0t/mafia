@@ -15,7 +15,8 @@
 #   guardonly 공격이 없던 밤의 수호: 방패를 든 익명 더미가 들어와 대상 옆에 선다.
 #   shaman    주술로 능력이 무효가 된 사람: 자기 더미가 대상 방에 들어와 섰다가 사악한 마법사 주문 소리 → 팅! → 걸어 나간다.
 #   oil       기름 뿌리기: 도약의 물약을 든 익명 더미가 들어와 마녀 웃음 → 물 뿌리는 소리 → 대상 더미에 노란 발광 → 걸어 나간다.
-# 보는 사람: kill/burn = 방문자 본인(익명이어도 본인은 봄), 대상, 수호자 / guardonly = 수호자, 대상 / shaman = 무효가 된 사람 / oil = 방화범, 대상.
+#   leave     집 나서기(공통): 이 밤에 능력을 쓴 사람은 자기가 한 일 장면 앞에 먼저, 자기 방에서 자기 더미가 의자에서 일어나 문으로 나가는 장면을 본다.
+# 보는 사람: leave = 능력을 쓴 본인 / kill/burn = 방문자 본인(익명이어도 본인은 봄), 대상, 수호자 / guardonly = 수호자, 대상 / shaman = 무효가 된 사람 / oil = 방화범, 대상.
 #   대상은 자기에게 온 kill/burn 장면 중 첫 번째만 본다(마피아 여럿이 같은 사람을 노린 경우).
 # 기름 발광: 기름에 젖은 생존자의 원탁 더미와 밤 방 더미는 모두에게 노란색으로 빛난다(팀 mafia_oil). 죽으면 더미가 해골로 바뀌어 사라진다.
 # 장소 키(mbuild.sk 의 mBSaveSpots): fxdoor(문 안쪽, 방문자가 나타나는 자리) fxdoorblock(문 아래 블록) fxvisit(대상 앞에 서는 자리)
@@ -215,6 +216,8 @@ function mFxLen(spec: text) :: number:
 		return 102
 	if {_k} is "oil":
 		return 97
+	if {_k} is "leave":
+		return 60
 	return 20
 
 function mFxAddA(vid: text, spec: text):
@@ -249,6 +252,12 @@ function mSceneResolve() :: number:
 			if {_t} is set:
 				if {_nul::%loop-value%} is not true:
 					set {_gof::%{_t}%} to loop-value
+	# 집 나서기: 이 밤에 능력을 쓴 사람(대상을 골랐거나 점화)은 자기가 한 일 장면들 앞에 먼저 자기 방에서 나가는 장면을 본다
+	loop {-m::players::*}:
+		if {-m::act::%loop-value%} is set:
+			mFxAddA(loop-value, "leave|-|%loop-value%|-|leave|0")
+		else if {-m::actmode::%loop-value%} is "ignite":
+			mFxAddA(loop-value, "leave|-|%loop-value%|-|leave|0")
 	# 사건 → 장면
 	loop {-m::ev::*}:
 		set {_e::*} to split loop-value at "|"
@@ -443,6 +452,24 @@ function mFxTick(vid: text, t: number):
 	set {_visit} to mLocLoad("fxvisit")
 	set {_gpos} to mLocLoad("fxguard")
 	set {_room} to mLocLoad("room")
+	# ---- 집 나서기: 자기 더미가 의자에서 일어나 문으로 걸어가 나간다
+	if {_k} is "leave":
+		set {_me} to {-msc::%{_vid}%::vic}
+		set {_st} to new Location({_room}.getWorld(), {_room}.getX() - 1.2, {_door}.getY(), {_room}.getZ())
+		if {_t} is 6:
+			{_me}.leaveVehicle()
+			{_me}.teleport({_st})
+			mFxFace({_me}, {_door})
+		if {_t} >= 10:
+			if {_t} <= 42:
+				mFxWalk({_me}, {_st}, {_door}, ({_t} - 10) / 32)
+		if {_t} is 36:
+			mFxDoor({_vid}, true)
+		if {_t} is 46:
+			{_me}.remove()
+		if {_t} is 52:
+			mFxDoor({_vid}, false)
+		stop
 	# ---- 수호자 입장(앞 30틱): 방패를 든 익명 더미가 대상 옆(문 반대쪽)에 선다
 	set {_u} to {_t}
 	if {_g} is not "-":
