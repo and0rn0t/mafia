@@ -1,11 +1,26 @@
 # [maudio_data.sk] tools/BuildPack.java 가 만든 파일(손으로 고치지 말 것). 리소스팩 소리 키, 길이(초), 팩 SHA-1.
-# 아직 ogg 를 넣지 않아 소리가 없다(배경음 꺼짐). ogg 를 준비한 뒤 BuildPack 을 실행하면 이 파일이 바뀐다.
 
 function mAuKeys() :: texts:
-	return {_none::*}
+	return "day1", "day2", "day3", "day4", "day5", "day6", "day7", "vote"
 
 function mAuLen(k: text) :: number:
+	if {_k} is "day1":
+		return 109
+	if {_k} is "day2":
+		return 103
+	if {_k} is "day3":
+		return 67
+	if {_k} is "day4":
+		return 177
+	if {_k} is "day5":
+		return 105
+	if {_k} is "day6":
+		return 157
+	if {_k} is "day7":
+		return 99
+	if {_k} is "vote":
+		return 34
 	return 0
 
 function mAuSha1() :: text:
-	return ""
+	return "1685a61140cbf42e5cb4b5f951947bd06d031743"
