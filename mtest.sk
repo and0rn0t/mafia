@@ -8,6 +8,7 @@
 #   /mtest kill <이름>          그 참가자를 바로 사망 처리한다(승패 판정은 다음 단계 끝에서)
 #   /mtest auto                내 입력도 봇처럼 자동으로 할지 켜고 끈다
 #   /mtest ai <이름>            그 봇이 아는 것과 의심 점수를 본다
+#   /mtest llm url|key|model|on|off|test|status   봇 말하기 AI(OpenAI 호환 API) 설정. 아래 "봇 말하기: AI(LLM) 연결"
 #   /mtest stop                게임을 끝내고 로비로(= /mstop)
 # 봇 동작(규칙 기반 AI, 아래 "봇 AI"): 밤·투표 시간 중 무작위 시점에 직업과 아는 것·의심 점수로 판단해 능력을 쓰고 투표한다.
 #   낮에는 말도 한다(경찰 결과 밝히기, 의심 가는 사람 말하기, 고발당하면 해명, 마피아는 거짓 고발·거짓 경찰 주장). 사람 채팅의 고발/변호도 듣는다.
@@ -32,6 +33,15 @@ import:
 	com.comphenix.protocol.wrappers.WrappedChatComponent
 	com.comphenix.protocol.wrappers.EnumWrappers$PlayerInfoAction as MtPIA
 	com.comphenix.protocol.wrappers.EnumWrappers$NativeGameMode as MtGM
+	java.net.URI
+	java.time.Duration
+	java.net.http.HttpClient
+	java.net.http.HttpRequest
+	java.net.http.HttpRequest$BodyPublishers as HBodyPub
+	java.net.http.HttpResponse$BodyHandlers as HBodyHand
+	com.google.gson.JsonObject
+	com.google.gson.JsonArray
+	com.google.gson.JsonParser
 
 # mTestBots, mTestName, mIsBot(게임 코드가 부르는 것)은 mcore.sk 에 있다(이 파일을 빼도 게임이 돌게).
 
@@ -322,7 +332,7 @@ function mTestVote(id: text):
 		# 가끔 누구 찍었는지 말한다
 		if mIsBot({_id}) is true:
 			if chance of 25%:
-				mBotSay({_id}, mBotFill(mBotLine("vote"), {_best}, "", ""))
+				mBotSpeak({_id}, "vote", {_best}, "", "")
 
 # 테러리스트 봇의 길동무: 아는 마피아 → 가장 의심
 function mTestTake(id: text):
@@ -519,7 +529,7 @@ function mBotSayQueued(b: text):
 	if {_t} is not "":
 		if {-m::alive::%{_t}%} is not true:
 			stop
-	mBotSay({_b}, mBotFill(mBotLine({_f::1}), {_t}, {_u}, {_r}))
+	mBotSpeak({_b}, {_f::1}, {_t}, {_u}, {_r})
 
 # 말한 사람 s 가 t 를 고발(kind "mafia") 또는 변호(kind "town")했다. 봇들이 받아들인다
 function mBotClaim(s: text, t: text, kind: text):
@@ -623,7 +633,7 @@ function mBotTalk(b: text):
 		set {_o} to {-mt::conflict::%{_b}%}
 		delete {-mt::conflict::%{_b}%}
 		if {-m::alive::%{_o}%} is true:
-			mBotSay({_b}, mBotFill(mBotLine("real_vs_fake"), {_o}, "", {_role}))
+			mBotSpeak({_b}, "real_vs_fake", {_o}, "", {_role})
 			stop
 	# 고발당했으면 해명
 	if {-mt::defend::%{_b}%} is set:
@@ -632,14 +642,14 @@ function mBotTalk(b: text):
 		if mBotEvilSide({_b}) is true:
 			if chance of 45%:
 				mBotSetClaim({_b}, "police")
-				mBotSay({_b}, mBotFill(mBotLine("fake_police"), {_s}, "", ""))
+				mBotSpeak({_b}, "fake_police", {_s}, "", "")
 				stop
 		if {_role} is "doctor" or "police" or "soldier" or "reporter" or "detective" or "politician":
 			if chance of 70%:
 				mBotSetClaim({_b}, {_role})
-				mBotSay({_b}, mBotFill(mBotLine("defend_role"), {_s}, "", {_role}))
+				mBotSpeak({_b}, "defend_role", {_s}, "", {_role})
 				stop
-		mBotSay({_b}, mBotFill(mBotLine("defend"), {_s}, "", ""))
+		mBotSpeak({_b}, "defend", {_s}, "", "")
 		stop
 	# 경찰: 지난 밤 결과를 밝힌다(하루 한 번)
 	if {_role} is "police":
@@ -649,11 +659,11 @@ function mBotTalk(b: text):
 				set {-mt::told::%{_b}%::%{-m::day}%} to true
 				if mBotK({_b}, {_t}) is "mafia":
 					mBotSetClaim({_b}, "police")
-					mBotSay({_b}, mBotFill(mBotLine("police_mafia"), {_t}, "", ""))
+					mBotSpeak({_b}, "police_mafia", {_t}, "", "")
 					stop
 				if chance of 50%:
 					mBotSetClaim({_b}, "police")
-					mBotSay({_b}, mBotFill(mBotLine("police_town"), {_t}, "", ""))
+					mBotSpeak({_b}, "police_town", {_t}, "", "")
 					stop
 	# 마피아 팀: 가끔 시민을 몰아간다
 	if mBotEvilSide({_b}) is true:
@@ -665,15 +675,15 @@ function mBotTalk(b: text):
 			if size of {_town::*} > 0:
 				set {_t} to mBotBest({_b}, {_town::*}, "threat")
 				if {_t} is not "":
-					mBotSay({_b}, mBotFill(mBotLine("mafia_push"), {_t}, "", ""))
+					mBotSpeak({_b}, "mafia_push", {_t}, "", "")
 					stop
 		if chance of 30%:
-			mBotSay({_b}, mBotLine("idle"))
+			mBotSpeak({_b}, "idle", "", "", "")
 		stop
 	# 광대: 일부러 수상하게
 	if {_role} is "jester":
 		if chance of 50%:
-			mBotSay({_b}, mBotLine("jester"))
+			mBotSpeak({_b}, "jester", "", "", "")
 		stop
 	# 그 밖: 가장 의심 가는 사람을 말하거나, 할 말이 없으면 가볍게
 	set {_best} to ""
@@ -686,10 +696,256 @@ function mBotTalk(b: text):
 					set {_best} to loop-value
 	if {_best} is not "":
 		if chance of 60%:
-			mBotSay({_b}, mBotFill(mBotLine("accuse"), {_best}, "", ""))
+			mBotSpeak({_b}, "accuse", {_best}, "", "")
 			stop
 	if chance of 30%:
-		mBotSay({_b}, mBotLine("idle"))
+		mBotSpeak({_b}, "idle", "", "", "")
+
+
+# ------------------------------------------------------------------ 봇 말하기: AI(LLM) 연결
+# 행동(밤 능력, 투표)은 위의 규칙이 정하고, 말은 AI 가 만든다. OpenAI 호환 채팅 API(POST .../v1/chat/completions)면 어느 서비스든 된다
+#   (예: Groq, OpenRouter 무료 모델, Google Gemini 의 OpenAI 호환 주소, 내 PC 의 Ollama http://localhost:11434/v1/chat/completions).
+# 설정(관리자): /mtest llm url <주소> | key <키> | model <모델> | on | off | status | test
+#   {mcfg::llm::url} {mcfg::llm::key} {mcfg::llm::model} {mcfg::llm::on}. 키는 서버 변수 파일에 그대로 저장되고, 화면에는 보여 주지 않는다.
+# 흐름: mBotSpeak(봇, 의도, 대상...) → AI 가 켜져 있으면 요청을 비동기로 보내고(게임이 멈추지 않음) 1초마다 답이 왔는지 본다 → 한 줄로 다듬어 mBotSay.
+#   AI 가 꺼져 있거나, 12초 안에 답이 없거나, 실패하면 정해 둔 문장(mBotLine)으로 말한다.
+# 보내는 것: 봇의 진짜 직업·팀(마피아 팀이면 팀원), 아는 것, 의심 순위, 주장한 직업, 살아 있는 사람 번호, 최근 공개 채팅 12줄, 이번에 할 말의 의도.
+#   (다른 사람에게 알려지면 안 되는 정보는 그 봇 자신의 것만 넣는다. 사람 플레이어의 채팅도 최근 공개 채팅으로 함께 보내진다.)
+# 변수: {-mtllm::f::봇}(답을 기다리는 요청) {-mtllm::fb::봇}(실패하면 대신 할 말) {-mtllm::t::봇}(보낸 초) {-mtllm::err}(마지막 오류, status 에 표시)
+
+function mBotLlmOn() :: boolean:
+	if {mcfg::llm::on} is not true:
+		return false
+	if {mcfg::llm::url} is not set:
+		return false
+	if {mcfg::llm::model} is not set:
+		return false
+	return true
+
+# 의도 → AI 에게 줄 지시
+function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
+	set {_tn} to ""
+	set {_un} to ""
+	set {_rn} to ""
+	if {_t} is not "":
+		set {_tn} to "%mNum({_t})%번 %mNameOf({_t})%"
+	if {_u} is not "":
+		set {_un} to "%mNum({_u})%번 %mNameOf({_u})%"
+	if {_r} is not "":
+		set {_rn} to mRoleName({_r})
+	if {_kind} is "police_mafia":
+		return "너는 경찰이다. 어젯밤 조사해 보니 %{_tn}% 이(가) 마피아였다고 모두에게 밝혀라."
+	if {_kind} is "police_town":
+		return "너는 경찰이다. 어젯밤 조사한 %{_tn}% 은(는) 마피아가 아니었다고 밝혀라."
+	if {_kind} is "accuse":
+		return "%{_tn}% 이(가) 가장 수상하다고 의심을 말해라. 지금까지 채팅에서 근거를 짚어도 좋다."
+	if {_kind} is "mafia_push":
+		return "너는 마피아 팀이다(절대 밝히지 마라). 시민인 %{_tn}% 에게 의심을 돌려라. 자연스럽게."
+	if {_kind} is "defend_role":
+		return "%{_tn}% 이(가) 너를 마피아로 몰았다. 네 직업 %{_rn}% 을(를) 밝히며 해명해라."
+	if {_kind} is "defend":
+		return "%{_tn}% 이(가) 너를 마피아로 몰았다. 억울함을 말하고 해명해라."
+	if {_kind} is "fake_police":
+		return "너는 마피아 팀이다(절대 밝히지 마라). %{_tn}% 이(가) 너를 몰았다. 네가 경찰인 척하며 오히려 %{_tn}% 이(가) 마피아라고 주장해라."
+	if {_kind} is "agree":
+		return "%{_tn}% 이(가) 수상하다는 말에 동의해라."
+	if {_kind} is "conflict":
+		return "%{_tn}% 와(과) %{_un}% 가 둘 다 %{_rn}% 이라고 주장했다. 둘 중 하나는 거짓말이라고 짚어라."
+	if {_kind} is "real_vs_fake":
+		return "너는 진짜 %{_rn}% 이다. %{_tn}% 이(가) %{_rn}% 을(를) 사칭하고 있다고 반박해라."
+	if {_kind} is "jester":
+		return "너는 광대다(밝히지 마라). 투표로 처형당해야 이긴다. 일부러 살짝 수상하게, 장난스럽게 말해라."
+	if {_kind} is "vote":
+		return "방금 %{_tn}% 에게 투표했다고 짧게 말해라."
+	return "지금 상황에 맞게 가볍게 한마디 해라(누가 경찰인지 묻거나, 생각을 말하거나)."
+
+# 봇이 아는 상황(시스템 지시)
+function mBotCtx(b: text) :: text:
+	set {_r} to {-m::role::%{_b}%}
+	set {_shown} to mActRole({_b})
+	set {_c} to "너는 한국어 채팅으로 하는 마피아 게임(마인크래프트)의 참가자 %mNum({_b})%번 %mNameOf({_b})% 이다. 지금 %{-m::day}%일차 낮이다."
+	set {_c} to "%{_c}% 네 진짜 직업은 %mRoleName({_shown})% 이다."
+	if mBotEvilSide({_b}) is true:
+		loop {-m::players::*}:
+			if loop-value is not {_b}:
+				if {-m::team::%loop-value%} is "mafia":
+					add "%mNum(loop-value)%번 %mNameOf(loop-value)%(%mRoleName({-m::role::%loop-value%})%)" to {_mates::*}
+		set {_c} to "%{_c}% 너는 마피아 팀이다. 절대로 마피아라고 밝히지 말고 시민인 척해라."
+		if size of {_mates::*} > 0:
+			set {_c} to "%{_c}% 같은 팀: %{_mates::*}%. 팀원을 감싸되 티 나지 않게."
+	if {-mt::claim::%{_b}%} is set:
+		set {_c} to "%{_c}% 너는 사람들에게 %mRoleName({-mt::claim::%{_b}%})% 이라고 말해 두었다. 말이 엇갈리지 않게."
+	loop {-m::players::*}:
+		set {_t} to loop-value
+		if {_t} is not {_b}:
+			set {_k} to mBotK({_b}, {_t})
+			if {_k} is "mafia":
+				add "%mNum({_t})%번 마피아 확인" to {_kn::*}
+			else if {_k} is "town":
+				add "%mNum({_t})%번 시민 확인" to {_kn::*}
+			if {-m::alive::%{_t}%} is true:
+				add "%mNum({_t})%번 %mNameOf({_t})%" to {_al::*}
+	if size of {_kn::*} > 0:
+		set {_c} to "%{_c}% 네가 아는 것: %{_kn::*}%."
+	set {_c} to "%{_c}% 살아 있는 다른 사람: %{_al::*}%."
+	set {_c} to "%{_c}% 규칙: 밤에 마피아가 한 명을 죽이고, 낮에 토론한 뒤 투표로 한 명을 처형한다. 경찰은 밤마다 한 명이 마피아인지 조사한다."
+	set {_c} to "%{_c}% 말하는 법: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 써라. 따옴표, 이름표, 설명, 이모지 없이. 사람을 가리킬 때는 번호를 쓴다(예: 3번). 게임 밖 이야기는 하지 마라."
+	return {_c}
+
+# 최근 공개 채팅(기록의 전체 알림·채팅) 12줄
+function mBotRecent() :: text:
+	set {_n} to size of {-m::log::*}
+	set {_from} to {_n} - 11
+	if {_from} < 1:
+		set {_from} to 1
+	set {_out} to ""
+	set {_i} to 0
+	loop {-m::log::*}:
+		add 1 to {_i}
+		if {_i} >= {_from}:
+			set {_e::*} to split loop-value at "|"
+			if {_e::1} is "*":
+				set {_l} to loop-value
+				replace first "*|" in {_l} with ""
+				replace first "|" in {_l} with " "
+				set {_l} to {_l}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+				set {_out} to "%{_out}%%{_l}%%nl%"
+	return {_out}
+
+# AI 에게 요청을 보낸다(비동기). 돌려주는 값: 보냈으면 true
+function mBotLlmSend(b: text, intent: text) :: boolean:
+	set {_root} to new JsonObject()
+	{_root}.addProperty("model", {mcfg::llm::model})
+	{_root}.addProperty("max_tokens", 80)
+	{_root}.addProperty("temperature", 0.9)
+	set {_msgs} to new JsonArray()
+	set {_sys} to new JsonObject()
+	{_sys}.addProperty("role", "system")
+	{_sys}.addProperty("content", mBotCtx({_b}))
+	{_msgs}.add({_sys})
+	set {_usr} to new JsonObject()
+	{_usr}.addProperty("role", "user")
+	{_usr}.addProperty("content", "최근 채팅:%nl%%mBotRecent()%%nl%이번에 할 말: %{_intent}%%nl%한 문장만 답해라.")
+	{_msgs}.add({_usr})
+	{_root}.add("messages", {_msgs})
+	set {_rb} to HttpRequest.newBuilder(URI.create({mcfg::llm::url}))
+	{_rb}.timeout(Duration.ofSeconds(12))
+	{_rb}.header("Content-Type", "application/json")
+	if {mcfg::llm::key} is set:
+		{_rb}.header("Authorization", "Bearer %{mcfg::llm::key}%")
+	{_rb}.POST(HBodyPub.ofString({_root}.toString()))
+	if {-mtllm::client} is not set:
+		set {-mtllm::client} to HttpClient.newHttpClient()
+	set {-mtllm::f::%{_b}%} to {-mtllm::client}.sendAsync({_rb}.build(), HBodyHand.ofString())
+	set {-mtllm::t::%{_b}%} to {-mau::sec}
+	return true
+
+# 답 꺼내기: 첫 번째 답의 내용 한 줄(실패하면 "")
+function mBotLlmText(body: text) :: text:
+	set {_o} to JsonParser.parseString({_body}).getAsJsonObject()
+	if {_o}.has("choices") is false:
+		set {-mtllm::err} to "답에 choices 가 없음: %{_body}%"
+		return ""
+	set {_m} to {_o}.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message")
+	set {_s} to {_m}.get("content").getAsString()
+	# 한 줄로, 색 코드·따옴표·이름표를 빼고 60자까지
+	set {_s} to {_s}.replaceAll("[\r\n]+", " ").replaceAll("[&§]", "").trim()
+	set {_s} to {_s}.replaceAll("^[""'“”]+|[""'“”]+$", "")
+	set {_s} to {_s}.replaceAll("^<[^>]*>\s*", "")
+	if {_s}.length() > 60:
+		set {_s} to {_s}.substring(0, 60)
+	return {_s}
+
+# 말하기: AI 가 켜져 있으면 요청, 아니면(또는 이미 기다리는 중이면) 정해 둔 문장
+function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	set {_fb} to mBotFill(mBotLine({_kind}), {_t}, {_u}, {_r})
+	if mBotLlmOn() is true:
+		if {-mtllm::f::%{_b}%} is not set:
+			set {-mtllm::fb::%{_b}%} to {_fb}
+			mBotLlmSend({_b}, mBotIntent({_kind}, {_t}, {_u}, {_r}))
+			stop
+	if {_fb} is not "":
+		mBotSay({_b}, {_fb})
+
+# 1초마다: 답이 온 요청을 꺼내 말한다
+function mBotLlmPoll():
+	loop indices of {-mtllm::f::*}:
+		set {_b} to loop-value
+		set {_f} to {-mtllm::f::%{_b}%}
+		set {_say} to ""
+		set {_done} to false
+		if {_f}.isDone() is true:
+			set {_done} to true
+			if {_f}.isCompletedExceptionally() is true:
+				set {-mtllm::err} to "요청 실패(주소나 네트워크를 확인)"
+			else:
+				set {_res} to {_f}.get()
+				if {_res}.statusCode() is 200:
+					set {_say} to mBotLlmText({_res}.body())
+				else:
+					set {-mtllm::err} to "HTTP %{_res}.statusCode()%: %{_res}.body()%"
+		else if {-mau::sec} - {-mtllm::t::%{_b}%} > 12:
+			set {_done} to true
+			{_f}.cancel(true)
+			set {-mtllm::err} to "12초 안에 답이 없음"
+		if {_done} is true:
+			set {_fb} to {-mtllm::fb::%{_b}%}
+			delete {-mtllm::f::%{_b}%}
+			delete {-mtllm::fb::%{_b}%}
+			delete {-mtllm::t::%{_b}%}
+			if mState() is "day" or "vote":
+				if {_say} is not "":
+					mBotSay({_b}, {_say})
+				else if {_fb} is set:
+					if {_fb} is not "":
+						mBotSay({_b}, {_fb})
+
+every second:
+	if size of {-mtllm::f::*} > 0:
+		mBotLlmPoll()
+
+# 설정 시험: 짧은 요청 하나를 보내 답을 보여 준다
+function mBotLlmTest(p: player):
+	set {_root} to new JsonObject()
+	{_root}.addProperty("model", {mcfg::llm::model})
+	{_root}.addProperty("max_tokens", 40)
+	set {_msgs} to new JsonArray()
+	set {_usr} to new JsonObject()
+	{_usr}.addProperty("role", "user")
+	{_usr}.addProperty("content", "마피아 게임 참가자처럼 한국어로 짧게 인사해 줘.")
+	{_msgs}.add({_usr})
+	{_root}.add("messages", {_msgs})
+	set {_rb} to HttpRequest.newBuilder(URI.create({mcfg::llm::url}))
+	{_rb}.timeout(Duration.ofSeconds(12))
+	{_rb}.header("Content-Type", "application/json")
+	if {mcfg::llm::key} is set:
+		{_rb}.header("Authorization", "Bearer %{mcfg::llm::key}%")
+	{_rb}.POST(HBodyPub.ofString({_root}.toString()))
+	if {-mtllm::client} is not set:
+		set {-mtllm::client} to HttpClient.newHttpClient()
+	set {_f} to {-mtllm::client}.sendAsync({_rb}.build(), HBodyHand.ofString())
+	send "&7AI 시험 요청을 보냈습니다. 답을 기다리는 중..." to {_p}
+	set {_w} to 0
+	while {_f}.isDone() is false:
+		wait 10 ticks
+		add 1 to {_w}
+		if {_w} > 26:
+			{_f}.cancel(true)
+			send "&c13초 안에 답이 없습니다." to {_p}
+			stop
+	if {_f}.isCompletedExceptionally() is true:
+		send "&c요청 실패: 주소나 네트워크를 확인해 주세요." to {_p}
+		stop
+	set {_res} to {_f}.get()
+	if {_res}.statusCode() is not 200:
+		set {_bd} to {_res}.body()
+		if {_bd}.length() > 200:
+			set {_bd} to {_bd}.substring(0, 200)
+		send "&cHTTP %{_res}.statusCode()%: &7%{_bd}%" to {_p}
+		stop
+	send "&a답: &f%mBotLlmText({_res}.body())%" to {_p}
 
 # 사람 채팅 듣기(살아 있는 참가자가 낮·투표 시간에 한 말)
 on chat:
@@ -880,7 +1136,7 @@ command /mtest [<text>] [<text>] [<text>]:
 		set {_me} to "%uuid of player%"
 		set {_a} to arg-1
 		if {_a} is not set:
-			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | skip | kill <이름> | auto | stop"
+			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
 			stop
 		if {_a} is "start":
 			if mState() is not "lobby":
@@ -919,6 +1175,70 @@ command /mtest [<text>] [<text>] [<text>]:
 				send "&c시작하지 못했습니다. (위의 이유를 확인해 주세요)"
 				stop
 			send "&6[시험] &7봇 %{_n}%명과 게임을 시작했습니다. /mtest info 로 직업을 볼 수 있습니다."
+			stop
+		# AI(말하기) 설정: 게임 중이 아니어도 된다
+		if {_a} is "llm":
+			set {_k} to arg-2
+			if {_k} is "url":
+				if arg-3 is not set:
+					send "&7예: /mtest llm url https://api.groq.com/openai/v1/chat/completions  (Ollama: http://localhost:11434/v1/chat/completions)"
+					stop
+				set {mcfg::llm::url} to arg-3
+				send "&aAI 주소를 정했습니다."
+				stop
+			if {_k} is "key":
+				if arg-3 is not set:
+					delete {mcfg::llm::key}
+					send "&7AI 키를 지웠습니다(키가 필요 없는 Ollama 등)."
+					stop
+				set {mcfg::llm::key} to arg-3
+				send "&aAI 키를 저장했습니다. &7(화면에는 다시 보여 주지 않습니다)"
+				stop
+			if {_k} is "model":
+				if arg-3 is not set:
+					send "&7예: /mtest llm model llama-3.1-8b-instant"
+					stop
+				set {mcfg::llm::model} to arg-3
+				send "&aAI 모델을 정했습니다: &f%arg-3%"
+				stop
+			if {_k} is "on":
+				set {mcfg::llm::on} to true
+				send "&a봇 말하기를 AI 로 합니다."
+				if mBotLlmOn() is false:
+					send "&e아직 주소나 모델이 없어 정해 둔 문장으로 말합니다."
+				stop
+			if {_k} is "off":
+				delete {mcfg::llm::on}
+				send "&7봇 말하기를 정해 둔 문장으로 합니다."
+				stop
+			if {_k} is "test":
+				if {mcfg::llm::url} is not set:
+					send "&c먼저 /mtest llm url <주소> 와 model <모델> 을 정해 주세요."
+					stop
+				if {mcfg::llm::model} is not set:
+					send "&c먼저 /mtest llm model <모델> 을 정해 주세요."
+					stop
+				mBotLlmTest(player)
+				stop
+			set {_st} to "&c꺼짐"
+			if {mcfg::llm::on} is true:
+				set {_st} to "&a켜짐"
+			set {_ky} to "&c없음"
+			if {mcfg::llm::key} is set:
+				set {_ky} to "&a있음"
+			set {_ur} to "없음"
+			if {mcfg::llm::url} is set:
+				set {_ur} to {mcfg::llm::url}
+			set {_mo} to "없음"
+			if {mcfg::llm::model} is set:
+				set {_mo} to {mcfg::llm::model}
+			send "&6[AI] &7상태 %{_st}% &7주소 &f%{_ur}% &7모델 &f%{_mo}% &7키 %{_ky}%"
+			if {-mtllm::err} is set:
+				set {_er} to {-mtllm::err}
+				if {_er}.length() > 150:
+					set {_er} to {_er}.substring(0, 150)
+				send "&7마지막 오류: &c%{_er}%"
+			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | on | off | test | status"
 			stop
 		if {_a} is "stop":
 			mToLobby()
@@ -1030,4 +1350,4 @@ command /mtest [<text>] [<text>] [<text>]:
 			if {_tp} is set:
 				mRoleReveal({_tp})
 			stop
-		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | skip | kill <이름> | auto | stop"
+		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
