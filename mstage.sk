@@ -315,7 +315,7 @@ function mStgLineup(w: text):
 		set {_l} to new Location({_lw}, {_lx}, {_ly}, {_lz}, {_yaw}, 0)
 		set {_m} to {_l}.getWorld().spawnEntity({_l}, EntityType.MANNEQUIN)
 		mScDummySetup({_m}, loop-value)
-		{_m}.setCustomNameVisible(true)
+		mScNameTag({_m}, loop-value)
 		{_m}.setRotation({_yaw}, 0)
 	# 카메라: 줄 앞 5칸, 눈높이에서 줄 가운데를 본다
 	set {_d} to 5 + {_n} * 0.3

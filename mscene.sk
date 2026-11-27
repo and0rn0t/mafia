@@ -54,6 +54,7 @@ import:
 	org.bukkit.entity.Pose
 	org.bukkit.entity.Mannequin
 	org.bukkit.util.Vector
+	java.lang.reflect.Array
 	org.bukkit.event.player.PlayerMoveEvent
 	org.bukkit.event.player.PlayerInputEvent
 	com.destroystokyo.paper.event.player.PlayerStopSpectatingEntityEvent
@@ -140,8 +141,25 @@ function mScDummySetup(m: object, owner: text):
 
 # 마네킹의 스킨과 이름을 그 참가자로 바꾼다(접속 중일 때만 스킨을 가져온다)
 # 마네킹용 프로필: nick.sk 의 nickProfile(닉을 쓰면 가짜 UUID·가짜 스킨, 아니면 원래 프로필)
+# 이름·UUID 는 빼고 스킨(textures 속성)만 담는다: 레이더 모드 등이 엔티티 정보에서 닉네임을 읽지 못하게.
 function mScProfOf(p: player) :: object:
-	return ResolvableProfile.resolvableProfile(nickProfile({_p}))
+	set {_pp} to nickProfile({_p})
+	set {_b} to ResolvableProfile.resolvableProfile()
+	set {_arr} to {_pp}.getProperties().toArray()
+	set {_n} to Array.getLength({_arr})
+	set {_i} to 0
+	while {_i} < {_n}:
+		set {_pr} to Array.get({_arr}, {_i})
+		if {_pr}.getName() is "textures":
+			{_b}.addProperty({_pr})
+		add 1 to {_i}
+	return {_b}.build()
+
+# 이름표가 필요한 더미만 이름을 넣는다(지금은 승리 라인업만). 나머지 더미에는 이름 데이터 자체가 없다.
+function mScNameTag(m: object, owner: text):
+	set {_n} to mNameOf({_owner})
+	{_m}.customName(Component.text({_n}))
+	{_m}.setCustomNameVisible(true)
 
 function mScSkin(m: object, owner: text):
 	# 닉네임(nick.sk) 사용자는 가짜 프로필로(진짜 UUID/스킨 노출 방지). 게임 시작 때 저장한 것을 우선 쓴다(나가도 같은 스킨).
@@ -154,9 +172,7 @@ function mScSkin(m: object, owner: text):
 		{_m}.setProfile({_rp})
 	else:
 		{_m}.setProfile(Mannequin.defaultProfile())
-	set {_n} to mNameOf({_owner})
-	{_m}.customName(Component.text({_n}))
-	{_m}.setCustomNameVisible(true)
+	{_m}.setCustomNameVisible(false)
 
 # 이 엔티티를 viewer 한 사람에게만 보이게 한다
 function mScOnlyFor(e: object, viewer: text):
@@ -475,6 +491,8 @@ function mSceneStart():
 		broadcast "&6[마피아] &7연출 장소가 정해지지 않아 연출 없이 진행합니다. (&f%mSceneMissing()%&7)"
 		stop
 	set {-ms::on} to true
+	# 본체를 서로에게 다시 보내게 해서 생성 패킷이 막히게 한다(mbody.sk, 레이더에 본체 위치가 안 잡히게)
+	mBodyRefresh()
 	set {-ms::seatn} to size of {-m::players::*}
 	# 스킨을 시작할 때 저장해 둔다(중간에 나가도 같은 가짜 스킨, 진짜 프로필은 쓰지 않음)
 	loop {-m::players::*}:

@@ -1,0 +1,103 @@
+# ==============================================================================
+# [mbody.sk] 연출(카메라) 중에는 플레이어 본체를 서로에게 보내지 않는다 (ProtocolLib 필요). 구조는 DESIGN.md.
+# 왜: 참가자 본체는 관전 모드로 카메라 근처에 있고, 밤 장면 동안 행동한 사람만 본체가 다른 곳으로 순간이동한다.
+#     미니맵·엔티티 레이더 모드가 본체 위치를 보여 주면 "누가 밤에 움직였는지"가 드러난다.
+# 방법: 플레이어 엔티티 생성 패킷(SPAWN_ENTITY, 종류 PLAYER)을 막는다. 탭 목록(PLAYER_INFO)은 건드리지 않아 탭에는 그대로 나온다.
+#   이미 서로 보이던 본체는 mBodyRefresh(숨겼다 다시 보여 주기)로 다시 보내게 해서 막히게 한다. 게임이 끝나면 같은 함수로 다시 보이게 한다.
+#   막는 조건은 {-ms::on}(연출 켜짐)뿐이다. 연출 없이 하는 게임은 본체가 곧 플레이어라 막지 않는다.
+# 리스너 주인 플러그인: uuidmask.sk 가 다시 불러올 때 Skript 플러그인 이름으로 등록된 리스너를 모두 지우므로, 가능하면 skript-reflect 이름으로 등록한다.
+#   혹시 지워져도 5초마다 확인해서 다시 등록한다.
+# 변수: {-mbody::l}(등록한 리스너)
+# 미검증: 번들 안의 SPAWN_ENTITY 취소, getEntityTypeModifier 읽기, 네티 스레드에서 {-ms::on} 읽기.
+# ==============================================================================
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.entity.EntityType
+	ch.njol.skript.Skript as SkriptMain
+	java.util.ArrayList
+	java.util.HashSet
+	com.comphenix.protocol.ProtocolLibrary
+	com.comphenix.protocol.PacketType$Play$Server as PTServer
+	com.comphenix.protocol.events.PacketListener
+	com.comphenix.protocol.events.ListeningWhitelist
+	com.comphenix.protocol.events.ListenerPriority
+	com.comphenix.protocol.events.ListenerOptions
+
+function mBodyPlugin() :: object:
+	set {_pl} to Bukkit.getPluginManager().getPlugin("skript-reflect")
+	if {_pl} is set:
+		return {_pl}
+	return SkriptMain.getInstance()
+
+function mBodySendWl() :: object:
+	set {_t} to new ArrayList()
+	{_t}.add(PTServer.SPAWN_ENTITY)
+	set {_o} to new HashSet()
+	{_o}.add(ListenerOptions.SKIP_PLUGIN_VERIFIER)
+	set {_b} to ListeningWhitelist.newBuilder()
+	{_b}.types({_t})
+	{_b}.options({_o})
+	{_b}.priority(ListenerPriority.NORMAL)
+	return {_b}.build()
+
+function mBodyRecvWl() :: object:
+	return ListeningWhitelist.EMPTY_WHITELIST
+
+# (proxy 핸들러: 첫 인자는 proxy 자신, 두 번째가 PacketEvent)
+function mBodyOnSend(px: object, e: object):
+	if {-ms::on} is not true:
+		stop
+	if {_e}.isPlayerTemporary() is true:
+		stop
+	set {_ty} to {_e}.getPacket().getEntityTypeModifier().read(0)
+	if {_ty} is not set:
+		stop
+	if {_ty}.equals(EntityType.PLAYER) is true:
+		{_e}.setCancelled(true)
+
+function mBodyOnRecv(px: object, e: object):
+	stop
+
+function mBodyRegister():
+	if Bukkit.getPluginManager().isPluginEnabled("ProtocolLib") is false:
+		stop
+	if {-mbody::l} is set:
+		ProtocolLibrary.getProtocolManager().removePacketListener({-mbody::l})
+	set {_h::onpacketsending} to function reference "mBodyOnSend"
+	set {_h::onpacketreceiving} to function reference "mBodyOnRecv"
+	set {_h::getsendingwhitelist} to function reference "mBodySendWl"
+	set {_h::getreceivingwhitelist} to function reference "mBodyRecvWl"
+	set {_h::getplugin} to function reference "mBodyPlugin"
+	set {_l} to a new proxy of PacketListener using {_h::*}
+	ProtocolLibrary.getProtocolManager().addPacketListener({_l})
+	set {-mbody::l} to {_l}
+
+# 모든 접속자끼리 본체를 숨겼다 다시 보여 준다 -> 서버가 생성 패킷을 다시 보낸다(연출 중이면 막히고, 끝났으면 다시 보인다)
+function mBodyRefresh():
+	loop all players:
+		set {_a} to loop-player-1
+		loop all players:
+			if loop-player-2 is not {_a}:
+				{_a}.hidePlayer(mScPlugin(), loop-player-2)
+	wait 2 ticks
+	loop all players:
+		set {_a} to loop-player-1
+		loop all players:
+			if loop-player-2 is not {_a}:
+				{_a}.showPlayer(mScPlugin(), loop-player-2)
+
+on load:
+	mBodyRegister()
+
+on unload:
+	if {-mbody::l} is set:
+		ProtocolLibrary.getProtocolManager().removePacketListener({-mbody::l})
+		delete {-mbody::l}
+
+every 5 seconds:
+	if {-mbody::l} is not set:
+		mBodyRegister()
+		stop
+	if ProtocolLibrary.getProtocolManager().getPacketListeners().contains({-mbody::l}) is false:
+		mBodyRegister()

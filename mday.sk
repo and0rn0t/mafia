@@ -92,6 +92,8 @@ function mToLobby():
 			set loop-player's gamemode to creative
 		mTp(loop-player, {_lb})
 		mLobbyEnsure(loop-player)
+	# 연출 중 막아 둔 본체를 다시 보이게 한다(mbody.sk)
+	mBodyRefresh()
 	mTabUpdateAll()
 
 function mStartNight():
