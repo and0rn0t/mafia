@@ -93,6 +93,8 @@ function mLobbyEnsure(p: player):
 	if {_o} is set:
 		if mLobbyItemName({_o}) is true:
 			clear slot 40 of {_p}'s inventory
+	# 안내서 책(핫바 9번 칸, mhelp.sk)
+	mGuideGive({_p})
 
 # 로비 블록을 치운다(게임이 시작될 때)
 function mLobbyClear(p: player):

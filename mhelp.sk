@@ -1,0 +1,163 @@
+# ==============================================================================
+# [mhelp.sk] 도움말: 안내서 책(로비 핫바 9번 칸, /mhelp 책) + 채팅 도움말. 규칙은 ROLES.md, 구조는 DESIGN.md.
+# 명령(누구나, cmdhide.sk 허용 목록에 mhelp/마피아):
+#   /mhelp            짧은 요약(조작, 명령, 아래 명령 안내). 관리자에게는 관리자 명령도
+#   /mhelp 책          안내서 책을 연다(게임 중에도 열린다)
+#   /mhelp 직업        직업 목록(팀 색) / /mhelp 직업 <이름>  그 직업 설명
+#   /mhelp 내직업      게임 중 내 직업 다시 보기(광인은 받은 가짜 직업, 도둑이 훔치면 훔친 직업). 마피아 팀이면 같은 팀 이름도
+# 안내서 쪽: 표지 / 게임 진행 / 조작 / 팀과 승리(2쪽) / 직업 19개(한 쪽에 하나)
+# 미검증: BookMeta#setPages(List), Player#openBook, 쪽 안 줄바꿈(nl).
+# ==============================================================================
+
+import:
+	org.bukkit.Material
+	org.bukkit.inventory.ItemStack
+	java.util.ArrayList
+
+# 쪽 글: "|" 는 줄바꿈, "&" 색 코드
+function mGuideText(s: text) :: text:
+	set {_t} to {_s}
+	replace all "|" in {_t} with nl
+	replace all "&" in {_t} with "§"
+	return {_t}
+
+function mTimingName(t: text) :: text:
+	if {_t} is "nightly":
+		return "밤마다"
+	if {_t} is "once":
+		return "게임 중 한 번"
+	if {_t} is "vote":
+		return "투표·처형 때"
+	return "패시브"
+
+function mPoolName(pool: text) :: text:
+	if {_pool} is "mafia":
+		return "마피아 팀"
+	if {_pool} is "support":
+		return "보조(접선하면 마피아 팀)"
+	if {_pool} is "citizen":
+		return "시민 팀"
+	return "중립"
+
+# 직업 이름(한글) 또는 id → id. 없으면 ""
+function mRoleFind(n: text) :: text:
+	loop mRoleIds():
+		if loop-value is {_n}:
+			return loop-value
+		if mRoleName(loop-value) is {_n}:
+			return loop-value
+	return ""
+
+function mGuideBook() :: object:
+	set {_it} to new ItemStack(Material.WRITTEN_BOOK)
+	set {_m} to {_it}.getItemMeta()
+	{_m}.setTitle("마피아 안내서")
+	{_m}.setAuthor("마피아")
+	set {_pg} to new ArrayList()
+	{_pg}.add(mGuideText("&l     마피아 안내서&r||&01. 게임 진행|2. 조작|3. 팀과 승리|4. 직업 19개||&8로비 핫바 9번 칸에 있고,|게임 중에는 /mhelp 책|으로 다시 열 수 있습니다."))
+	{_pg}.add(mGuideText("&l게임 진행&r||&9밤&0: 능력을 쓸 대상을|고릅니다.|&5밤 처리&0: 밤 사이 일어난|일을 연출로 봅니다.|&6낮&0: 사망자 발표 뒤 토론.|토론 시간 = 생존자 수×%mTimeDiscussPer()%초|&c투표&0: 가장 많이 받은|한 명이 화형됩니다.|승부가 날 때까지 반복!"))
+	{_pg}.add(mGuideText("&l조작&r|&8게임 중에는 화면이|고정되고 이동 키로 조작|&0W  대상 고르기 열기|A/D  대상 바꾸기|Space  확정|Shift  고르지 않기|&6낮&0 W/S  토론 ±15초|  (하루 한 번)|&7죽은 뒤&0 A/D 로|  생존자를 관전합니다."))
+	{_pg}.add(mGuideText("&l팀과 승리&r||&c마피아 팀&0: 중립이 없고|마피아 팀 표가 시민 팀|표보다 많으면 승리||&a시민 팀&0: 중립과 마피아|팀이 모두 없으면 승리||&b중립&0: 혼자 남으면 승리"))
+	{_pg}.add(mGuideText("&l팀과 승리 2&r||&c보조 직업&0(스파이, 마담,|마녀)은 마피아와 접선해야|마피아 팀이 됩니다. 승패는|접선과 상관없이 마피아|팀을 따릅니다.||&7무승부&0: 모두 죽거나,|승부가 날 수 없거나,|%mCalmMax()%일 동안 아무도|죽지 않으면"))
+	loop mRoleIds():
+		set {_r} to loop-value
+		set {_po} to mRolePool({_r})
+		set {_c} to mTeamColor({_po})
+		set {_line} to "&l%{_c}%%mRoleName({_r})%&r||&8%mPoolName({_po})%|%mTimingName(mRoleTiming({_r}))%||&0%mRoleDesc({_r})%"
+		{_pg}.add(mGuideText({_line}))
+	{_m}.setPages({_pg})
+	{_it}.setItemMeta({_m})
+	return {_it}
+
+# 로비 핫바 9번 칸(인덱스 8)에 안내서(없을 때만 넣는다)
+function mGuideGive(p: player):
+	set {_cur} to {_p}.getInventory().getItem(8)
+	if {_cur} is set:
+		if {_cur}.getType().equals(Material.WRITTEN_BOOK) is true:
+			stop
+	{_p}.getInventory().setItem(8, mGuideBook())
+
+function mGuideOpen(p: player):
+	{_p}.openBook(mGuideBook())
+
+# 게임 중 내 직업
+function mMyRole(p: player):
+	set {_id} to "%uuid of {_p}%"
+	if mRunning() is not true:
+		send "&c게임 중에만 볼 수 있습니다." to {_p}
+		stop
+	set {_r} to {-m::role::%{_id}%}
+	if {_r} is not set:
+		send "&c이번 게임 참가자가 아닙니다." to {_p}
+		stop
+	if {_r} is "madman":
+		if {-m::fake::%{_id}%} is set:
+			set {_r} to {-m::fake::%{_id}%}
+	set {_po} to mRolePool({_r})
+	set {_c} to mTeamColor({_po})
+	send "&6[마피아] &7내 직업: %{_c}%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)" to {_p}
+	send "&7%mRoleDesc({_r})%" to {_p}
+	if {-m::alive::%{_id}%} is not true:
+		send "&8(사망)" to {_p}
+	if {-m::team::%{_id}%} is "mafia":
+		loop {-m::players::*}:
+			if loop-value is not {_id}:
+				if {-m::team::%loop-value%} is "mafia":
+					add mNameOf(loop-value) to {_mates::*}
+		if size of {_mates::*} > 0:
+			send "&c같은 팀: &f%{_mates::*}%" to {_p}
+	else if {_po} is "support":
+		send "&7아직 마피아와 접선하지 않았습니다." to {_p}
+
+command /mhelp [<text>] [<text>]:
+	aliases: /마피아
+	description: 마피아 게임 도움말
+	trigger:
+		if arg-1 is "책" or "book":
+			if sender is not a player:
+				stop
+			mGuideOpen(player)
+			stop
+		if arg-1 is "내직업" or "me":
+			if sender is not a player:
+				stop
+			mMyRole(player)
+			stop
+		if arg-1 is "직업" or "role":
+			if arg-2 is not set:
+				send "&6[마피아] &7직업 목록 &8(/mhelp 직업 <이름>)"
+				loop "mafia", "support", "citizen", "neutral":
+					set {_po} to loop-value
+					delete {_ns::*}
+					loop mRoleIds():
+						if mRolePool(loop-value-2) is {_po}:
+							add mRoleName(loop-value-2) to {_ns::*}
+					send "%mTeamColor({_po})%%mPoolName({_po})%&7: &f%{_ns::*}%"
+				stop
+			set {_r} to mRoleFind(arg-2)
+			if {_r} is "":
+				send "&c그런 직업이 없습니다. /mhelp 직업 으로 목록을 보세요."
+				stop
+			set {_po} to mRolePool({_r})
+			send "&6[마피아] %mTeamColor({_po})%%mRoleName({_r})% &8(%mPoolName({_po})%, %mTimingName(mRoleTiming({_r}))%)"
+			send "&7%mRoleDesc({_r})%"
+			stop
+		send "&6&l[마피아 도움말]"
+		send "&e조작 &7(게임 중에는 화면이 고정되고 이동 키로 조작합니다)"
+		send "&f W &7대상 고르기 화면 열기 (밤 능력, 낮 투표)"
+		send "&f A / D &7대상 바꾸기 &8| &7사망·관전 중에는 볼 사람 바꾸기"
+		send "&f Space &7고른 대상 확정  &f Shift &7고르지 않기"
+		send "&f W / S &7(낮 토론 중) 토론 시간 15초 늘리기 / 줄이기, 낮마다 한 번"
+		send "&e더 보기"
+		send "&f /mhelp 책 &7안내서(규칙, 팀과 승리, 직업 설명) 열기"
+		send "&f /mhelp 직업 [이름] &7직업 목록 / 설명  &f/mhelp 내직업 &7게임 중 내 직업"
+		send "&f /mvote <닉네임> &7투표  &f/mtake <닉네임> &7길동무  &f/mdisc up|down &7토론 시간"
+		if sender is a player:
+			if player is not op:
+				stop
+		send "&c관리자"
+		send "&f /madmin &7관리자 메뉴 (시간, 직업, 맵/연출, 로비·라인업 위치, 시작/종료)"
+		send "&f /mstart &7/ &f/mstop &7게임 시작 / 강제 종료"
+		send "&f /mbuild &7맵(mafia_map) 짓기  &f/mloc lobby|game set|tp|info &7위치"
+		send "&f /mtime discuss|vote|night <초> &7시간 (토론은 생존자 1명당 초)"
+		send "&f /mrole &7직업 켜고 끄기  &f/mtest &7봇과 혼자 시험하기"
