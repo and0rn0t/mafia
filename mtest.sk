@@ -418,6 +418,8 @@ function mBotInit():
 	delete {-mt::saidtxt::*}
 	delete {-mt::susr::*}
 	delete {-mt::thiefsaid::*}
+	delete {-mt::hbuf::*}
+	delete {-mt::hbt::*}
 	delete {-mt::vdecl::*}
 	delete {-mt::vdn::*}
 	delete {-mt::vdfirst::*}
@@ -2411,7 +2413,7 @@ function mBotLlmParseNow(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호],""night_target"":번호,""night_result"":""결과""}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. night_target = 말한 사람이 지난밤 자기 능력을 썼다고 밝힌 대상 번호(자기 자신도 됨, 밝히지 않았으면 0). night_result = 그 결과: 경찰 조사면 mafia 또는 town, 탐정이면 그 대상이 능력을 쓴 상대 번호(아무에게도 안 썼으면 none), 의사가 공격을 막았으면 saved, 그 밖에는 빈 문자열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
+	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호],""night_target"":번호,""night_result"":""결과""}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. night_target = 말한 사람이 지난밤 자기 능력을 썼다고 밝힌 대상 번호(자기 자신도 됨, 밝히지 않았으면 0). night_result = 그 결과: 경찰 조사면 mafia 또는 town, 탐정이면 그 대상이 능력을 쓴 상대 번호(아무에게도 안 썼으면 none), 의사가 공격을 막았으면 saved, 그 밖에는 빈 문자열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 분석할 말은 사람이 짧게 끊어 친 여러 줄을 이어 붙인 것일 수 있으니 하나의 문장으로 읽어라(예: ""전 주술사 3번 거짓말"" = 자기는 주술사, 3번이 거짓말한다). 확실하지 않으면 넣지 마라."
 	# 공개 기록(대화 포함, 앞 요청과 같은 앞부분) 뒤에 분석할 말을 붙인다
 	set {_f} to mBotLlmPost(mBotStatic(), mBotUser("", "%{_sys}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%%nl%JSON 하나만 답해라."), 300)
 	if {_f} is not set:
@@ -2784,6 +2786,23 @@ on chat:
 	set {_msg} to uncolored message
 	# 봇의 대화 기억에 남긴다(AI 가 사람 말을 볼 수 있게)
 	mBotChatAdd({_id}, {_msg})
+	# 짧게 끊어 치는 말("전", "주술사", "8번 거짓말")은 모았다가 한 문장으로 읽는다(mBotHearFlush, 4초 동안 더 안 치면)
+	if {-mt::hbuf::%{_id}%} is set:
+		set {-mt::hbuf::%{_id}%} to "%{-mt::hbuf::%{_id}%}% %{_msg}%"
+	else:
+		set {-mt::hbuf::%{_id}%} to {_msg}
+	set {-mt::hbt::%{_id}%} to {-mau::sec}
+
+# 모아 둔 사람 말을 한 문장으로 읽는다
+function mBotHearFlush(id: text):
+	set {_msg} to {-mt::hbuf::%{_id}%}
+	delete {-mt::hbuf::%{_id}%}
+	delete {-mt::hbt::%{_id}%}
+	if {_msg} is not set:
+		stop
+	if mState() is not "day" or "vote":
+		stop
+	mBotDbg("사람 말 묶음 %mNum({_id})%번: %{_msg}%")
 	# AI 가 켜져 있으면 앞 대화까지 보고 뜻을 읽는다(단어만 보고 오해하지 않게, 단어 해석은 쓰지 않음)
 	if mBotLlmOn() is true:
 		mBotLlmParse({_id}, {_msg})
@@ -2791,6 +2810,20 @@ on chat:
 	# AI 가 꺼져 있으면 단어로 읽고, 봇을 불렀으면 그 봇이 대답한다
 	mBotHear({_id}, {_msg})
 	mBotAddressed({_id}, {_msg})
+
+every second:
+	loop indices of {-mt::hbuf::*}:
+		add loop-value to {_ids::*}
+	loop {_ids::*}:
+		set {_id} to loop-value
+		set {_age} to 99
+		if {-mt::hbt::%{_id}%} is set:
+			set {_age} to {-mau::sec} - {-mt::hbt::%{_id}%}
+		# 4초 동안 더 안 치거나, 너무 길어지면 읽는다
+		if {_age} >= 4:
+			mBotHearFlush({_id})
+		else if length of {-mt::hbuf::%{_id}%} > 120:
+			mBotHearFlush({_id})
 
 # ------------------------------------------------------------------ 밤의 마피아 팀 대화(봇)
 # 마피아 팀 채팅(mchat.sk)은 원래 밤에 열려 있다. 봇도 거기서 말한다:
