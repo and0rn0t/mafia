@@ -546,6 +546,9 @@ function mTestNight(id: text):
 		stop
 	set {_t} to ""
 	if {_role} is "mafia":
+		# 실제로 죽이는 건 마피아 봇 한 명뿐(나머지는 능력을 안 써서 탐정에게 "아무것도 안 함"으로 보이고, 가짜 직업 보고와 어긋나지 않는다)
+		if mBotMafiaLeader() is not {_id}:
+			stop
 		# 마피아끼리 같은 대상(먼저 고른 봇의 선택을 따른다)
 		set {_key} to "%{-m::day}%"
 		if {-mt::mk::%{_key}%} is set:
@@ -864,41 +867,61 @@ function mBotLiar(b: text) :: boolean:
 		return false
 	return true
 
-# 가짜 직업 고르기(한 번 정하면 유지). 많이 쓰이는 무난한 직업 위주, 이미 누가 주장했거나 공개된 직업은 피한다
+# 가짜 직업 고르기(한 번 정하면 유지). 들키기 어려운 거짓을 고른다:
+#   밤에 실제로 능력을 쓰는 거짓말쟁이(마피아 중 실제로 죽이는 한 명, 스파이·마녀·마담·암살자·방화범·도둑)는 탐정에게 "누군가에게 능력을 썼다"가 보이므로
+#     대상이 있는 직업(주술사, 경찰)으로 실제 대상을 그대로 말한다(대상이 밤에 죽어도 어긋나지 않는 직업).
+#   밤에 아무것도 안 하는 거짓말쟁이는 확인할 방법이 없는 직업(테러리스트, 자경단 "아직 안 씀", 기자 "아껴 둠", 군인)을 고른다.
+#   쓰지 않는 것: 건달(협박한 사람이 투표하면 바로 들킴), 탐정(다른 사람 보고와 엇갈림), 정치인(처형되면 들킴), 의사·수호자(지킨 사람이 죽으면 들킴)는 거의 고르지 않는다.
+#   이미 누가 주장했거나 공개된 직업, 마피아 팀원의 진짜·가짜 직업은 피한다.
 function mBotFakePick(b: text) :: text:
 	if {-mt::fakerole::%{_b}%} is set:
 		return {-mt::fakerole::%{_b}%}
-	set {_w::*} to "soldier", "soldier", "soldier", "politician", "politician", "terrorist", "terrorist", "shaman", "shaman", "doctor", "doctor", "guardian", "detective", "thug" and "police"
+	set {_acts} to false
+	if {-m::act::%{_b}%} is set:
+		set {_acts} to true
+	if mRoleTiming(mActRole({_b})) is "nightly":
+		if mActRole({_b}) is not "mafia":
+			set {_acts} to true
+	if {_acts} is true:
+		set {_w::*} to "shaman", "shaman", "shaman", "police", "police"
+	else:
+		set {_w::*} to "terrorist", "terrorist", "terrorist", "vigilante", "vigilante", "vigilante", "reporter", "reporter", "soldier", "soldier", "politician"
 	loop {_w::*}:
 		if mRoleOn(loop-value) is true:
 			add loop-value to {_c::*}
 	if size of {_c::*} is 0:
-		set {_c::*} to "soldier" and "politician"
-	set {_pick} to random element of {_c::*}
-	set {_k} to 0
-	while {_k} < 8:
-		add 1 to {_k}
-		set {_x} to random element of {_c::*}
+		set {_c::*} to "terrorist" and "soldier"
+	# 남이 이미 주장했거나 공개된 직업, 팀원의 직업은 뺀다
+	loop {_c::*}:
+		set {_x} to loop-value-1
 		set {_ok} to true
 		loop {-m::players::*}:
-			if loop-value is not {_b}:
-				if {-mt::claim::%loop-value%} is {_x}:
+			if loop-value-2 is not {_b}:
+				if {-mt::claim::%loop-value-2%} is {_x}:
 					set {_ok} to false
-				if {-mt::fakerole::%loop-value%} is {_x}:
+				if {-mt::fakerole::%loop-value-2%} is {_x}:
 					set {_ok} to false
-				if {-m::pubrole::%loop-value%} is {_x}:
+				if {-m::pubrole::%loop-value-2%} is {_x}:
 					set {_ok} to false
-				if {-m::alive::%loop-value%} is true:
-					if mActRole(loop-value) is {_x}:
-						# 마피아 팀은 팀원의 진짜 직업을 안다(겹치지 않게)
-						if {-m::team::%loop-value%} is "mafia":
-							if {-m::team::%{_b}%} is "mafia":
-								set {_ok} to false
+				if {-m::alive::%loop-value-2%} is true:
+					if mBotK({_b}, loop-value-2) is "mafia":
+						if mActRole(loop-value-2) is {_x}:
+							set {_ok} to false
 		if {_ok} is true:
-			set {_pick} to {_x}
-			set {_k} to 99
+			add {_x} to {_ok::*}
+	if size of {_ok::*} > 0:
+		set {_pick} to random element of {_ok::*}
+	else:
+		set {_pick} to random element of {_c::*}
 	set {-mt::fakerole::%{_b}%} to {_pick}
 	return {_pick}
+
+# 실제로 죽이는 마피아 봇(능력을 쓸 수 있는 첫 마피아 봇). 나머지 마피아 봇은 밤에 능력을 쓰지 않아 탐정에게 걸리지 않는다
+function mBotMafiaLeader() :: text:
+	loop mBotMafiaBots():
+		if mActCheck(loop-value) is "":
+			return loop-value
+	return ""
 
 # 오늘 할 보고 만들기("직업|대상|결과"). 이미 했으면 ""
 function mBotRepMake(b: text) :: text:
@@ -928,29 +951,35 @@ function mBotRepMake(b: text) :: text:
 				return "%{_r}%|-|-"
 			set {_t} to "-"
 			if {_r} is "police" or "doctor" or "guardian" or "shaman" or "thug" or "detective":
-				set {_t} to random element of {_al::*}
-				# 진짜로 능력을 쓴 대상이 살아 있으면 그 사람을 말한다(탐정 결과와 맞게)
+				# 밤에 실제로 능력을 썼으면 그 대상을 그대로 말한다(탐정 결과와 어긋나지 않게).
+				#   주술사·경찰은 대상이 밤에 죽어도 말이 되므로 죽은 사람도 그대로, 의사·수호자는 살아 있는 사람만
 				if {_at} is not "-":
-					if {_al::*} contains {_at}:
-						if chance of 60%:
-							set {_t} to {_at}
+					if {_r} is "shaman" or "police":
+						set {_t} to {_at}
+					else if {_al::*} contains {_at}:
+						set {_t} to {_at}
+				if {_t} is "-":
+					# 실제로 능력을 안 썼으면 대상 없이(탐정이 "아무에게도 안 씀"을 봐도 어긋나지 않게)
+					if {_at} is not "-":
+						set {_t} to random element of {_al::*}
 				if {_r} is "doctor":
-					if chance of 25%:
+					if {_t} is "-":
 						set {_t} to {_b}
 			if {_r} is "police":
-				# 둘째 날부터 가끔 시민을 마피아로 몬다. 아니면 팀원이나 아무나 "마피아 아님"
 				set {_res} to "town"
+				# 둘째 날부터 가끔, 이미 의심받는 시민을 마피아로 몬다(근거 있어 보이는 사람이라 믿기 쉽다)
 				if {-m::day} >= 2:
 					if chance of 35%:
-						if size of {_others::*} > 0:
-							set {_fr} to mBotBest({_b}, {_others::*}, "threat")
-							if {_fr} is not "":
-								set {_t} to {_fr}
-								set {_res} to "mafia"
-				if {_res} is "town":
-					if size of {_mates::*} > 0:
-						if chance of 40%:
-							set {_t} to random element of {_mates::*}
+						set {_fr} to ""
+						set {_fs} to 20
+						loop {_others::*}:
+							set {_pf} to mBotFacts("", loop-value)
+							if {_pf} > {_fs}:
+								set {_fs} to {_pf}
+								set {_fr} to loop-value
+						if {_fr} is not "":
+							set {_t} to {_fr}
+							set {_res} to "mafia"
 			if {_r} is "detective":
 				set {_res} to "none"
 				if size of {_others::*} > 0:
@@ -2678,11 +2707,16 @@ function mBotMafiaBots() :: texts:
 # 마피아 봇들의 오늘 밤 대상을 t 로 맞춘다
 function mBotMafiaSet(t: text):
 	set {-mt::mk::%{-m::day}%} to {_t}
+	# 실제로 죽이는 한 봇만 대상을 정하고, 나머지 마피아 봇은 능력을 쓰지 않는다
+	set {_ld} to mBotMafiaLeader()
 	loop mBotMafiaBots():
-		set {_c::*} to mTargets(loop-value)
-		if {_c::*} contains {_t}:
-			mSetAct(loop-value, {_t})
-		delete {_c::*}
+		if loop-value is {_ld}:
+			set {_c::*} to mTargets(loop-value)
+			if {_c::*} contains {_t}:
+				mSetAct(loop-value, {_t})
+			delete {_c::*}
+		else:
+			mClearAct(loop-value)
 
 # 밤 시작 몇 초 뒤: 마피아 봇 하나가 대상을 제안한다
 function mBotMafiaPlan():
