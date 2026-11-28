@@ -3350,6 +3350,26 @@ function mBotHearFlush(id: text):
 		loop {-m::players::*}:
 			if {-m::num::%loop-value%} is {_pvi}:
 				set {-mt::pv::%{_id}%} to loop-value
+	# 경찰이라고 한 사람이 "○번 마피아" / "○번 마피아 아님" 이라고 하면 조사 결과로 기록한다(AI 해석이 꺼져 있어도 가능한 세계 추론에 들어가게).
+	#   봇 경찰의 보고와 같은 무게로 다룬다. 오늘 이미 기록한 결과가 있으면 그대로 둔다
+	set {_pc} to false
+	if {-mt::claim::%{_id}%} is "police":
+		set {_pc} to true
+	else if mBotSelfRole({_msg}) is "police":
+		set {_pc} to true
+	if {_pc} is true:
+		if {-mt::rep::%{_id}%::%{-m::day}%} is not set:
+			if {_msg}.matches("(?s).*?(\d+)\s*번?\s*(님)?\s*(은|는|이|가)?\s*마피아.*") is true:
+				set {_pn} to {_msg}.replaceAll("(?s)^.*?(\d+)\s*번?\s*(님)?\s*(은|는|이|가)?\s*마피아.*$", "$1")
+				set {_pi} to "%{_pn}%" parsed as integer
+				set {_pres} to "mafia"
+				set {_nm} to {_msg}.replaceAll(" ", "")
+				if {_nm} contains "노마피아" or "마피아아님" or "마피아아니" or "마피아가아" or "마피아는아":
+					set {_pres} to "town"
+				loop {-m::players::*}:
+					if {-m::num::%loop-value%} is {_pi}:
+						if loop-value is not {_id}:
+							mBotRepApply({_id}, "police|%loop-value%|%{_pres}%", false)
 	mBotDbg("사람 말 묶음 %mNum({_id})%번: %{_msg}%")
 	# AI 가 켜져 있으면 앞 대화까지 보고 뜻을 읽는다(단어만 보고 오해하지 않게, 단어 해석은 쓰지 않음)
 	if mBotLlmOn() is true:
