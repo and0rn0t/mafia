@@ -856,7 +856,7 @@ function mBotCtx(b: text) :: text:
 		set {_c} to "%{_c}% 마피아 팀 전략: 시민처럼 추리하는 척하고, 팀원이 의심받으면 티 나지 않게 화제를 돌리고, 진짜 경찰로 보이는 사람의 신뢰를 깎아라."
 	else:
 		set {_c} to "%{_c}% 시민 전략: 근거를 따져 마피아를 찾고, 믿을 만한 경찰 결과는 따르고, 억울하게 몰리는 사람은 변호해라."
-	set {_c} to "%{_c}% 말하는 법: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 써라. 따옴표, 이름표, 설명, 이모지 없이. 사람을 가리킬 때는 번호를 쓴다(예: 3번). 게임 밖 이야기는 하지 마라."
+	set {_c} to "%{_c}% 말하는 법: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 써라. 따옴표, 이름표, 괄호 지문(목소리·행동 묘사), 여러 후보, 설명, 이모지 없이 실제로 칠 말만. 사람을 가리킬 때는 번호를 쓴다(예: 3번). 게임 밖 이야기는 하지 마라."
 	return {_c}
 
 # 최근 공개 채팅(기록의 전체 알림·채팅) 12줄
@@ -932,8 +932,15 @@ function mBotLlmText(body: text) :: text:
 	set {_s} to {_m}.get("content").getAsString()
 	# 한 줄로, 색 코드·따옴표·이름표를 빼고 60자까지
 	set {_s} to {_s}.replaceAll("[\r\n]+", " ").replaceAll("[&§]", "").trim()
+	# 작은 모델의 버릇 정리: 괄호 지문 "(낮은 목소리로)" 빼기, 여러 후보면 첫 번째만("또는" 뒤 버림), 따옴표 안의 말만
+	set {_s} to {_s}.replaceAll("[(（][^)）]*[)）]", " ").replaceAll("\*[^*]*\*", " ").trim()
+	set {_s} to {_s}.replaceAll("\s+또는\s.*$", "").trim()
+	if {_s}.matches(".*[""“][^""“”]+[""”].*") is true:
+		set {_s} to {_s}.replaceAll("^[^""“]*[""“]([^""“”]+)[""”].*$", "$1").trim()
 	set {_s} to {_s}.replaceAll("^[""'“”]+|[""'“”]+$", "")
 	set {_s} to {_s}.replaceAll("^<[^>]*>\s*", "")
+	set {_s} to {_s}.replaceAll("^\d+번\s*[^:：]{1,12}[:：]\s*", "")
+	set {_s} to {_s}.replaceAll("\s{2,}", " ").trim()
 	if {_s}.length() > 60:
 		set {_s} to {_s}.substring(0, 60)
 	return {_s}
@@ -960,11 +967,71 @@ function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
 	set {_fb} to mBotFill(mBotLine({_kind}), {_t}, {_u}, {_r})
 	if mBotLlmOn() is true:
 		if {-mtllm::f::%{_b}%} is not set:
-			set {-mtllm::fb::%{_b}%} to {_fb}
-			mBotLlmSend({_b}, mBotIntent({_kind}, {_t}, {_u}, {_r}))
+			if {-mtllm::q::*} does not contain {_b}:
+				set {-mtllm::fb::%{_b}%} to {_fb}
+				# 동시에 보낼 수 있는 수(기본 1)를 넘으면 줄을 세운다(저사양 Ollama 가 한 번에 하나씩 처리해 시간 초과가 나지 않게)
+				if mBotLlmInflight() < mBotLlmPar():
+					mBotLlmSend({_b}, mBotIntent({_kind}, {_t}, {_u}, {_r}))
+				else:
+					set {-mtllm::qd::%{_b}%} to "%{_kind}%|%{_t}%|%{_u}%|%{_r}%"
+					set {-mtllm::qs::%{_b}%} to {-mau::sec}
+					add {_b} to {-mtllm::q::*}
 			stop
 	if {_fb} is not "":
 		mBotSay({_b}, {_fb})
+
+# 동시에 보낼 요청 수({mcfg::llm::par}, 기본 1)와 지금 보낸 수
+function mBotLlmPar() :: number:
+	if {mcfg::llm::par} is set:
+		return {mcfg::llm::par}
+	return 1
+
+function mBotLlmInflight() :: number:
+	set {_n} to size of {-mtllm::f::*}
+	add size of {-mtllm::pf::*} to {_n}
+	if {-mtllm::sf} is set:
+		add 1 to {_n}
+	return {_n}
+
+# 1초마다: 자리가 나면 줄 선 요청을 보낸다(말하기 → 말 뜻 읽기 → 하루 요약 순). 너무 오래 기다린 말하기는 정해 둔 문장으로 바로 말한다
+function mBotLlmDispatch():
+	set {_k} to 0
+	while {_k} < 4:
+		add 1 to {_k}
+		if mBotLlmInflight() >= mBotLlmPar():
+			stop
+		if size of {-mtllm::q::*} > 0:
+			set {_b} to first element of {-mtllm::q::*}
+			remove {_b} from {-mtllm::q::*}
+			set {_f::*} to split {-mtllm::qd::%{_b}%} at "|"
+			set {_age} to {-mau::sec} - {-mtllm::qs::%{_b}%}
+			delete {-mtllm::qd::%{_b}%}
+			delete {-mtllm::qs::%{_b}%}
+			if {-m::alive::%{_b}%} is true:
+				if mState() is "day" or "vote":
+					if {_age} > 20:
+						set {_fb} to {-mtllm::fb::%{_b}%}
+						delete {-mtllm::fb::%{_b}%}
+						if {_fb} is set:
+							mBotSay({_b}, {_fb})
+					else:
+						mBotLlmSend({_b}, mBotIntent({_f::1}, {_f::2} ? "", {_f::3} ? "", {_f::4} ? ""))
+		else if size of {-mtllm::pq::*} > 0:
+			set {_e} to first element of {-mtllm::pq::*}
+			remove {_e} from {-mtllm::pq::*}
+			set {_pe::*} to split {_e} at "|"
+			if mState() is "day" or "vote":
+				mBotLlmParseNow({_pe::1}, {_pe::2})
+		else if {-mtllm::sumwant} is set:
+			set {_d} to {-mtllm::sumwant}
+			delete {-mtllm::sumwant}
+			mBotSummarize({_d})
+		else:
+			stop
+
+every second:
+	if mBotLlmOn() is true:
+		mBotLlmDispatch()
 
 # 1초마다: 답이 온 요청을 꺼내 말한다
 function mBotLlmPoll():
@@ -1135,6 +1202,10 @@ function mBotSummarize(d: number):
 		stop
 	if {-mtllm::sf} is set:
 		stop
+	# 다른 요청이 처리 중이면 나중에(mBotLlmDispatch)
+	if mBotLlmInflight() >= mBotLlmPar():
+		set {-mtllm::sumwant} to {_d}
+		stop
 	set {_txt} to mBotDayText({_d})
 	if {_txt} is "":
 		stop
@@ -1214,8 +1285,19 @@ function mBotQueueReply(b: text, s: text, msg: text):
 	replace all "|" in {_m} with "/"
 	mBotQueue({_b}, "reply|%{_s}%||%{_m}%", random integer between 2 and 4)
 
-# AI 로 사람 말의 뜻을 읽는다(비동기). 결과는 mBotLlmPoll 이 mBotApplyParse 로 넘긴다
+# 말 뜻 읽기: 자리가 없으면 줄을 세운다(최근 4개까지만, 오래된 것은 버림)
 function mBotLlmParse(s: text, msg: text):
+	if mBotLlmInflight() < mBotLlmPar():
+		mBotLlmParseNow({_s}, {_msg})
+		stop
+	set {_m} to {_msg}
+	replace all "|" in {_m} with "/"
+	add "%{_s}%|%{_m}%" to {-mtllm::pq::*}
+	if size of {-mtllm::pq::*} > 4:
+		remove first element of {-mtllm::pq::*} from {-mtllm::pq::*}
+
+# AI 로 사람 말의 뜻을 읽는다(비동기). 결과는 mBotLlmPoll 이 mBotApplyParse 로 넘긴다
+function mBotLlmParseNow(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
@@ -1611,6 +1693,27 @@ command /mtest [<text>] [<text>] [<text>]:
 				set {mcfg::llm::model} to arg-3
 				send "&aAI 모델을 정했습니다: &f%arg-3%"
 				stop
+			if {_k} is "wait":
+				set {_w} to arg-3 parsed as integer
+				if {_w} is not set:
+					send "&7답을 기다리는 시간(초): &f%mBotLlmWait()% &7(예: /mtest llm wait 40)"
+					stop
+				if {_w} < 5:
+					set {_w} to 5
+				set {mcfg::llm::wait} to {_w}
+				delete {-mtllm::client}
+				send "&a답을 기다리는 시간을 &f%{_w}%초&a로 정했습니다."
+				stop
+			if {_k} is "par":
+				set {_w} to arg-3 parsed as integer
+				if {_w} is not set:
+					send "&7동시에 보내는 요청 수: &f%mBotLlmPar()% &7(내 PC 의 Ollama 는 1, 인터넷 서비스는 2~3, 예: /mtest llm par 1)"
+					stop
+				if {_w} < 1:
+					set {_w} to 1
+				set {mcfg::llm::par} to {_w}
+				send "&a동시에 보내는 요청 수를 &f%{_w}%&a(으)로 정했습니다."
+				stop
 			if {_k} is "effort":
 				if arg-3 is not set:
 					delete {mcfg::llm::effort}
@@ -1656,7 +1759,7 @@ command /mtest [<text>] [<text>] [<text>]:
 				if {_er}.length() > 150:
 					set {_er} to {_er}.substring(0, 150)
 				send "&7마지막 오류: &c%{_er}%"
-			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | effort [none|low] | on | off | test | status"
+			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | effort [none|low] | wait <초> | par <수> | on | off | test | status"
 			stop
 		if {_a} is "stop":
 			mToLobby()
