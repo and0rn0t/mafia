@@ -1,0 +1,74 @@
+# ==============================================================================
+# [mspec.sk] 관전자용 원탁 이름표: 낮(토론·투표·처형) 동안 관전자(사망한 참가자와 관전자, mscene.sk mWatchers)에게만
+#   원탁의 모든 더미(마네킹, 죽은 사람은 스켈레톤) 위에 "번호 이름 / 진짜 직업"을 띄운다. 산 참가자에게는 보이지 않는다(엔티티를 그 사람에게만 보여 줌).
+#   직업은 지금 직업(도둑이 훔쳤으면 훔친 직업), 팀 색. 죽은 사람은 "(사망)". 밤에는 모두에게서 숨긴다.
+#   높이: 자리 위치 + {mcfg::scene::speclabely}(기본 2.4). 엔티티는 mScTrack 으로 등록해 게임이 끝나면 지워진다.
+# 변수: {-ms::rlab::참가자}(그 자리의 이름표 텍스트 디스플레이)
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+import:
+	org.bukkit.Color
+	org.bukkit.entity.EntityType
+	org.bukkit.entity.Display$Billboard as DBillboard
+	net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+
+function mSpecLabelText(id: text) :: text:
+	set {_r} to {-m::role::%{_id}%}
+	set {_c} to mTeamColor(mRolePool({_r}))
+	set {_t} to "%mNumName({_id})%%nl%%{_c}%%mRoleName({_r})%"
+	if {-m::alive::%{_id}%} is not true:
+		set {_t} to "%{_t}% &7(사망)"
+	return {_t}
+
+# 그 자리의 이름표(없으면 만든다). 자리가 없으면 값 없음
+function mSpecLabelEnsure(id: text) :: object:
+	set {_e} to {-ms::rlab::%{_id}%}
+	if {_e} is set:
+		if {_e}.isValid() is true:
+			return {_e}
+	set {_i} to {-ms::seat::%{_id}%}
+	if {_i} is not set:
+		return {_none}
+	set {_l} to mScSeatLoc({_i})
+	set {_h} to mScNum("speclabely", 2.4)
+	{_l}.add(0, {_h}, 0)
+	set {_e} to {_l}.getWorld().spawnEntity({_l}, EntityType.TEXT_DISPLAY)
+	{_e}.setPersistent(false)
+	{_e}.setVisibleByDefault(false)
+	{_e}.setBillboard(DBillboard.CENTER)
+	{_e}.setShadowed(true)
+	{_e}.setBackgroundColor(Color.fromARGB(96, 0, 0, 0))
+	mScTrack({_e})
+	set {-ms::rlab::%{_id}%} to {_e}
+	return {_e}
+
+# 1초마다: 낮에는 이름표 내용을 고치고 관전자에게만 보여 주며, 밤에는 모두에게서 숨긴다
+every second:
+	if mSceneOn() is not true:
+		stop
+	if {-ms::seatn} is not set:
+		stop
+	set {_day} to false
+	if mState() is "day" or "vote" or "execute":
+		set {_day} to true
+	set {_w::*} to mWatchers()
+	loop {-m::players::*}:
+		set {_id} to loop-value
+		set {_e} to {-ms::rlab::%{_id}%}
+		if {_day} is true:
+			set {_e} to mSpecLabelEnsure({_id})
+			if {_e} is set:
+				{_e}.text(LegacyComponentSerializer.legacyAmpersand().deserialize(mSpecLabelText({_id})))
+		if {_e} is set:
+			loop all players:
+				set {_vp} to loop-player
+				set {_v} to "%uuid of {_vp}%"
+				set {_show} to false
+				if {_day} is true:
+					if {_w::*} contains {_v}:
+						set {_show} to true
+				if {_show} is true:
+					{_vp}.showEntity(mScPlugin(), {_e})
+				else:
+					{_vp}.hideEntity(mScPlugin(), {_e})
