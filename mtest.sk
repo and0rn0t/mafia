@@ -177,7 +177,11 @@ function mBotFacts(b: text, t: text) :: number:
 						else if {-mt::liar::%{_p}%} is set:
 							subtract 60 from {_s}
 						else if {-mt::nd::%{_p}%} is set:
-							add 150 to {_s}
+							# 밤에 죽은 쪽이 진짜일 가능성이 크다. 단 광인(자기가 그 직업인 줄 안다)이 있을 수 있으면 죽은 쪽이 광인일 수도 있어 약하게
+							if mBotMadPossible() is true:
+								add 60 to {_s}
+							else:
+								add 150 to {_s}
 						else if mBotK({_b}, {_p}) is "town":
 							add 120 to {_s}
 						else if {-m::alive::%{_p}%} is true:
@@ -263,6 +267,8 @@ function mBotWhy(b: text, t: text) :: text:
 									return "진짜 %{_rn}%%mKoEun({_rn})% 저인데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
 						if {-mt::nd::%{_p}%} is set:
 							set {-mt::whyinf} to "마피아가 자기 편을 죽일 리 없잖아요"
+							if mBotMadPossible() is true:
+								set {-mt::whyinf} to "죽은 쪽이 광인일 수도 있지만 진짜였을 가능성이 커요"
 							return "%{_rn}% 주장한 %mBotRef({_p})% 님이 밤에 죽었는데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
 						if {-m::pubrole::%{_p}%} is {_tc}:
 							set {-mt::whyinf} to "진짜는 이미 공개됐어요"
@@ -672,6 +678,10 @@ function mBotVotePick(id: text) :: text:
 		else:
 			# 시민 쪽: 아는 것 + 공개된 사실 + 의심. 남의 표는 조금만 따라간다(말 많은 사람에게 우르르 몰리지 않게)
 			add {_v} * 4 to {_s}
+			# 정치인이라고 한 사람: 진짜면 처형되지 않아 하루가 헛되니(실제로 그렇게 진 판이 있다) 확실하지 않으면 피한다
+			if {-mt::claim::%{_t}%} is "politician":
+				if {-m::pubrole::%{_t}%} is not set:
+					subtract 40 from {_s}
 			add mBotScore({_id}, {_t}) to {_s}
 		if {_s} > {_bs}:
 			set {_bs} to {_s}
@@ -804,9 +814,8 @@ function mBotVoteReview():
 											if loop-value-3 is not {_t}:
 												mBotAddSus({_b}, {_v}, 8)
 							if {_t} is {_b}:
-								mBotAddSus({_b}, {_v}, 15)
-								if {-mt::susr::%{_b}%::%{_v}%} is not set:
-									set {-mt::susr::%{_b}%::%{_v}%} to "%mBotRef({_v})% 님이 시민인 저한테 투표했어요"
+								# 나를 찍었다는 건 의심을 조금 올릴 뿐 근거로 말하지 않는다(사람은 실수로도 찍는다. 이 근거로 진짜 의사가 처형된 적이 있다)
+								mBotAddSus({_b}, {_v}, 8)
 		else:
 			delete {-mt::lastvote::%{_v}%}
 
@@ -1705,6 +1714,8 @@ function mBotHear(s: text, msg: text):
 		set {_kind} to "town"
 	else if {_m} contains "마피아":
 		set {_kind} to "mafia"
+	else if {_m} contains "투표하자" or "투표해요" or "투표할게" or "찍자" or "찍어요" or "찍을게" or "처형" or "가짜" or "사칭" or "수상":
+		set {_kind} to "mafia"
 	else if {_m} contains "시민" or "아니" or "믿으셔도":
 		set {_kind} to "town"
 	if {_kind} is "":
@@ -2478,7 +2489,7 @@ function mBotLlmParseNow(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호],""night_target"":번호,""night_result"":""결과""}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. night_target = 말한 사람이 지난밤 자기 능력을 썼다고 밝힌 대상 번호(자기 자신도 됨, 밝히지 않았으면 0). night_result = 그 결과: 경찰 조사면 mafia 또는 town, 탐정이면 그 대상이 능력을 쓴 상대 번호(아무에게도 안 썼으면 none), 의사가 공격을 막았으면 saved, 그 밖에는 빈 문자열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 분석할 말은 사람이 짧게 끊어 친 여러 줄을 이어 붙인 것일 수 있으니 하나의 문장으로 읽어라(예: ""전 주술사 3번 거짓말"" = 자기는 주술사, 3번이 거짓말한다). 확실하지 않으면 넣지 마라."
+	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호],""night_target"":번호,""night_result"":""결과""}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. night_target = 말한 사람이 지난밤 자기 능력을 썼다고 밝힌 대상 번호(자기 자신도 됨, 밝히지 않았으면 0). night_result = 그 결과: 경찰 조사면 mafia 또는 town, 탐정이면 그 대상이 능력을 쓴 상대 번호(아무에게도 안 썼으면 none), 의사가 공격을 막았으면 saved, 그 밖에는 빈 문자열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 줄임말은 미리 풀어 두었다(맢=마피아, ㄱㄱ=투표하자, 짭=가짜, 확시=확정 시민). 묻는 말(?)은 변호가 아니다. 분석할 말은 사람이 짧게 끊어 친 여러 줄을 이어 붙인 것일 수 있으니 하나의 문장으로 읽어라(예: ""전 주술사 3번 거짓말"" = 자기는 주술사, 3번이 거짓말한다). 확실하지 않으면 넣지 마라."
 	# 공개 기록(대화 포함, 앞 요청과 같은 앞부분) 뒤에 분석할 말을 붙인다
 	set {_f} to mBotLlmPost(mBotStatic(), mBotUser("", "%{_sys}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%%nl%JSON 하나만 답해라."), 300)
 	if {_f} is not set:
@@ -2528,6 +2539,14 @@ function mBotApplyParse(s: text, msg: text, raw: text):
 		stop
 	set {_j} to {_raw}.substring({_a}, {_z} + 1)
 	set {_o} to JsonParser.parseString({_j}).getAsJsonObject()
+	# 묻는 말("2번이 맞아?")은 변호로 읽지 않는다
+	set {_q} to false
+	if {_msg} contains "?":
+		set {_q} to true
+	# 사람이 근거를 들어 말하면("~인데", "~잖아", "그러면", "~라며") 그 고발을 더 믿는다(봇의 근거 없는 지목은 4, 보통은 8)
+	if mIsBot({_s}) is false:
+		if {_msg}.matches("(?s).*(데|잖아|니까|때문|왜냐|그러면|그럼|라며|으니|했는데).*") is true:
+			set {-mt::clw} to 20
 	loop "accuse" and "clear":
 		set {_key} to loop-value
 		if {_o}.has({_key}) is true:
@@ -2542,9 +2561,10 @@ function mBotApplyParse(s: text, msg: text, raw: text):
 						if mBotMentions({_msg}, loop-value-2) is true:
 							if {_key} is "accuse":
 								mBotClaim({_s}, loop-value-2, "mafia")
-							else:
+							else if {_q} is false:
 								mBotClaim({_s}, loop-value-2, "town")
 				add 1 to {_i}
+	delete {-mt::clw}
 	# 직업 주장은 AI 답을 믿지 않고 글에서 직접 확인한다(남의 직업 이야기를 말한 사람의 주장으로 잘못 읽지 않게)
 	set {_selfr} to mBotSelfRole({_msg})
 	if {_selfr} is not "":
@@ -2858,6 +2878,45 @@ on chat:
 		set {-mt::hbuf::%{_id}%} to {_msg}
 	set {-mt::hbt::%{_id}%} to {-mau::sec}
 
+# 광인이 있을 수 있는 판인지(광인은 자기가 그 직업인 줄 알고 주장하므로 직업 충돌 단서가 약해진다). 10명 이상이면 광인은 반드시 나온다(mroles.sk)
+function mBotMadPossible() :: boolean:
+	if size of {-m::players::*} >= 10:
+		return true
+	if mRoleOn("madman") is true:
+		return true
+	return false
+
+# 사람 채팅의 줄임말·은어·흔한 오타를 풀어 쓴다(규칙 읽기와 AI 해석 모두 이 글을 읽는다)
+#   맢/ㅁㅍ/마피 → 마피아(노맢 → 노마피아), ㄱㄱ/N번 가죠·가자·갈게요 → 투표하자, 짭 → 가짜, 확시 → 확정 시민, 시티 → 시민,
+#   ㄱㅊ → 경찰, 깡패 → 건달, 무당 → 주술사, 스파/자경/테러/정치/수호/암살/방화 → 스파이/자경단/테러리스트/정치인/수호자/암살자/방화범,
+#   ㅇㅇ → 응, ㄴㄴ → 아니, ㅇㅈ → 인정, ㄹㅇ → 진짜, 썻 → 썼, 됬 → 됐
+function mBotNormalize(msg: text) :: text:
+	set {_s} to {_msg}
+	set {_s} to {_s}.replaceAll("ㅁㅍ|맢피아|맢|마피(?!아)", "마피아")
+	set {_s} to {_s}.replaceAll("번\s*(가죠|가자|갑시다|갈게요|갈께요|가요|감|ㄱ+)(?![가-힣])", "번 투표하자")
+	set {_s} to {_s}.replaceAll("ㄱㄱ+", " 투표하자")
+	set {_s} to {_s}.replaceAll("짭\s*", "가짜 ")
+	set {_s} to {_s}.replaceAll("확시|확정시민", "확정 시민")
+	set {_s} to {_s}.replaceAll("시티", "시민")
+	set {_s} to {_s}.replaceAll("ㄱㅊ", "경찰")
+	set {_s} to {_s}.replaceAll("깡패", "건달")
+	set {_s} to {_s}.replaceAll("무당", "주술사")
+	set {_s} to {_s}.replaceAll("스파(?!이)", "스파이")
+	set {_s} to {_s}.replaceAll("자경(?!단)", "자경단")
+	set {_s} to {_s}.replaceAll("테러(?!리)", "테러리스트")
+	set {_s} to {_s}.replaceAll("정치(?!인)", "정치인")
+	set {_s} to {_s}.replaceAll("수호(?!자)", "수호자")
+	set {_s} to {_s}.replaceAll("암살(?!자)", "암살자")
+	set {_s} to {_s}.replaceAll("방화(?!범)", "방화범")
+	set {_s} to {_s}.replaceAll("ㅇㅇ", "응")
+	set {_s} to {_s}.replaceAll("ㄴㄴ", "아니")
+	set {_s} to {_s}.replaceAll("ㅇㅈ", "인정")
+	set {_s} to {_s}.replaceAll("ㄹㅇ", "진짜")
+	set {_s} to {_s}.replaceAll("썻", "썼")
+	set {_s} to {_s}.replaceAll("됬", "됐")
+	set {_s} to {_s}.replaceAll("\s{2,}", " ").trim()
+	return "%{_s}%"
+
 # 모아 둔 사람 말을 한 문장으로 읽는다
 function mBotHearFlush(id: text):
 	set {_msg} to {-mt::hbuf::%{_id}%}
@@ -2867,6 +2926,8 @@ function mBotHearFlush(id: text):
 		stop
 	if mState() is not "day" or "vote":
 		stop
+	# 줄임말·은어를 풀어서 읽는다(맢→마피아, ㄱㄱ→투표 등, mBotNormalize)
+	set {_msg} to mBotNormalize({_msg})
 	mBotDbg("사람 말 묶음 %mNum({_id})%번: %{_msg}%")
 	# AI 가 켜져 있으면 앞 대화까지 보고 뜻을 읽는다(단어만 보고 오해하지 않게, 단어 해석은 쓰지 않음)
 	if mBotLlmOn() is true:
