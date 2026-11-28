@@ -728,42 +728,62 @@ function mBotDeclare(b: text):
 	if {_t} is "":
 		stop
 	set {-mt::vdecl::%{_b}%} to {_t}
-	set {_n} to 0
-	if {-mt::vdn::%{_t}%} is set:
-		set {_n} to {-mt::vdn::%{_t}%}
-	set {-mt::vdn::%{_t}%} to {_n} + 1
 	if mBotLiar({_b}) is true:
 		set {_why} to mBotWhy("", {_t})
 	else:
 		set {_why} to mBotWhy({_b}, {_t})
 	set {_inf} to {-mt::whyinf}
-	# 근거를 댄 결론 수(시민 쪽 봇은 이것만 따라간다, mBotVotePick)
+	# 이 결론이 채팅에 나온 뒤에 다른 봇이 따라가도록 결론 수는 말이 나온 순간 센다(mBotFxRun "decl")
+	set {_rs} to "0"
 	if {_why} is not "":
-		set {_nr} to 0
-		if {-mt::vdr::%{_t}%} is set:
-			set {_nr} to {-mt::vdr::%{_t}%}
-		set {-mt::vdr::%{_t}%} to {_nr} + 1
-	if {_n} > 0:
-		if {-mt::vdfirst::%{_t}%} is set:
-			# 시민 쪽은 먼저 말한 사람이 근거를 댔을 때만 "같은 결론"이라고 얹는다(근거 없는 지목을 그대로 받아 주지 않게)
-			set {_same} to true
-			if mBotLiar({_b}) is false:
-				if {-mt::vdfr::%{_t}%} is not set:
-					set {_same} to false
-			if {_same} is true:
-				mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "")
-				stop
-	if {-mt::vdfirst::%{_t}%} is not set:
-		set {-mt::vdfirst::%{_t}%} to {_b}
-		if {_why} is not "":
-			set {-mt::vdfr::%{_t}%} to true
+		set {_rs} to "1"
+	set {_fx} to "decl|%{_t}%|%{_rs}%"
+	# 이미 채팅에 나온 같은 결론이 있으면 얹는다. 시민 쪽은 먼저 말한 사람이 근거를 댔을 때만 "같은 결론"이라고 얹는다
+	if {-mt::vdfirst::%{_t}%} is set:
+		set {_same} to true
+		if mBotLiar({_b}) is false:
+			if {-mt::vdfr::%{_t}%} is not set:
+				set {_same} to false
+		if {_same} is true:
+			mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "", {_fx})
+			stop
 	if {_why} is not "":
 		set {_full} to {_why}
 		if {_inf} is not "":
 			set {_full} to "%{_why}%^%{_inf}%"
-		mBotSpeak({_b}, "decl_why", {_t}, "", {_full})
+		mBotSpeak({_b}, "decl_why", {_t}, "", {_full}, {_fx})
 	else:
-		mBotSpeak({_b}, "decl", {_t}, "", "")
+		mBotSpeak({_b}, "decl", {_t}, "", "", {_fx})
+
+# 봇 말의 효과를 그 말이 채팅에 나온 순간에 반영한다(사람이 보는 대화 순서와 봇들의 반응 순서가 같게).
+#   "ie|종류|대상" 고발·변호 등(mBotIntentEffect) / "rep|직업|대상|결과" 아침 보고 기록·주장·모순(mBotRepApply) / "decl|대상|근거있음" 투표 결론 수
+function mBotFxRun(b: text, fx: text):
+	if {_fx} starts with "rep|":
+		set {_spec} to {_fx}.substring(4)
+		mBotRepApply({_b}, "%{_spec}%", true)
+		stop
+	set {_f::*} to split {_fx} at "|"
+	if {_f::1} is "ie":
+		set {_t} to ""
+		if {_f::3} is set:
+			set {_t} to {_f::3}
+		mBotIntentEffect({_b}, {_f::2}, {_t})
+		stop
+	if {_f::1} is "decl":
+		set {_t} to {_f::2}
+		set {_n} to 0
+		if {-mt::vdn::%{_t}%} is set:
+			set {_n} to {-mt::vdn::%{_t}%}
+		set {-mt::vdn::%{_t}%} to {_n} + 1
+		if {_f::3} is "1":
+			set {_nr} to 0
+			if {-mt::vdr::%{_t}%} is set:
+				set {_nr} to {-mt::vdr::%{_t}%}
+			set {-mt::vdr::%{_t}%} to {_nr} + 1
+		if {-mt::vdfirst::%{_t}%} is not set:
+			set {-mt::vdfirst::%{_t}%} to {_b}
+			if {_f::3} is "1":
+				set {-mt::vdfr::%{_t}%} to true
 
 # 테러리스트 봇의 길동무: 아는 마피아 → 가장 의심
 function mTestTake(id: text):
@@ -1205,7 +1225,7 @@ function mBotReport(b: text):
 	if {_spec} is "":
 		stop
 	set {-mt::told::%{_b}%::%{-m::day}%} to true
-	mBotRepApply({_b}, {_spec}, true)
+	# 보고 기록·직업 주장·모순 검사는 보고가 채팅에 나온 순간에(mBotFxRun "rep")
 	set {_f::*} to split {_spec} at "|"
 	set {_t} to ""
 	if {_f::2} is not "-":
@@ -1231,7 +1251,7 @@ function mBotReport(b: text):
 					if {_vic} is not "":
 						set {_pre} to "사실 저는 도둑이었어요. 어젯밤 %mBotRef({_vic})% 님 직업을 훔쳐서 이제 %{_sn}%%mKoIe({_sn})%"
 					set {_txt} to "%{_pre}%^앞에 한 말은 정체 숨기려던 거예요^%{_txt}%"
-	mBotSpeak({_b}, "report", {_t}, "", {_txt})
+	mBotSpeak({_b}, "report", {_t}, "", {_txt}, "rep|%{_spec}%")
 
 # 보고를 기록하고 직업 주장·모순 검사를 한다. fx = 경찰 결과를 고발/변호로 반영(봇의 보고. 사람 말은 AI 해석이 이미 반영)
 function mBotRepApply(s: text, spec: text, fx: boolean):
@@ -1545,24 +1565,38 @@ function mBotTypeWait(b: text, msg: text) :: number:
 	return {_d}
 
 # "^" 로 나눈 말은 사람이 끊어 치듯 한 줄씩 차례로 친다(줄마다 타자 시간)
-function mBotSay(b: text, msg: text):
+# fx = 마지막 줄이 채팅에 나온 순간 반영할 효과(mBotFxRun)
+function mBotSay(b: text, msg: text, fx: text = ""):
 	if {_msg} contains "^":
 		set {_parts::*} to split {_msg} at "^"
+		# 빈 줄을 빼고 마지막 줄 번호
+		set {_last} to 0
+		set {_k} to 0
+		loop {_parts::*}:
+			add 1 to {_k}
+			set {_pt0} to loop-value
+			if {_pt0}.trim() is not "":
+				set {_last} to {_k}
+		set {_k} to 0
 		# 아침 보고면 줄마다 보고 순서를 지킨다(다음 사람 보고가 중간에 끼지 않게)
 		set {_rep} to false
 		if {-mt::isrep::%{_b}%} is set:
 			set {_rep} to true
 		loop {_parts::*}:
+			add 1 to {_k}
 			if {_rep} is true:
 				set {-mt::isrep::%{_b}%} to true
 			set {_pt} to loop-value
 			set {_pt} to {_pt}.trim()
 			if {_pt} is not "":
-				mBotSayPart({_b}, "%{_pt}%")
+				if {_k} is {_last}:
+					mBotSayPart({_b}, "%{_pt}%", {_fx})
+				else:
+					mBotSayPart({_b}, "%{_pt}%")
 		stop
-	mBotSayPart({_b}, {_msg})
+	mBotSayPart({_b}, {_msg}, {_fx})
 
-function mBotSayPart(b: text, msg: text):
+function mBotSayPart(b: text, msg: text, fx: text = ""):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	set {_d} to mBotTypeWait({_b}, {_msg})
@@ -1572,6 +1606,8 @@ function mBotSayPart(b: text, msg: text):
 	if mState() is not "day" or "vote" or "execute":
 		stop
 	mBotSayNow({_b}, {_msg})
+	if {_fx} is not "":
+		mBotFxRun({_b}, {_fx})
 
 function mBotMafiaSay(b: text, msg: text):
 	if {-m::alive::%{_b}%} is not true:
@@ -2108,16 +2144,19 @@ function mBotIntentEffect(b: text, kind: text, t: text):
 		mBotClaim({_b}, {_t}, "mafia")
 		delete {-mt::clw}
 
-function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
+function mBotSpeak(b: text, kind: text, t: text, u: text, r: text, fx: text = ""):
 	if {-m::alive::%{_b}%} is not true:
 		stop
-	# 봇이 한 말의 뜻은 글을 다시 읽지 않고 의도로 바로 반영한다(오해가 번지지 않게)
-	mBotIntentEffect({_b}, {_kind}, {_t})
+	# 봇이 한 말의 뜻(고발·변호 등)은 글을 다시 읽지 않고 의도로 반영하되, 그 말이 채팅에 나온 순간에 반영한다(mBotFxRun).
+	#   그래야 다른 봇이 아직 화면에 안 나온 말에 먼저 반응하지 않아, 사람이 보는 대화 순서와 봇들의 반응 순서가 같다.
+	set {_e} to "ie|%{_kind}%|%{_t}%"
+	if {_fx} is not "":
+		set {_e} to {_fx}
 	set {_fb} to mBotFill(mBotLine({_kind}), {_t}, {_u}, {_r})
 	# AI 는 사람에게 대답할 때(reply)만 쓴다. 나머지는 정해 둔 문장(근거가 들어 있음)으로 바로 말한다
 	#   (작은 모델이 지목·해명을 만들면 근거를 지어내거나 역할극을 해서, 판단은 규칙이 하고 말도 규칙 문장으로 한다)
 	if {_kind} is not "reply":
-		mBotSay({_b}, {_fb})
+		mBotSay({_b}, {_fb}, {_e})
 		stop
 	if mBotLlmOn() is true:
 		# 이미 이 봇의 말을 만드는 중이면 새 말은 버린다(정해 둔 문장이 끼어들어 두 번 말하지 않게)
