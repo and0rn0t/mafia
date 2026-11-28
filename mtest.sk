@@ -402,6 +402,7 @@ function mBotInit():
 	delete {-mt::sus::*}
 	delete {-mt::claim::*}
 	delete {-mt::lastvote::*}
+	delete {-mt::pv::*}
 	delete {-mt::told::*}
 	delete {-mt::qm::*}
 	delete {-mt::qt::*}
@@ -768,10 +769,16 @@ function mBotFxRun(b: text, fx: text):
 		set {_t} to ""
 		if {_f::3} is set:
 			set {_t} to {_f::3}
+		# 투표했다고 말했으면 그 사람의 투표는 모두가 안다
+		if {_f::2} is "vote" or "vote_why":
+			if {_t} is not "":
+				set {-mt::pv::%{_b}%} to {_t}
 		mBotIntentEffect({_b}, {_f::2}, {_t})
 		stop
 	if {_f::1} is "decl":
 		set {_t} to {_f::2}
+		# 찍겠다고 밝힌 사람(봇은 밝힌 대로 찍는다)
+		set {-mt::pv::%{_b}%} to {_t}
 		set {_n} to 0
 		if {-mt::vdn::%{_t}%} is set:
 			set {_n} to {-mt::vdn::%{_t}%}
@@ -811,10 +818,11 @@ function mBotUniqueRole(r: text) :: boolean:
 
 # 투표가 끝났을 때(다음 단계로 넘어가는 순간): 누가 누구를 찍었는지로 의심을 고친다
 #   확인된 시민을 찍은 사람 +20, 확인된 마피아를 찍은 사람 -10, 아는 마피아가 있는데 다른 사람을 찍은 사람 +8, 나(시민)를 찍은 사람 +15
+# 투표는 비밀이다(누가 누구를 찍었는지는 알림에 나오지 않는다). 봇은 스스로 밝힌 투표만 안다: 토론 때 밝힌 결론, 투표했다는 말({-mt::pv::사람}, mBotFxRun·mBotHearFlush)
 function mBotVoteReview():
 	loop {-m::players::*}:
 		set {_v} to loop-value
-		set {_t} to {-m::vote::%{_v}%}
+		set {_t} to {-mt::pv::%{_v}%}
 		if {_t} is set:
 			set {-mt::lastvote::%{_v}%} to {_t}
 			loop {-m::players::*}:
@@ -825,7 +833,7 @@ function mBotVoteReview():
 							set {_kt} to mBotK({_b}, {_t})
 							if {_kt} is "town":
 								mBotAddSus({_b}, {_v}, 20)
-								set {-mt::susr::%{_b}%::%{_v}%} to "%mBotRef({_v})% 님이 시민으로 확인된 %mBotRef({_t})% 님한테 투표했어요"
+								set {-mt::susr::%{_b}%::%{_v}%} to "%mBotRef({_v})% 님이 시민으로 확인된 %mBotRef({_t})% 님을 찍겠다고 했어요"
 							else if {_kt} is "mafia" or "evil":
 								mBotAddSus({_b}, {_v}, -10)
 							else:
@@ -835,7 +843,7 @@ function mBotVoteReview():
 											if loop-value-3 is not {_t}:
 												mBotAddSus({_b}, {_v}, 8)
 							if {_t} is {_b}:
-								# 나를 찍었다는 건 의심을 조금 올릴 뿐 근거로 말하지 않는다(사람은 실수로도 찍는다. 이 근거로 진짜 의사가 처형된 적이 있다)
+								# 나를 찍겠다고 밝혔다는 건 의심을 조금 올릴 뿐 근거로 말하지 않는다(사람은 실수로도 찍는다)
 								mBotAddSus({_b}, {_v}, 8)
 		else:
 			delete {-mt::lastvote::%{_v}%}
@@ -854,7 +862,7 @@ function mBotDeathReview():
 							if mBotLiar({_b}) is false:
 								mBotAddSus({_b}, {_v}, 12)
 								if {-mt::susr::%{_b}%::%{_v}%} is not set:
-									set {-mt::susr::%{_b}%::%{_v}%} to "%mBotRef({_v})% 님이 어제 투표한 %mBotRef({_d})% 님은 밤에 죽었어요. 밤에 죽는 건 대개 시민이니 시민을 찍었던 거예요"
+									set {-mt::susr::%{_b}%::%{_v}%} to "%mBotRef({_v})% 님이 어제 찍겠다던 %mBotRef({_d})% 님이 밤에 죽었어요"
 
 # s 가 직업 r 을 주장했다. 한 사람만 있는 직업을 이미 다른 생존자가 주장했으면 충돌로 처리한다
 function mBotSetClaim(s: text, r: text):
@@ -2986,6 +2994,13 @@ function mBotHearFlush(id: text):
 		stop
 	# 줄임말·은어를 풀어서 읽는다(맢→마피아, ㄱㄱ→투표 등, mBotNormalize)
 	set {_msg} to mBotNormalize({_msg})
+	# 사람이 누구를 찍었다/찍겠다고 말하면 그 사람의 투표로 기억한다(투표는 비밀이라 말한 것만 안다)
+	if {_msg}.matches("(?s).*?(\d+)\s*번?\s*(님)?\s*(찍었|찍음|찍을|찍어|투표했|투표함|투표할|투표하자|투표요).*") is true:
+		set {_pvn} to {_msg}.replaceAll("(?s)^.*?(\d+)\s*번?\s*(님)?\s*(찍었|찍음|찍을|찍어|투표했|투표함|투표할|투표하자|투표요).*$", "$1")
+		set {_pvi} to "%{_pvn}%" parsed as integer
+		loop {-m::players::*}:
+			if {-m::num::%loop-value%} is {_pvi}:
+				set {-mt::pv::%{_id}%} to loop-value
 	mBotDbg("사람 말 묶음 %mNum({_id})%번: %{_msg}%")
 	# AI 가 켜져 있으면 앞 대화까지 보고 뜻을 읽는다(단어만 보고 오해하지 않게, 단어 해석은 쓰지 않음)
 	if mBotLlmOn() is true:
@@ -3210,6 +3225,7 @@ every second:
 		delete {-mt::isrep::*}
 		if {_s} is "day":
 			delete {-mt::said::*}
+			delete {-mt::pv::*}
 			delete {-mt::vdecl::*}
 			delete {-mt::vdn::*}
 			delete {-mt::vdfirst::*}
