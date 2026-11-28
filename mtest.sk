@@ -436,6 +436,8 @@ function mBotInit():
 	delete {-mt::vdfr::*}
 	delete {-mt::repdue::*}
 	delete {-mt::noparse::*}
+	delete {-mt::repq::*}
+	delete {-mt::ccpol::*}
 	loop {-m::players::*}:
 		set {_b} to loop-value
 		if mIsBot({_b}) is true:
@@ -508,6 +510,82 @@ function mBotResText(r: text) :: text:
 		return "대상 없이 능력을 씀"
 	return "아무에게도 능력을 쓰지 않음"
 
+# 거짓말하는 쪽(마피아 팀·중립 살해자·보조)이 본 t 의 위협 점수. 밤에 죽이거나 막을 사람, 낮에 몰 사람을 고를 때 쓴다(고수의 우선순위):
+#   1) 경찰(주장 하나뿐이거나 공개) > 탐정 > 의사·수호자 > 주술사·기자 > 자경단 순으로 위험하다. 팀원을 마피아로 지목한 경찰은 더 위험하다.
+#   2) 군인을 주장한 사람은 마피아 공격을 한 번 버텨 밤 하나를 버리게 되니 피한다(암살자는 군인을 무시하므로 상관없다).
+#   3) 팀원(또는 나)이 가짜로 같은 직업을 주장해 맞서는 상대는 밤에 죽이면 "죽은 쪽이 진짜"가 되어 팀원이 들키므로 피한다(낮 투표로 보낸다).
+#   4) 시민 쪽이 이미 의심하는 사람은 낮에 대신 처형될 사람이니 살려 둔다.
+function mBotThreat(b: text, t: text) :: number:
+	set {_s} to mBotSus({_b}, {_t})
+	set {_ar} to mActRole({_b})
+	set {_c} to ""
+	if {-m::pubrole::%{_t}%} is set:
+		set {_c} to {-m::pubrole::%{_t}%}
+	else if {-mt::claim::%{_t}%} is set:
+		set {_c} to {-mt::claim::%{_t}%}
+	if {_c} is "police":
+		add 110 to {_s}
+		if {-m::pubrole::%{_t}%} is "police":
+			add 50 to {_s}
+		# 이 경찰이 팀원을 마피아로 지목했거나(더 위험) 팀원을 시민이라고 해 줬으면(오히려 쓸모 있다)
+		loop {-mt::rep::%{_t}%::*}:
+			set {_f::*} to split loop-value at "|"
+			if {_f::1} is "police":
+				if {_f::2} is not "-":
+					set {_mate} to false
+					if {_f::2} is {_b}:
+						set {_mate} to true
+					else if mBotK({_b}, {_f::2}) is "mafia":
+						set {_mate} to true
+					if {_mate} is true:
+						if {_f::3} is "mafia":
+							add 60 to {_s}
+						else:
+							subtract 40 from {_s}
+	else if {_c} is "detective":
+		add 90 to {_s}
+	else if {_c} is "doctor":
+		add 75 to {_s}
+	else if {_c} is "guardian":
+		add 60 to {_s}
+	else if {_c} is "shaman" or "reporter":
+		add 45 to {_s}
+	else if {_c} is "vigilante":
+		add 40 to {_s}
+	else if {_c} is "thug":
+		add 20 to {_s}
+	else if {_c} is "soldier":
+		if {_ar} is not "assassin":
+			if {-m::pubrole::%{_t}%} is not "soldier":
+				subtract 80 from {_s}
+	else if {_c} is "politician" or "terrorist":
+		add 5 to {_s}
+	else if {_c} is "":
+		# 아직 직업을 안 밝힌 사람: 무엇일지 모른다
+		add 15 to {_s}
+	# 3) 팀원·나와 같은 직업을 주장해 맞서는 상대
+	if {-m::pubrole::%{_t}%} is not set:
+		if {-mt::claim::%{_t}%} is set:
+			if mBotUniqueRole({-mt::claim::%{_t}%}) is true:
+				loop {-m::players::*}:
+					set {_m} to loop-value
+					if {_m} is not {_t}:
+						if {-m::alive::%{_m}%} is true:
+							set {_mine} to false
+							if {_m} is {_b}:
+								set {_mine} to true
+							else if mBotK({_b}, {_m}) is "mafia":
+								set {_mine} to true
+							if {_mine} is true:
+								if {-mt::claim::%{_m}%} is {-mt::claim::%{_t}%}:
+									subtract 150 from {_s}
+	# 4) 시민 쪽이 이미 의심하는 사람은 낮에 처형될 테니 살려 둔다(밤 대상으로만. 낮에 몰 때는 오히려 얹는다)
+	if mState() is "night":
+		set {_pf} to mBotFacts("", {_t})
+		if {_pf} >= 60:
+			subtract 70 from {_s}
+	return {_s}
+
 # 살아 있는 다른 참가자 중 점수가 가장 높은 사람(c 목록 안에서). 같은 마피아 팀원은 마피아 팀 봇이 고르지 않는다
 function mBotBest(b: text, c: texts, mode: text) :: text:
 	set {_best} to ""
@@ -534,10 +612,8 @@ function mBotBest(b: text, c: texts, mode: text) :: text:
 					subtract 500 from {_s}
 				add mBotSus({_b}, {_t}) to {_s}
 			else if {_mode} is "threat":
-				# 마피아 팀: 직업을 밝힌 사람, 팀원을 의심하는 사람
-				if {-mt::claim::%{_t}%} is set:
-					add 60 to {_s}
-				add mBotSus({_b}, {_t}) to {_s}
+				# 마피아 팀: 위험한 직업을 밝힌 사람, 팀원을 의심하는 사람(mBotThreat)
+				add mBotThreat({_b}, {_t}) to {_s}
 			else if {_mode} is "protect":
 				# 지키기: 경찰 등 직업을 밝힌 사람, 시민으로 아는 사람
 				if {-mt::claim::%{_t}%} is set:
@@ -1043,6 +1119,44 @@ function mBotFakePick(b: text) :: text:
 	set {-mt::fakerole::%{_b}%} to {_pick}
 	return {_pick}
 
+# 맞경(경찰 맞사칭): 오늘 아침 나보다 먼저 보고한 경찰 주장자가 나나 팀원을 마피아로 지목했으면, 그 경찰을 가짜로 몰 경찰 주장을 한다.
+#   고수 마피아의 기본기: 경찰 주장이 하나뿐이면 시민이 그대로 믿지만, 둘이 되면 누가 진짜인지 다퉈야 한다.
+#   조건: 오늘 팀에서 아직 아무도 맞경하지 않았고, 나는 아직 다른 직업을 밝히지 않았거나 이미 경찰이라고 했고, 상대 경찰은 공개된 진짜 경찰이 아니다.
+#   보고 순서는 번호 순이고 먼저 보고한 사람의 말이 먼저 나오므로({-mt::repq}, mBotReport) 나오기 전에 정해도 사람이 보는 순서와 맞는다.
+# 맞설 경찰 주장자(없으면 "")
+function mBotCounterPol(b: text) :: text:
+	set {_d} to {-m::day}
+	if {-mt::ccpol::%{_d}%} is set:
+		return ""
+	if mRoleOn("police") is not true:
+		return ""
+	if {-mt::fakerole::%{_b}%} is set:
+		if {-mt::fakerole::%{_b}%} is not "police":
+			return ""
+	if {-mt::claim::%{_b}%} is set:
+		if {-mt::claim::%{_b}%} is not "police":
+			return ""
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {_p} is not {_b}:
+			if {-m::alive::%{_p}%} is true:
+				if mBotK({_b}, {_p}) is not "mafia":
+					if {-m::pubrole::%{_p}%} is not set:
+						set {_s} to ""
+						if {-mt::repq::%{_p}%::%{_d}%} is set:
+							set {_s} to {-mt::repq::%{_p}%::%{_d}%}
+						else if {-mt::rep::%{_p}%::%{_d}%} is set:
+							set {_s} to {-mt::rep::%{_p}%::%{_d}%}
+						if {_s} starts with "police|":
+							set {_f::*} to split {_s} at "|"
+							if {_f::3} is "mafia":
+								if {_f::2} is {_b}:
+									return {_p}
+								if mBotK({_b}, {_f::2}) is "mafia":
+									if {-m::alive::%{_f::2}%} is true:
+										return {_p}
+	return ""
+
 # 실제로 죽이는 마피아 봇(능력을 쓸 수 있는 첫 마피아 봇). 나머지 마피아 봇은 밤에 능력을 쓰지 않아 탐정에게 걸리지 않는다
 function mBotMafiaLeader() :: text:
 	loop mBotMafiaBots():
@@ -1062,6 +1176,15 @@ function mBotRepMake(b: text) :: text:
 	# ---- 거짓 보고(직업이 공개된 뒤에는 숨길 수 없으니 사실대로)
 	if mBotLiar({_b}) is true:
 		if {-m::pubrole::%{_b}%} is not set:
+			# 경찰이 나나 팀원을 지목했으면 맞경: 그 경찰을 조사했더니 마피아라고 한다
+			set {_cp} to mBotCounterPol({_b})
+			if {_cp} is not "":
+				set {-mt::fakerole::%{_b}%} to "police"
+				set {-mt::ccpol::%{_d}%} to {_b}
+				set {_spec} to "police|%{_cp}%|mafia"
+				mBotDbg("맞경 %mNum({_b})%번 → %mNum({_cp})%번")
+				mBotPMem({_b}, "%{_d}%일차 아침에 경찰인 척 맞섰다: %mBotPlain(mBotRepText({_b}, {_spec}))%")
+				return {_spec}
 			set {_r} to mBotFakePick({_b})
 			loop {-m::players::*}:
 				if loop-value is not {_b}:
@@ -1233,6 +1356,8 @@ function mBotReport(b: text):
 	set {_spec} to mBotRepMake({_b})
 	if {_spec} is "":
 		stop
+	# 곧 채팅에 나올 보고(뒤 번호 봇이 맞경할지 정할 때 본다. 보고는 번호 순서대로 나온다)
+	set {-mt::repq::%{_b}%::%{-m::day}%} to {_spec}
 	set {-mt::told::%{_b}%::%{-m::day}%} to true
 	# 보고 기록·직업 주장·모순 검사는 보고가 채팅에 나온 순간에(mBotFxRun "rep")
 	set {_f::*} to split {_spec} at "|"
