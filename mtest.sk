@@ -1383,7 +1383,8 @@ function mBotLine(kind: text) :: text:
 		set {_l::*} to "경찰인데 @t 님은 시민 확인했어요", "@t 님 조사했는데 시민이에요. 저 경찰이에요", "경찰입니다. @t 님은 믿으셔도 돼요"
 	else if {_kind} is "accuse":
 		# 근거가 흐릿할 때: 왜 의심하는지 + 그래서 어떻게 할지
-		set {_l::*} to "@t 님은 딱 꼬집을 근거는 없지만 오늘 하는 말이 계속 다른 사람 탓이에요. 해명 들어 보고 정할게요", "@t 님 보고가 다른 사람 보고랑 이어지지 않아요. 확실하진 않으니 일단 @t 님 해명부터 들어 봐요"
+		# 시민 쪽 봇이 쓰는 말이라 지어낸 근거를 넣지 않는다(근거가 없다고 솔직하게 말하고 해명을 요구)
+		set {_l::*} to "@t 님한테 의심이 많이 모였는데, 저도 확실한 근거는 없어요. @t 님 해명부터 들어 보고 정할게요", "딱 꼬집을 근거는 없지만 지금 흐름으로는 @t 님이 제일 걸려요. @t 님 이야기 좀 더 들어 봐요"
 	else if {_kind} is "accuse_old":
 		set {_l::*} to "@t 님이 제일 수상해요. 마피아 같아요", "저는 @t 님 의심돼요", "@t 님 말이 좀 이상해요. 마피아 아닐까요", "@t 님 오늘 좀 조용하신데 마피아 같네요", "솔직히 @t 님 마피아 같아요"
 	else if {_kind} is "mafia_push":
@@ -1611,6 +1612,8 @@ function mBotClaim(s: text, t: text, kind: text):
 								set {_w} to 8
 								if {-mt::claim::%{_s}%} is "police":
 									set {_w} to 20
+								if {-mt::clw} is set:
+									set {_w} to {-mt::clw}
 								mBotAddSus({_b}, {_t}, {_w})
 								if mBotScore({_b}, {_t}) >= 80:
 									if chance of 20%:
@@ -2029,8 +2032,11 @@ function mBotIntentEffect(b: text, kind: text, t: text):
 		mBotClaim({_b}, {_t}, "town")
 		stop
 	# 의심 말하기(봇 말은 AI 로 다시 읽지 않으니 늘 의도로 반영)
+	# 근거 없는 지목(흐릿한 의심, 마피아 쪽의 몰아가기, 억울하다는 반박)은 듣는 봇이 반만 믿는다({-mt::clw}, 근거 있는 지목은 사실 점수로 따로 센다)
 	if {_kind} is "accuse" or "mafia_push" or "defend":
+		set {-mt::clw} to 4
 		mBotClaim({_b}, {_t}, "mafia")
+		delete {-mt::clw}
 
 function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
 	if {-m::alive::%{_b}%} is not true:

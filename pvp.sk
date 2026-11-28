@@ -7,7 +7,8 @@
 # PVP 에서 죽으면 로비로 돌아간다(아이템은 떨어뜨리지 않음). /pvp 로 들어가고 나오기(별칭 /로비, /lobby 는 나오기).
 # 마피아 게임이 시작되면 PVP 에 있던 사람을 모두 로비로 돌리고 PVP 상태를 초기화한다(pvpStopAll, mjoin.sk mStart 가 맨 먼저 부른다).
 # 마피아 게임 중에는 들어갈 수 없다(진주·상자는 로비에서만 있고, 게임이 시작되면 mLobbyClear 가 치운다).
-# 관리자: /mpvp world <월드 이름>(PVP 월드 지정), /mpvp spawn(지금 서 있는 곳을 PVP 스폰으로), /mpvp info.
+# 관리자: /mpvp world <월드 이름>(PVP 월드 지정), /mpvp spawn(지금 서 있는 곳을 PVP 스폰으로), /mpvp height [Y](겉날개 강하 높이), /mpvp(정보).
+# 들어갈 때는 스폰 주변 상공에서 겉날개로 내려온다(MCK 의 상공 낙하와 같음, pvpDropStart).
 #   PVP 월드 = {mcfg::pvp::world}(그 월드 안에서만 MCK 전투가 켜진다: pvpIn), 스폰 = mLocSave("pvp", ...)(없으면 그 월드의 스폰).
 #   월드는 미리 불러와 있어야 한다(마피아 /world 명령 등). 마피아 게임 월드·로비와 다른 월드를 써야 한다.
 # 변수: {-pvp::in::uuid}(PVP 중), {-pvp::dead::uuid}(PVP 에서 죽어 로비로 보낼 사람)
@@ -105,6 +106,79 @@ function pvpLobbyClear(p: player):
 			if pvpItemName({_n}) is true:
 				clear slot loop-value of {_p}'s inventory
 
+# ===== 상공 낙하(겉날개, MCK game.sk 의 gDropStart 와 같은 방식) =====
+# PVP 에 들어가면 스폰 주변(반경 10칸)의 상공에서 겉날개를 입고 활강해 내려온다. 땅에 닿으면 겉날개를 벗기고 원래 가슴 방어구를 돌려준다.
+# 높이: {mcfg::pvp::dropy}(/mpvp height <높이>), 없으면 스폰 높이 + 60(월드 높이 제한 - 2 까지).
+# 낙하 중에는 낙하/벽 충돌 피해를 받지 않고 스킬·도약을 못 쓴다(MCK 쪽이 {-gdropon} 을 본다). 개인전이라 팀 색 발광은 없다.
+# 변수(RAM): {-gdropon::uuid}(낙하 중), {-gdropchest::uuid}(원래 가슴 방어구), {-gdropgen::uuid}(낙하 세대)
+function pvpDropLoc(base: location) :: location:
+	set {_w} to {_base}.getWorld()
+	set {_top} to {_w}.getMaxHeight() - 2
+	set {_y} to {_base}.getY() + 60
+	if {mcfg::pvp::dropy} is set:
+		set {_y} to {mcfg::pvp::dropy}
+	if {_y} > {_top}:
+		set {_y} to {_top}
+	set {_ang} to random number between 0 and 360
+	set {_dist} to sqrt(random number between 0 and 1) * 10
+	set {_r} to {_base}.clone()
+	set {_dx} to cos({_ang}) * {_dist}
+	set {_dz} to sin({_ang}) * {_dist}
+	{_r}.setX({_base}.getX() + {_dx})
+	{_r}.setZ({_base}.getZ() + {_dz})
+	{_r}.setY({_y})
+	return {_r}
+
+function pvpDropEnd(p: player):
+	set {_id} to "%uuid of {_p}%"
+	add 1 to {-gdropgen::%{_id}%}
+	if {-gdropon::%{_id}%} is true:
+		if {_p} is online:
+			if {-gdropchest::%{_id}%} is set:
+				set chestplate of {_p} to {-gdropchest::%{_id}%}
+			else:
+				delete chestplate of {_p}
+			{_p}.setGliding(false)
+	delete {-gdropon::%{_id}%}
+	delete {-gdropchest::%{_id}%}
+
+function pvpDropStart(p: player):
+	set {_id} to "%uuid of {_p}%"
+	if {-gdropon::%{_id}%} is true:
+		add 1 to {-gdropgen::%{_id}%}
+	else:
+		delete {-gdropchest::%{_id}%}
+		if chestplate of {_p} is set:
+			set {-gdropchest::%{_id}%} to chestplate of {_p}
+		set {-gdropon::%{_id}%} to true
+		add 1 to {-gdropgen::%{_id}%}
+	set {_gen} to {-gdropgen::%{_id}%}
+	set chestplate of {_p} to elytra named "&f낙하용 겉날개"
+	{_p}.setGliding(true)
+	apply slow falling potion of tier 1 without any particles whilst hiding the potion icon to {_p} for 1 seconds replacing the existing effect
+	wait 1 second
+	set {_t} to 0
+	while {_t} < 400:
+		if {-gdropgen::%{_id}%} is not {_gen}:
+			stop
+		if {_p} is not online:
+			stop
+		if pvpIn({_p}) is not true:
+			exit loop
+		if {_p}.isOnGround() is true:
+			exit loop
+		wait 5 ticks
+		add 1 to {_t}
+	if {-gdropgen::%{_id}%} is {_gen}:
+		pvpDropEnd({_p})
+
+on damage of player:
+	if {-gdropon::%victim's uuid%} is not true:
+		stop
+	set {_cn} to event.getCause().name()
+	if {_cn} is "FALL" or "FLY_INTO_WALL":
+		cancel event
+
 # PVP 로 들어간다
 function pvpEnter(p: player):
 	if mState() is not "lobby":
@@ -123,7 +197,8 @@ function pvpEnter(p: player):
 		set {_p}'s gamemode to adventure
 	else if gamemode of {_p} is spectator or creative:
 		set {_p}'s gamemode to adventure
-	mTp({_p}, {_l})
+	# 스폰 상공에서 겉날개로 내려온다(pvpDropStart)
+	mTp({_p}, pvpDropLoc({_l}))
 	wait 2 ticks
 	if pvpIn({_p}) is not true:
 		stop
@@ -133,6 +208,7 @@ function pvpEnter(p: player):
 	jumpFlightOn({_p})
 	mSound({_p}, "entity.enderman.teleport", 0.6, 1.2)
 	send action bar colored "&bPVP &7| 죽거나 5번 칸 진주를 쓰면 로비로 돌아갑니다" to {_p}
+	pvpDropStart({_p})
 
 # 체력·배고픔·효과·불 등 몸 상태를 처음으로
 function pvpResetBody(p: player):
@@ -181,6 +257,8 @@ function pvpLeave(p: player, quiet: boolean):
 	set {_id} to "%uuid of {_p}%"
 	delete {-pvp::in::%{_id}%}
 	delete {-pvp::dead::%{_id}%}
+	# 낙하 중이면 겉날개를 벗긴다
+	pvpDropEnd({_p})
 	# 꿀벌 조종 중이면 끝낸다(bee.sk)
 	if {-beemode::%{_id}%} is set:
 		beeClean({_p}, true)
@@ -309,6 +387,14 @@ command /mpvp [<text>] [<text>]:
 				stop
 			set {mcfg::pvp::world} to arg-2
 			send "&aPVP 월드: %arg-2%" to sender
+		else if arg-1 is "height":
+			set {_h} to arg-2 parsed as number
+			if {_h} is not set:
+				delete {mcfg::pvp::dropy}
+				send "&a겉날개 강하 높이: 스폰 높이 + 60(기본)" to sender
+				stop
+			set {mcfg::pvp::dropy} to {_h}
+			send "&a겉날개 강하 높이: Y %{_h}%" to sender
 		else if arg-1 is "spawn":
 			if sender is not a player:
 				stop
@@ -320,7 +406,7 @@ command /mpvp [<text>] [<text>]:
 			if {mcfg::pvp::world} is set:
 				set {_w} to {mcfg::pvp::world}
 			send "&ePVP 월드: &f%{_w}%" to sender
-			send "&7/mpvp world <월드 이름> | /mpvp spawn(서 있는 곳)" to sender
+			send "&7/mpvp world <월드 이름> | /mpvp spawn(서 있는 곳) | /mpvp height [Y](겉날개 강하 높이, 비우면 스폰 + 60)" to sender
 			set {_n} to 0
 			loop all players:
 				if pvpIn(loop-player) is true:
