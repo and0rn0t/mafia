@@ -74,8 +74,32 @@ function pvpItemName(n: text) :: boolean:
 		return true
 	return false
 
+# PVP 월드 밖에서는 PVP 무기·스킬 아이템(구성 아이템, 꿀벌 조종 아이템, 화살, 낙하용 겉날개)을 치운다: 로비에서는 1~4번 칸 등이 빈 칸으로 남는다.
+#   (PVP 에서 접속을 끊고 다시 들어온 op 처럼 인벤토리가 지워지지 않은 경우까지 매초 정리한다. mLobbyEnsure → pvpLobbySlots)
+function pvpLobbyScrub(p: player):
+	loop itemIds():
+		add itemName(loop-value) to {_names::*}
+	add itemName("bee_sting"), itemName("bee_bomb") and itemName("bee_stop") to {_names::*}
+	loop integers from 0 to 40:
+		set {_s} to loop-value
+		set {_it} to slot {_s} of {_p}'s inventory
+		if {_it} is not air:
+			set {_n} to name of {_it}
+			if {_n} is set:
+				if {_names::*} contains {_n}:
+					set slot {_s} of {_p}'s inventory to air
+			if {_it} is an arrow:
+				set slot {_s} of {_p}'s inventory to air
+	set {_c} to chestplate of {_p}
+	if {_c} is set:
+		if name of {_c} is "&f낙하용 겉날개":
+			delete chestplate of {_p}
+
 # 로비·PVP 핫바 5번(진주)·6번(상자) 칸을 맞춘다(mjoin.sk mLobbyEnsure 가 부른다)
 function pvpLobbySlots(p: player):
+	if pvpIn({_p}) is false:
+		if {-pvp::in::%uuid of {_p}%} is not set:
+			pvpLobbyScrub({_p})
 	set {_want} to pvpGoName()
 	if pvpIn({_p}) is true:
 		set {_want} to pvpBackName()
