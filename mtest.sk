@@ -513,6 +513,13 @@ function mKoJ(w: text, a: text, b: text) :: text:
 		return {_b}
 	return {_a}
 
+# "이에요/예요", "이라고/라고"
+function mKoIe(w: text) :: text:
+	return mKoJ({_w}, "이에요", "예요")
+
+function mKoIra(w: text) :: text:
+	return mKoJ({_w}, "이라고", "라고")
+
 # 색 코드를 뺀 글(AI 에게 줄 때)
 function mBotPlain(s: text) :: text:
 	return {_s}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
@@ -670,7 +677,7 @@ function mBotRepText(s: text, spec: text) :: text:
 	set {_t} to {_f::2}
 	set {_res} to {_f::3}
 	set {_rn} to mRoleName({_r})
-	set {_head} to "%{_rn}%%mKoJ({_rn}, ""이에요"", ""예요"")%."
+	set {_head} to "%{_rn}%%mKoIe({_rn})%."
 	set {_tr} to ""
 	if {_t} is not "-":
 		set {_tr} to mBotRef({_t})
@@ -784,7 +791,7 @@ function mBotContraOne(s: text, d: number, dl: number):
 	if {_pr} is set:
 		if {_pr} is not {_r}:
 			set {_pn} to mRoleName({_pr})
-			mBotContra({_s}, "", "pub-%{_s}%", "%{_rs}% 님은 %{_rn}%%mKoJ({_rn}, ""이라고"", ""라고"")% 했는데 공개된 직업은 %{_pn}%%mKoJ({_pn}, ""이에요"", ""예요"")%", 80, {_dl})
+			mBotContra({_s}, "", "pub-%{_s}%", "%{_rs}% 님은 %{_rn}%%mKoIra({_rn})% 했는데 공개된 직업은 %{_pn}%%mKoIe({_pn})%", 80, {_dl})
 			stop
 	if {_t} is "-":
 		stop
@@ -808,7 +815,7 @@ function mBotContraOne(s: text, d: number, dl: number):
 			set {_tpn} to mRoleName({_tp})
 			if {_res} is "mafia":
 				if {_tp} is not "mafia":
-					mBotContra({_s}, "", "pol-%{_s}%-%{_d}%", "%{_rs}% 님이 %{_rt}% 님을 마피아라고 했는데 공개된 직업은 %{_tpn}%%mKoJ({_tpn}, ""이에요"", ""예요"")%", 80, {_dl})
+					mBotContra({_s}, "", "pol-%{_s}%-%{_d}%", "%{_rs}% 님이 %{_rt}% 님을 마피아라고 했는데 공개된 직업은 %{_tpn}%%mKoIe({_tpn})%", 80, {_dl})
 			else if {_res} is "town":
 				if {_tp} is "mafia":
 					mBotContra({_s}, "", "pol-%{_s}%-%{_d}%", "%{_rs}% 님이 %{_rt}% 님은 마피아가 아니라고 했는데 마피아였어요", 80, {_dl})
