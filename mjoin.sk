@@ -212,8 +212,9 @@ function mRoleReveal(p: player):
 		stop
 	set {_shown} to {_r}
 	if {_r} is "madman":
-		set {_shown} to mFakeRole()
-		set {-m::fake::%{_id}%} to {_shown}
+		if {-m::fake::%{_id}%} is not set:
+			set {-m::fake::%{_id}%} to mFakeRole()
+		set {_shown} to {-m::fake::%{_id}%}
 	set {_nm} to mRoleName({_shown})
 	set {_ds} to mRoleDesc({_shown})
 	set {_pool} to mRolePool({_shown})
