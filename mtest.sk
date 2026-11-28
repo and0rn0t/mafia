@@ -45,6 +45,7 @@ import:
 	com.google.gson.JsonObject
 	com.google.gson.JsonArray
 	com.google.gson.JsonParser
+	mafiabrain.Brain
 
 # mTestBots, mTestName, mIsBot(게임 코드가 부르는 것)은 mcore.sk 에 있다(이 파일을 빼도 게임이 돌게).
 
@@ -201,6 +202,13 @@ function mBotScore(b: text, t: text) :: number:
 		return 500
 	if {_k} is "town":
 		return -500
+	# 시민 쪽 봇: 공개 직업이 없는 사람은 가능한 세계 추론(mWmScore)으로. 계산 전이거나 거짓말하는 쪽이면 예전 사실 점수(mBotFacts)
+	if {-m::pubrole::%{_t}%} is not set:
+		if {_b} is not "":
+			if mBotLiar({_b}) is false:
+				set {_w} to mWmScore({_b}, {_t})
+				if {_w} > -9999:
+					return mBotSus({_b}, {_t}) + {_w}
 	set {_s} to mBotSus({_b}, {_t}) + mBotFacts({_b}, {_t})
 	if {_k} is "evil":
 		add 150 to {_s}
@@ -438,6 +446,10 @@ function mBotInit():
 	delete {-mt::noparse::*}
 	delete {-mt::repq::*}
 	delete {-mt::ccpol::*}
+	delete {-mt::wmf}
+	delete {-mt::wmc::*}
+	delete {-mt::wmok}
+	delete {-mt::cctgt}
 	loop {-m::players::*}:
 		set {_b} to loop-value
 		if mIsBot({_b}) is true:
@@ -510,6 +522,138 @@ function mBotResText(r: text) :: text:
 		return "대상 없이 능력을 씀"
 	return "아무에게도 능력을 쓰지 않음"
 
+# ------------------------------------------------------------------ 봇 추리: 가능한 세계(MafiaBrain 플러그인, brain/src/mafiabrain/Brain.java)
+# 직업 구성(마피아·보조·중립 수)에 맞는 모든 배치(12인 약 6천 가지)를 공개 사실(직업 주장, 공개 직업, 밤 사망, 경찰 결과, 모순, 거짓말 확인)과 맞춰 보고,
+#   배치마다 맞는 정도로 가중치를 매겨 "○번이 마피아일 확률"을 낸다(Java 라 빠르다). 관점마다 자기만 아는 것(내 진짜 직업, 내 조사 결과)을 더한다.
+#   시민 쪽 봇: 점수(mBotScore)를 이 확률로 낸다(공개 직업이 없는 사람). 근거 문장(mBotWhy)은 그대로 사실에서 고른다.
+#   마피아 쪽 봇: 시민 쪽(공개 관점 "")이 보는 확률로 투표를 얹고, "이렇게 하면 팀원이 얼마나 의심받나"(Brain.risk)를 미리 따져
+#     밤 공격 대상, 가짜 직업, 맞경 여부를 고른다.
+# 1초마다 사실이 바뀌었으면 다시 계산한다. 변수: {-mt::wmf}(마지막 사실 문자열) {-mt::wmc::봇}(마지막 관점 조건) {-mt::wmok}(계산됨)
+
+# 참가자의 직업 풀 → 세계의 종류(M 마피아, S 보조, N 중립, C 시민 팀)
+function mWmType(r: text) :: text:
+	set {_po} to mRolePool({_r})
+	if {_po} is "mafia":
+		return "M"
+	if {_po} is "support":
+		return "S"
+	if {_po} is "neutral":
+		return "N"
+	return "C"
+
+# 공개 사실 문자열
+function mWmFacts() :: text:
+	set {_n} to size of {-m::players::*}
+	set {_k::*} to mCompo({_n})
+	if size of {_k::*} < 4:
+		return ""
+	set {_s} to "comp|%{_k::1}%|%{_k::2}%|%{_k::3}%"
+	if {_n} >= 10:
+		set {_s} to "%{_s}%;mad|1"
+	else if mRoleOn("madman") is true:
+		set {_s} to "%{_s}%;mad|1"
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		set {_s} to "%{_s}%;p|%{_p}%"
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {-mt::claim::%{_p}%} is set:
+			set {_s} to "%{_s}%;cl|%{_p}%|%{-mt::claim::%{_p}%}%"
+		if {-m::pubrole::%{_p}%} is set:
+			set {_s} to "%{_s}%;pub|%{_p}%|%mWmType({-m::pubrole::%{_p}%})%"
+		if {-mt::nd::%{_p}%} is set:
+			set {_s} to "%{_s}%;nd|%{_p}%"
+		if {-mt::liar::%{_p}%} is set:
+			set {_s} to "%{_s}%;liar|%{_p}%"
+		if {-mt::cxs::%{_p}%} is set:
+			set {_s} to "%{_s}%;cx|%{_p}%|%{-mt::cxs::%{_p}%}%"
+		loop {-mt::rep::%{_p}%::*}:
+			set {_f::*} to split loop-value-2 at "|"
+			if {_f::1} is "police":
+				if {_f::2} is not "-":
+					if {_f::3} is "mafia" or "town":
+						set {_s} to "%{_s}%;pol|%{_p}%|%{_f::2}%|%{_f::3}%"
+	return {_s}
+
+# 봇 b 의 관점 조건: 나는 시민 팀이고 내 진짜(라고 아는) 직업, 내가 아는 사람들
+function mWmCons(b: text) :: text:
+	set {_s} to "me|C;role|%mActRole({_b})%"
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {_p} is not {_b}:
+			set {_kv} to mBotK({_b}, {_p})
+			if {_kv} is "mafia":
+				set {_s} to "%{_s}%;k|%{_p}%|M"
+			else if {_kv} is "town":
+				set {_s} to "%{_s}%;k|%{_p}%|T"
+			else if {_kv} is "evil":
+				set {_s} to "%{_s}%;k|%{_p}%|E"
+	return {_s}
+
+# 사실이 바뀌었으면 다시 계산(공개 관점 + 살아 있는 시민 쪽 봇마다)
+function mWmUpdate():
+	set {_f} to mWmFacts()
+	if {_f} is "":
+		stop
+	set {_new} to false
+	if {-mt::wmf} is not {_f}:
+		set {-mt::wmf} to {_f}
+		delete {-mt::wmc::*}
+		set {_cnt} to Brain.load({_f})
+		Brain.view("", "", "")
+		set {_new} to true
+		set {-mt::wmok} to true
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			if {-m::alive::%{_b}%} is true:
+				if mBotLiar({_b}) is false:
+					set {_c} to mWmCons({_b})
+					if {-mt::wmc::%{_b}%} is not {_c}:
+						set {-mt::wmc::%{_b}%} to {_c}
+						Brain.view({_b}, {_b}, {_c})
+	if {_new} is true:
+		# 기록: 시민 쪽이 보는 마피아 확률이 높은 사람(30% 넘는 사람만)
+		set {_line} to ""
+		loop {-m::players::*}:
+			if {-m::alive::%loop-value%} is true:
+				set {_pm} to Brain.pm("", loop-value)
+				if {_pm} >= 0.3:
+					set {_line} to "%{_line}% %mNum(loop-value)%번 %rounded ({_pm} * 100)%%%"
+		if {_line} is not "":
+			mBotDbg("추론(공개, 세계 %{_cnt}%개):%{_line}%")
+
+every second:
+	if mState() is "day" or "vote" or "execute" or "night":
+		if {-m::players::*} is set:
+			mWmUpdate()
+
+# 관점 key 에서 본 t 의 세계 추론 점수(마피아 350, 보조·중립 140 비중, 평범한 사람은 대략 0). 계산 전이면 -9999
+function mWmScore(key: text, t: text) :: number:
+	if {-mt::wmok} is not set:
+		return -9999
+	set {_pm} to Brain.pm({_key}, {_t})
+	if {_pm} < 0:
+		return -9999
+	set {_po} to Brain.ps({_key}, {_t}) + Brain.pn({_key}, {_t})
+	return ({_pm} * 350) + ({_po} * 140) - 60
+
+# 마피아 쪽 봇 b 가 아는 살아 있는 팀원(자기 포함), 쉼표로
+function mWmMates(b: text) :: text:
+	set {_s} to {_b}
+	loop {-m::players::*}:
+		if loop-value is not {_b}:
+			if {-m::alive::%loop-value%} is true:
+				if mBotK({_b}, loop-value) is "mafia":
+					set {_s} to "%{_s}%,%loop-value%"
+	return {_s}
+
+# 미리 따져 보기: 공개 사실에 extra 를 더하면 시민 쪽이 보는 팀원(mates)의 "마피아 팀일 확률" 합. 계산 전이면 -1
+function mWmRisk(extra: text, mates: text) :: number:
+	if {-mt::wmok} is not set:
+		return -1
+	return Brain.risk({_extra}, {_mates})
+
 # 거짓말하는 쪽(마피아 팀·중립 살해자·보조)이 본 t 의 위협 점수. 밤에 죽이거나 막을 사람, 낮에 몰 사람을 고를 때 쓴다(고수의 우선순위):
 #   1) 경찰(주장 하나뿐이거나 공개) > 탐정 > 의사·수호자 > 주술사·기자 > 자경단 순으로 위험하다. 팀원을 마피아로 지목한 경찰은 더 위험하다.
 #   2) 군인을 주장한 사람은 마피아 공격을 한 번 버텨 밤 하나를 버리게 되니 피한다(암살자는 군인을 무시하므로 상관없다).
@@ -563,8 +707,22 @@ function mBotThreat(b: text, t: text) :: number:
 	else if {_c} is "":
 		# 아직 직업을 안 밝힌 사람: 무엇일지 모른다
 		add 15 to {_s}
-	# 3) 팀원·나와 같은 직업을 주장해 맞서는 상대
-	if {-m::pubrole::%{_t}%} is not set:
+	# 3) 밤: 이 사람을 죽이면 시민 쪽이 팀원을 얼마나 더 의심하게 되나(가능한 세계로 미리 따져 본다).
+	#   예) 맞경 상대인 진짜 경찰을 죽이면 "죽은 쪽이 진짜" 가 되어 팀원의 마피아 팀 확률이 크게 오른다
+	set {_looked} to false
+	if mState() is "night":
+		set {_mates} to mWmMates({_b})
+		set {_r0} to mWmRisk("", {_mates})
+		if {_r0} >= 0:
+			set {_r1} to mWmRisk("nd|%{_t}%", {_mates})
+			if {_r1} >= 0:
+				subtract ({_r1} - {_r0}) * 400 from {_s}
+				set {_looked} to true
+	# 3') 팀원·나와 같은 직업을 주장해 맞서는 상대(미리 따져 보지 못했을 때의 어림 규칙)
+	if {_looked} is false:
+		if {-m::pubrole::%{_t}%} is set:
+			set {_looked} to true
+	if {_looked} is false:
 		if {-mt::claim::%{_t}%} is set:
 			if mBotUniqueRole({-mt::claim::%{_t}%}) is true:
 				loop {-m::players::*}:
@@ -581,7 +739,9 @@ function mBotThreat(b: text, t: text) :: number:
 									subtract 150 from {_s}
 	# 4) 시민 쪽이 이미 의심하는 사람은 낮에 처형될 테니 살려 둔다(밤 대상으로만. 낮에 몰 때는 오히려 얹는다)
 	if mState() is "night":
-		set {_pf} to mBotFacts("", {_t})
+		set {_pf} to mWmScore("", {_t})
+		if {_pf} <= -9999:
+			set {_pf} to mBotFacts("", {_t})
 		if {_pf} >= 60:
 			subtract 70 from {_s}
 	return {_s}
@@ -742,14 +902,21 @@ function mBotVotePick(id: text) :: text:
 					add 100 to {_s}
 				else:
 					subtract 500 from {_s}
+					# 시민 쪽이 거의 확신하고(공개 관점 마피아 팀 확률 85% 넘음) 표도 몰렸으면 버린다(같이 찍어 나는 시민처럼 보인다)
+					set {_tr} to mWmRisk("", {_t})
+					if {_tr} > 0.85:
+						if {_v} >= 2:
+							add 560 to {_s}
 			else:
 				if {-mt::claim::%{_t}%} is set:
 					add 40 to {_s}
 				if {-m::pubrole::%{_t}%} is set:
 					if mRolePool({-m::pubrole::%{_t}%}) is "citizen":
 						subtract 200 from {_s}
-				# 시민 쪽이 의심하는 사람(공개 정보)에 얹어 시민처럼 보인다
-				set {_pf} to mBotFacts("", {_t})
+				# 시민 쪽이 의심하는 사람(공개 정보)에 얹어 시민처럼 보인다. 가능한 세계 추론이 있으면 시민 쪽이 보는 확률로
+				set {_pf} to mWmScore("", {_t})
+				if {_pf} <= -9999:
+					set {_pf} to mBotFacts("", {_t})
 				if {_pf} > 0:
 					add {_pf} * 0.6 to {_s}
 			add mBotSus({_id}, {_t}) to {_s}
@@ -1133,6 +1300,17 @@ function mBotFakePick(b: text) :: text:
 						add {_x} to {_ok::*}
 	if size of {_ok::*} > 0:
 		set {_pick} to random element of {_ok::*}
+		# 가능한 세계로 미리 따져 본다: 이 직업을 주장하면 시민 쪽이 보는 팀원(나 포함)의 마피아 팀 확률이 가장 낮은 것(조금 무작위)
+		if size of {_ok::*} > 1:
+			set {_mates} to mWmMates({_b})
+			set {_bestr} to 99
+			loop {_ok::*}:
+				set {_rk} to mWmRisk("cl|%{_b}%|%loop-value%", {_mates})
+				if {_rk} >= 0:
+					set {_rk} to {_rk} + random number between 0 and 0.04
+					if {_rk} < {_bestr}:
+						set {_bestr} to {_rk}
+						set {_pick} to loop-value
 	else:
 		set {_pick} to random element of {_c::*}
 	set {-mt::fakerole::%{_b}%} to {_pick}
@@ -1170,9 +1348,11 @@ function mBotCounterPol(b: text) :: text:
 							set {_f::*} to split {_s} at "|"
 							if {_f::3} is "mafia":
 								if {_f::2} is {_b}:
+									set {-mt::cctgt} to {_f::2}
 									return {_p}
 								if mBotK({_b}, {_f::2}) is "mafia":
 									if {-m::alive::%{_f::2}%} is true:
+										set {-mt::cctgt} to {_f::2}
 										return {_p}
 	return ""
 
@@ -1197,6 +1377,18 @@ function mBotRepMake(b: text) :: text:
 		if {-m::pubrole::%{_b}%} is not set:
 			# 경찰이 나나 팀원을 지목했으면 맞경: 그 경찰을 조사했더니 마피아라고 한다
 			set {_cp} to mBotCounterPol({_b})
+			# 가능한 세계로 미리 따져 본다: 맞경했을 때와 조용히 확인할 수 없는 직업(테러리스트)을 댔을 때, 시민 쪽이 보는 팀원의 마피아 팀 확률을 비교
+			if {_cp} is not "":
+				set {_mates} to mWmMates({_b})
+				# 상대 경찰의 지목은 아직 채팅에 나오기 전일 수 있어 함께 넣는다
+				set {_acc} to "cl|%{_cp}%|police;pol|%{_cp}%|%{-mt::cctgt}%|mafia"
+				set {_rc} to mWmRisk("%{_acc}%;cl|%{_b}%|police;pol|%{_b}%|%{_cp}%|mafia", {_mates})
+				set {_rq} to mWmRisk("%{_acc}%;cl|%{_b}%|terrorist", {_mates})
+				if {_rc} >= 0:
+					if {_rq} >= 0:
+						mBotDbg("맞경 따져 보기 %mNum({_b})%번: 맞경 %{_rc}% / 조용히 %{_rq}%")
+						if {_rc} > {_rq} + 0.03:
+							set {_cp} to ""
 			if {_cp} is not "":
 				set {-mt::fakerole::%{_b}%} to "police"
 				set {-mt::ccpol::%{_d}%} to {_b}

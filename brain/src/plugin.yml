@@ -1,0 +1,5 @@
+name: MafiaBrain
+version: 1.0
+main: mafiabrain.MafiaBrain
+api-version: '1.21'
+description: Mafia bot world model for mtest.sk (skript-reflect)
