@@ -1561,12 +1561,24 @@ function mBotTypeWait(b: text, msg: text) :: number:
 			if {_min} > {_d}:
 				set {_d} to {_min}
 		set {-mt::repnext} to {_now} + {_d}
+	# 한 번에 한 봇씩 차례로 말한다: 다른 봇이 아직 말하는 중이면(여러 줄 포함) 그 말이 다 나온 뒤에 나온다(줄이 서로 끼어들지 않게). 치는 건 그동안 같이 친다
+	if {-mt::gfree} is set:
+		set {_g} to {-mt::gfree} - {_now} + 0.8
+		if {_g} > {_d}:
+			set {_d} to {_g}
+	set {-mt::gfree} to {_now} + {_d}
 	set {-mt::typeuntil::%{_b}%} to {_now} + {_d}
 	return {_d}
 
 # "^" 로 나눈 말은 사람이 끊어 치듯 한 줄씩 차례로 친다(줄마다 타자 시간)
 # fx = 마지막 줄이 채팅에 나온 순간 반영할 효과(mBotFxRun)
 function mBotSay(b: text, msg: text, fx: text = ""):
+	# 차례를 너무 오래(20초 넘게) 기다려야 하는 지목·반박 같은 말은 버린다(나올 때쯤이면 흐름이 지나 있다). 아침 보고·투표 결론·사람에게 하는 대답은 버리지 않는다
+	if {_fx} starts with "ie|":
+		if {-mt::gfree} is set:
+			if {-mt::gfree} - {-mau::sec} > 20:
+				mBotDbg("말 버림(차례 대기 김) %mNum({_b})%번: %mBotPlain({_msg})%")
+				stop
 	if {_msg} contains "^":
 		set {_parts::*} to split {_msg} at "^"
 		# 빈 줄을 빼고 마지막 줄 번호
@@ -3186,6 +3198,7 @@ every second:
 		delete {-mt::repdue::*}
 		delete {-mt::noparse::*}
 		delete {-mt::repnext}
+		delete {-mt::gfree}
 		delete {-mt::typeuntil::*}
 		delete {-mt::isrep::*}
 		if {_s} is "day":
