@@ -400,6 +400,7 @@ function mBotInit():
 	delete {-mt::defend::*}
 	delete {-mt::conflict::*}
 	delete {-mt::mk::*}
+	delete {-mt::mkb::*}
 	delete {-mt::rep::*}
 	delete {-mt::fakerole::*}
 	delete {-mt::cx::*}
@@ -546,17 +547,15 @@ function mTestNight(id: text):
 		stop
 	set {_t} to ""
 	if {_role} is "mafia":
-		# 실제로 죽이는 건 마피아 봇 한 명뿐(나머지는 능력을 안 써서 탐정에게 "아무것도 안 함"으로 보이고, 가짜 직업 보고와 어긋나지 않는다)
-		if mBotMafiaLeader() is not {_id}:
-			stop
-		# 마피아끼리 같은 대상(먼저 고른 봇의 선택을 따른다)
-		set {_key} to "%{-m::day}%"
-		if {-mt::mk::%{_key}%} is set:
-			if {_c::*} contains {-mt::mk::%{_key}%}:
-				set {_t} to {-mt::mk::%{_key}%}
+		# 마피아끼리 서로 다른 사람을 공격한다(밤 시작 때 mBotMafiaPlan 이 정한 대상, 없거나 겹치면 새로 고른다)
+		if {-mt::mkb::%{_id}%} is set:
+			if {_c::*} contains {-mt::mkb::%{_id}%}:
+				if mBotMafiaTaken({_id}, {-mt::mkb::%{_id}%}) is false:
+					set {_t} to {-mt::mkb::%{_id}%}
 		if {_t} is "":
-			set {_t} to mBotBest({_id}, {_c::*}, "threat")
-			set {-mt::mk::%{_key}%} to {_t}
+			set {_t} to mBotMafiaPick({_id})
+		if {_t} is "":
+			stop
 	else if {_role} is "doctor":
 		if chance of 35%:
 			if {_c::*} contains {_id}:
@@ -909,6 +908,20 @@ function mBotFakePick(b: text) :: text:
 							set {_ok} to false
 		if {_ok} is true:
 			add {_x} to {_ok::*}
+	if size of {_ok::*} is 0:
+		# 대상 있는 직업이 다 찼으면(마피아 여럿) 확인할 수 없는 직업 중에서
+		loop "terrorist", "vigilante", "reporter" and "soldier":
+			set {_x} to loop-value-1
+			if mRoleOn({_x}) is true:
+				set {_ok2} to true
+				loop {-m::players::*}:
+					if loop-value-2 is not {_b}:
+						if {-mt::claim::%loop-value-2%} is {_x}:
+							set {_ok2} to false
+						if {-mt::fakerole::%loop-value-2%} is {_x}:
+							set {_ok2} to false
+				if {_ok2} is true:
+					add {_x} to {_ok::*}
 	if size of {_ok::*} > 0:
 		set {_pick} to random element of {_ok::*}
 	else:
@@ -2589,7 +2602,7 @@ function mBotDecideApply(b: text, mode: text, raw: text):
 		if mSetAct({_b}, {_t}) is "":
 			set {-mt::dec::%{_b}%} to {_key}
 			if mActRole({_b}) is "mafia":
-				set {-mt::mk::%{-m::day}%} to {_t}
+				set {-mt::mkb::%{_b}%} to {_t}
 		stop
 	if {_no} is 0:
 		set {-mt::dec::%{_b}%} to {_key}
@@ -2669,7 +2682,7 @@ on chat:
 
 # ------------------------------------------------------------------ 밤의 마피아 팀 대화(봇)
 # 마피아 팀 채팅(mchat.sk)은 원래 밤에 열려 있다. 봇도 거기서 말한다:
-#   밤이 시작되고 몇 초 뒤 마피아 봇 하나가 오늘 밤 대상을 제안한다({-mt::mk::일차}, 마피아 봇은 모두 이 대상을 따른다).
+#   밤이 시작되고 몇 초 뒤 마피아 봇마다 서로 다른 대상을 정해 알린다({-mt::mkb::봇}). 마피아끼리는 서로 다른 사람을 공격한다.
 #   사람 마피아가 대상을 고르면(W 선택) 또는 마피아 팀 채팅에 번호·닉네임을 말하면 봇들이 그 대상으로 바꾸고 대답한다.
 # 변수: {-mt::mplan}(제안까지 남은 초), {-mt::msync::사람}(마지막으로 맞춘 사람 마피아의 선택)
 
@@ -2706,49 +2719,82 @@ function mBotMafiaBots() :: texts:
 
 # 마피아 봇들의 오늘 밤 대상을 t 로 맞춘다
 function mBotMafiaSet(t: text):
-	set {-mt::mk::%{-m::day}%} to {_t}
-	# 실제로 죽이는 한 봇만 대상을 정하고, 나머지 마피아 봇은 능력을 쓰지 않는다
-	set {_ld} to mBotMafiaLeader()
-	loop mBotMafiaBots():
-		if loop-value is {_ld}:
-			set {_c::*} to mTargets(loop-value)
-			if {_c::*} contains {_t}:
-				mSetAct(loop-value, {_t})
-			delete {_c::*}
-		else:
-			mClearAct(loop-value)
+	# (예전 이름 유지) 사람이 말한 대상 t 를 봇 한 명이 맡는다
+	mBotMafiaAssign({_t})
 
-# 밤 시작 몇 초 뒤: 마피아 봇 하나가 대상을 제안한다
+# 이번 밤 다른 마피아(봇·사람)가 이미 노리는 대상인지(b 자신은 빼고)
+function mBotMafiaTaken(b: text, t: text) :: boolean:
+	loop {-m::players::*}:
+		set {_m} to loop-value
+		if {_m} is not {_b}:
+			if {-m::alive::%{_m}%} is true:
+				if {-m::role::%{_m}%} is "mafia":
+					if mIsBot({_m}) is true:
+						if {-mt::mkb::%{_m}%} is {_t}:
+							return true
+					else if mActOf({_m}) is {_t}:
+						return true
+	return false
+
+# 마피아 봇 b 의 오늘 밤 대상을 고른다: 마피아끼리 서로 다른 사람을 공격한다(확정). 고른 대상(없으면 "")
+function mBotMafiaPick(b: text) :: text:
+	set {_c::*} to mTargets({_b})
+	if size of {_c::*} is 0:
+		return ""
+	loop {_c::*}:
+		if mBotMafiaTaken({_b}, loop-value) is false:
+			add loop-value to {_free::*}
+	if size of {_free::*} is 0:
+		# 남은 사람이 없으면 겹쳐도 된다
+		set {_free::*} to {_c::*}
+	set {_t} to mBotBest({_b}, {_free::*}, "threat")
+	if {_t} is "":
+		set {_t} to random element of {_free::*}
+	set {-mt::mkb::%{_b}%} to {_t}
+	mSetAct({_b}, {_t})
+	return {_t}
+
+# 사람 마피아가 말한 대상 t 를 봇 한 명이 맡는다(이미 맡은 봇이 있으면 그대로). 맡은 봇(없으면 "")
+function mBotMafiaAssign(t: text) :: text:
+	loop mBotMafiaBots():
+		if {-mt::mkb::%loop-value%} is {_t}:
+			return loop-value
+	loop mBotMafiaBots():
+		set {_c::*} to mTargets(loop-value)
+		if {_c::*} contains {_t}:
+			set {-mt::mkb::%loop-value%} to {_t}
+			mSetAct(loop-value, {_t})
+			return loop-value
+		delete {_c::*}
+	return ""
+
+# 밤 시작 몇 초 뒤: 마피아 봇마다 서로 다른 대상을 정하고 마피아 팀 채팅에 알린다
 function mBotMafiaPlan():
 	set {_bs::*} to mBotMafiaBots()
 	if size of {_bs::*} is 0:
 		stop
-	set {_b} to first element of {_bs::*}
-	set {_c::*} to mTargets({_b})
-	if size of {_c::*} is 0:
-		stop
-	set {_key} to "%{-m::day}%"
-	if {-mt::mk::%{_key}%} is set:
-		set {_t} to {-mt::mk::%{_key}%}
-	else:
-		set {_t} to mBotBest({_b}, {_c::*}, "threat")
-	if {_t} is "":
-		stop
-	mBotMafiaSet({_t})
-	# 사람 마피아 팀원이 있으면 의견을 묻는다
 	set {_human} to false
 	loop {-m::players::*}:
 		if mIsBot(loop-value) is false:
 			if {-m::alive::%loop-value%} is true:
 				if {-m::team::%loop-value%} is "mafia":
 					set {_human} to true
-	set {_l::*} to "오늘 밤은 %mBotRef({_t})% 어때요?", "%mBotRef({_t})% 가 제일 위험해 보여요. 그쪽 가죠", "저는 %mBotRef({_t})% 노릴게요"
-	set {_m} to random element of {_l::*}
-	if {_human} is true:
-		set {_m} to "%{_m}% 다른 사람이 좋으면 번호 말해 주세요"
-	mBotMafiaSay({_b}, {_m})
+	set {_n} to size of {_bs::*}
+	set {_i} to 0
+	loop {_bs::*}:
+		set {_b} to loop-value
+		add 1 to {_i}
+		set {_t} to mBotMafiaPick({_b})
+		if {_t} is not "":
+			set {_l::*} to "저는 %mBotRef({_t})% 노릴게요", "%mBotRef({_t})% 가 위험해 보여요. 제가 그쪽 갈게요", "제가 %mBotRef({_t})% 맡을게요"
+			set {_m} to random element of {_l::*}
+			if {_i} is {_n}:
+				if {_human} is true:
+					set {_m} to "%{_m}% 서로 다른 사람을 노려요. 원하는 대상 있으면 번호 말해 주세요"
+			mBotMafiaSay({_b}, {_m})
+			delete {_l::*}
 
-# 사람 마피아가 마피아 팀 채팅에 말했다: 번호·닉네임이 하나 나오면 그 사람으로 대상을 바꾼다
+# 사람 마피아가 마피아 팀 채팅에 말했다: 번호·닉네임이 하나 나오면 봇 한 명이 그 사람을 맡는다
 function mBotMafiaHear(s: text, msg: text):
 	set {_bs::*} to mBotMafiaBots()
 	if size of {_bs::*} is 0:
@@ -2780,13 +2826,13 @@ function mBotMafiaHear(s: text, msg: text):
 	if {-m::team::%{_t}%} is "mafia":
 		mBotMafiaSay({_b}, "%mBotRef({_t})% 님은 우리 팀이에요!")
 		stop
-	if {-mt::mk::%{-m::day}%} is {_t}:
-		mBotMafiaSay({_b}, "네, %mBotRef({_t})% 그대로 가요")
+	set {_who} to mBotMafiaAssign({_t})
+	if {_who} is "":
+		mBotMafiaSay({_b}, "%mBotRef({_t})% 님은 지금 고를 수 없어요")
 		stop
-	mBotMafiaSet({_t})
-	mBotMafiaSay({_b}, "좋아요, %mBotRef({_t})% 로 바꿀게요")
+	mBotMafiaSay({_who}, "좋아요, %mBotRef({_t})% 님은 제가 맡을게요")
 
-# 사람 마피아가 W 로 대상을 고르면 봇들도 따라간다
+# 사람 마피아가 W 로 대상을 고르면, 같은 사람을 노리던 봇은 다른 사람으로 바꾼다(서로 다른 대상)
 function mBotMafiaSync():
 	loop {-m::players::*}:
 		set {_h} to loop-value
@@ -2797,11 +2843,13 @@ function mBotMafiaSync():
 					if {_t} is not "":
 						if {-mt::msync::%{_h}%} is not {_t}:
 							set {-mt::msync::%{_h}%} to {_t}
-							if {-mt::mk::%{-m::day}%} is not {_t}:
-								set {_bs::*} to mBotMafiaBots()
-								if size of {_bs::*} > 0:
-									mBotMafiaSet({_t})
-									mBotMafiaSay(random element of {_bs::*}, "%mBotRef({_t})% 고르셨네요. 저도 거기 갈게요")
+							loop mBotMafiaBots():
+								if {-mt::mkb::%loop-value-2%} is {_t}:
+									set {_b} to loop-value-2
+									set {_nt} to mBotMafiaPick({_b})
+									if {_nt} is not "":
+										if {_nt} is not {_t}:
+											mBotMafiaSay({_b}, "%mBotRef({_t})% 고르셨네요. 그럼 저는 %mBotRef({_nt})% 갈게요")
 
 # ------------------------------------------------------------------ 봇 진행(1초마다)
 
@@ -2852,6 +2900,7 @@ every second:
 			# 마피아 봇이 몇 초 뒤 마피아 팀 채팅에 오늘 밤 대상을 제안한다
 			set {-mt::mplan} to random integer between 3 and 5
 			delete {-mt::msync::*}
+			delete {-mt::mkb::*}
 		loop {-m::players::*}:
 			if mTestAutoOn(loop-value) is true:
 				set {_max} to {-m::left} - 2
