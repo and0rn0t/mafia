@@ -107,6 +107,9 @@ function mStgMorning():
 	loop mStgViewers():
 		mViewAuto(loop-value)
 		mStgTitle(loop-value, "&e%{-m::day}%일차 낮", {_sub}, 35)
+	# 채팅·기록에도 남긴다
+	if size of {_dead::*} is 0:
+		mBc("&7지난 밤에는 아무도 사망하지 않았습니다.")
 	wait 40 ticks
 	loop {_dead::*}:
 		set {_d} to loop-value
@@ -114,6 +117,7 @@ function mStgMorning():
 		loop mStgViewers():
 			mCamFace(loop-value-2, {_d})
 			mStgTitle(loop-value-2, "&c%{_dn}%", "&f님이 사망했습니다", 35)
+		mBc("&f%mNumName({_d})%&7 님이 사망했습니다.")
 		mStgSoundAll("block.bell.use", 0.6, 0.6)
 		mStgSoundAll("block.bell.resonate", 0.4, 0.8)
 		mStgSeatPart({_d}, "SOUL", 20, 1)

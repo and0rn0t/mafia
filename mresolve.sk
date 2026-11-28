@@ -55,6 +55,12 @@ function mDie(id: text):
 	# 탭 목록의 생존/사망 표시
 	mTabUpdateAll()
 
+# 접선 알림은 화면 가운데 제목으로도 띄운다(접선한 사람과 마피아 팀 모두)
+function mInfoTitle(p: player, msg: text):
+	if {_msg} contains "접선":
+		send title "&c&l접선" with subtitle colored {_msg} to {_p} for 3 seconds with fadein 5 ticks and fade out 10 ticks
+		mSound({_p}, "entity.evoker.prepare_summon", 0.6, 1)
+
 function mAddInfo(id: text, msg: text):
 	add {_msg} to {-m::info::%{_id}%::*}
 
@@ -73,11 +79,13 @@ function mContactNotify(id: text, now: boolean):
 		set {_p} to mPlayerOf({_id})
 		if {_p} is set:
 			send {_m1} to {_p}
+			mInfoTitle({_p}, {_m1})
 		mLogP({_id}, {_m1})
 		loop {_mids::*}:
 			set {_p} to mPlayerOf(loop-value)
 			if {_p} is set:
 				send {_m2} to {_p}
+				mInfoTitle({_p}, {_m2})
 			mLogP(loop-value, {_m2})
 	else:
 		mAddInfo({_id}, {_m1})
@@ -359,4 +367,5 @@ function mResolveShow():
 		if {_p} is set:
 			loop {-m::info::%loop-value-1%::*}:
 				send loop-value-2 to {_p}
+				mInfoTitle({_p}, loop-value-2)
 				mLogP(loop-value-1, loop-value-2)

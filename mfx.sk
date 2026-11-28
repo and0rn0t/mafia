@@ -1336,6 +1336,7 @@ function mFxInfoNow(vid: text):
 		stop
 	loop {-m::info::%{_vid}%::*}:
 		send loop-value to {_p}
+		mInfoTitle({_p}, loop-value)
 		mLogP({_vid}, loop-value)
 	delete {-m::info::%{_vid}%::*}
 

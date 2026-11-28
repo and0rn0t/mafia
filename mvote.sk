@@ -161,6 +161,7 @@ function mWinBase() :: text:
 	set {_ch} to 0
 	set {_nn} to 0
 	set {_thug} to false
+	set {_mk} to 0
 	loop {-m::players::*}:
 		if {-m::alive::%loop-value%} is true:
 			# 광대는 투표로 처형당해야만 이기므로 다른 팀 승패 계산에는 넣지 않는다(살아 있어도 게임 종료를 막지 않음)
@@ -170,6 +171,8 @@ function mWinBase() :: text:
 			set {_tm} to {-m::team::%loop-value%}
 			if {_tm} is "mafia":
 				add 1 to {_m}
+				if {-m::role::%loop-value%} is "mafia":
+					add 1 to {_mk}
 			else if {_tm} is "citizen":
 				add mWeight(loop-value) to {_c}
 				add 1 to {_ch}
@@ -178,6 +181,12 @@ function mWinBase() :: text:
 			else if {_tm} is "neutral":
 				add 1 to {_nn}
 				set {_last} to loop-value
+	# 마피아 직업이 모두 죽으면 남은 보조 직업(접선한 스파이·마담·마녀 등)만으로는 마피아 팀이 이길 수 없다(확정): 마피아 팀이 없는 것으로 본다
+	set {_mdead} to false
+	if {_mk} is 0:
+		if {_m} > 0:
+			set {_mdead} to true
+		set {_m} to 0
 	if {_a} is 0:
 		set {-m::drawwhy} to "생존자가 없어 무승부입니다."
 		loop {-m::players::*}:
@@ -207,6 +216,8 @@ function mWinBase() :: text:
 				return "citizen"
 		return ""
 	set {-m::winwhy} to "마피아 팀이 모두 사망"
+	if {_mdead} is true:
+		set {-m::winwhy} to "마피아가 모두 사망(남은 보조 직업만으로는 이길 수 없음)"
 	return "citizen"
 
 # 사망자 없이 이만큼의 날(밤+낮)이 지나면 무승부. {mcfg::calm}, 기본 3

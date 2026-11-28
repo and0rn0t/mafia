@@ -1085,17 +1085,21 @@ function mKeyHint(id: text):
 				set {_hint} to "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%"
 				if mState() is "day":
 					set {_hint} to "%{_hint}% &8| &7앉기: 메모"
+				if mState() is "day" or "night":
+					set {_hint} to "%{_hint}% &8| &7점프: 기록"
 				send action bar colored {_hint} to {_p}
 		stop
 	if mPickCanOpen({_id}) is not "":
-		send action bar colored "&7W: 대상 고르기" to {_p}
+		send action bar colored "&7W: 대상 고르기 &8| &7점프: 기록" to {_p}
 		stop
 	if mState() is "day":
-		set {_hint} to "&7앉기: 메모"
+		set {_hint} to "&7앉기: 메모 &8| &7점프: 기록"
 		if {-m::alive::%{_id}%} is true:
 			if {-m::tadj::%{_id}%} is not true:
-				set {_hint} to "&7W: 토론 +15초 &8| &7S: 토론 -15초 &8| &7앉기: 메모"
+				set {_hint} to "&7W: 토론 +15초 &8| &7S: 토론 -15초 &8| &7앉기: 메모 &8| &7점프: 기록"
 		send action bar colored {_hint} to {_p}
+	else if mState() is "night":
+		send action bar colored "&7점프: 기록" to {_p}
 
 every second:
 	if mSceneOn() is not true:
@@ -1130,6 +1134,13 @@ on PlayerInputEvent:
 			delete {-ms::in::%{_k}%::%{_id}%}
 	if size of {_press::*} is 0:
 		stop
+	# 낮 토론·밤 대기 중: 점프(스페이스바)로 게임 기록 창(대상 고르기 화면이 열려 있지 않을 때, 사망자·관전자도)
+	if mState() is "day" or "night":
+		if {-ms::pick::%{_id}%} is not set:
+			if {-ms::stage} is not set:
+				if {_press::*} contains "jump":
+					mLogShow({_p})
+					stop
 	# 낮: Shift 로 메모 창(대상 고르기 화면이 열려 있지 않을 때, 사망자·관전자도)
 	if mState() is "day":
 		if {-ms::pick::%{_id}%} is not set:
