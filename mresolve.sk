@@ -258,11 +258,13 @@ function mResolve():
 			mAddInfo({_id}, "&b조사 결과: &f%{_tn}%&b 님의 직업은 &f%{_rn}%&b입니다.")
 			set {-m::inv::%{_id}%} to "role:%{-m::role::%{_t}%}%"
 		else if {_ro} is "reporter":
-			set {_rn} to mRoleName({-m::role::%{_t}%})
-			add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
-			add {_t} to {-m::rep::*}
-			# 기자 특종: 모두에게 공개된 직업(메모보다 우선, 팀 색으로 표시)
-			set {-m::pubrole::%{_t}%} to {-m::role::%{_t}%}
+			# 기자가 그날 밤 죽으면 특종은 나가지 않는다(확정, 능력은 쓴 것으로 소모. 밤 취재 연출은 그대로)
+			if {_killed::%{_id}%} is not true:
+				set {_rn} to mRoleName({-m::role::%{_t}%})
+				add "&e[기자] &f%{_tn}%&e 님의 직업은 &f%{_rn}%&e입니다." to {-m::pub::*}
+				add {_t} to {-m::rep::*}
+				# 기자 특종: 모두에게 공개된 직업(메모보다 우선, 팀 색으로 표시)
+				set {-m::pubrole::%{_t}%} to {-m::role::%{_t}%}
 			set {_usedrep::%{_id}%} to true
 		else if {_ro} is "witch":
 			set {_noch::%{_t}%} to true
