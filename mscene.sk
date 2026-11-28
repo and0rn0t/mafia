@@ -394,6 +394,9 @@ function mWatchers() :: texts:
 	return {_l::*}
 
 function mWatchMove(id: text, d: number):
+	# 게임 종료 화면(결과판)에서는 시점을 바꾸지 않는다
+	if mState() is "end":
+		stop
 	set {_cur} to mWatchOf({_id})
 	set {_n} to 0
 	set {_i} to 1
@@ -1081,7 +1084,7 @@ function mKeyHint(id: text):
 		stop
 	if mIsWatcher({_id}) is true:
 		if {-ms::stage} is not set:
-			if mState() is not "loading":
+			if mState() is not "loading" or "end":
 				set {_hint} to "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%"
 				if mState() is "day":
 					set {_hint} to "%{_hint}% &8| &7앉기: 메모"
