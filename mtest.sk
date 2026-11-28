@@ -1112,6 +1112,25 @@ function mBotFakePick(b: text) :: text:
 							set {_ok2} to false
 				if {_ok2} is true:
 					add {_x} to {_ok::*}
+	if size of {_ok::*} is 0:
+		# 그것도 다 찼으면(인원이 많은 판) 아직 아무도 주장하지 않은 다른 시민 직업 중에서. 이미 누가 주장한 직업을 고르면 바로 맞붙어 들킨다
+		#   (12인 판에서 마피아와 스파이가 둘 다 주술사라고 해 서로 맞붙은 일이 있었다)
+		loop "politician", "guardian", "thug", "doctor", "detective", "police", "shaman", "terrorist", "vigilante", "reporter" and "soldier":
+			set {_x} to loop-value-1
+			if mRoleOn({_x}) is true:
+				set {_ok3} to true
+				loop {-m::players::*}:
+					if loop-value-2 is not {_b}:
+						if {-mt::claim::%loop-value-2%} is {_x}:
+							set {_ok3} to false
+						if {-mt::fakerole::%loop-value-2%} is {_x}:
+							set {_ok3} to false
+						if {-m::pubrole::%loop-value-2%} is {_x}:
+							set {_ok3} to false
+				if {_ok3} is true:
+					if size of {_ok::*} is 0:
+						# 앞쪽(들키기 어려운 직업)부터 하나만
+						add {_x} to {_ok::*}
 	if size of {_ok::*} > 0:
 		set {_pick} to random element of {_ok::*}
 	else:
@@ -1575,7 +1594,11 @@ function mBotLine(kind: text) :: text:
 		# 시민 쪽 봇이 근거 없이 의심할 때: 지어낸 근거 없이 솔직하게
 		set {_l::*} to "@t 님 쪽으로 의심이 몰리는데 저도 근거는 없어요^일단 @t 님 얘기 들어 봐요", "확실한 건 없는데 @t 님이 좀 걸려요"
 	else if {_kind} is "mafia_push":
-		set {_l::*} to "@t 님 보고는 확인할 방법이 없잖아요^좀 의심돼요", "@t 님 근거 없이 지목만 하네요^수상해요", "@t 님 아침이랑 말이 좀 달라요"
+		# 확인할 수 없는 직업을 밝힌 사람: 사실인 말(확인할 방법이 없다)로만 흔든다. 지어낸 근거(말이 달라졌다 등)는 대화를 보면 바로 거짓이라 쓰지 않는다
+		set {_l::*} to "@t 님 @r~ira 하는데 확인할 방법이 없잖아요^좀 의심돼요", "@r~ira는 말은 누구나 할 수 있잖아요^@t 님 좀 더 봐야 할 것 같아요"
+	else if {_kind} is "mafia_push2":
+		# 근거 없이 슬쩍: 근거를 지어내지 않고 느낌으로만
+		set {_l::*} to "확실한 건 없는데 @t 님이 좀 걸려요", "@t 님 얘기를 좀 더 들어 보고 싶어요", "저는 @t 님이 좀 신경 쓰여요"
 	else if {_kind} is "defend_role":
 		set {_l::*} to "저 @r~ie. 아니에요", "@r인데 왜 저예요?^다른 사람 봐 주세요", "진짜 @r~ie^제 보고 다시 봐 주세요"
 	else if {_kind} is "defend":
@@ -2031,13 +2054,22 @@ function mBotTalk(b: text):
 				if {-m::alive::%loop-value%} is true:
 					if mBotK({_b}, loop-value) is not "mafia":
 						if loop-value is not {_b}:
-							add loop-value to {_town::*}
+							# 직업이 공개된 사람(확정 시민)을 흔들면 오히려 내가 수상해진다
+							if {-m::pubrole::%loop-value%} is not set:
+								add loop-value to {_town::*}
 			if size of {_town::*} > 0:
 				set {_t} to mBotBest({_b}, {_town::*}, "threat")
 				if {_t} is not "":
 					if {-mt::pushed::%{-m::day}%::%{_t}%} is not set:
 						set {-mt::pushed::%{-m::day}%::%{_t}%} to true
-						mBotSpeak({_b}, "mafia_push", {_t}, "", "")
+						# 확인할 수 없는 직업을 밝혔으면 그 점을(사실), 아니면 근거 없이 느낌으로만
+						set {_tcl} to ""
+						if {-mt::claim::%{_t}%} is set:
+							set {_tcl} to {-mt::claim::%{_t}%}
+						if {_tcl} is "terrorist" or "soldier" or "politician" or "reporter" or "vigilante":
+							mBotSpeak({_b}, "mafia_push", {_t}, "", {_tcl})
+						else:
+							mBotSpeak({_b}, "mafia_push2", {_t}, "", "")
 						stop
 		stop
 	# 시민 쪽: 가장 먼저 거짓을 밝힌다. 점수(아는 것 + 공개된 사실 + 의심)가 가장 높은 사람을 근거와 함께 지목한다(같은 근거는 되풀이하지 않고 동의만)
@@ -2132,8 +2164,8 @@ function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 		if {_r} is not "":
 			return "너는 %{_tn}% 을(를) 마피아로 의심한다. 근거(사실): %{_r}% 이 근거를 들어 %{_tn}% 을(를) 투표하자고 말해라. 근거에 없는 일을 지어내지 마라."
 		return "너는 %{_tn}% 을(를) 조금 의심하지만 뚜렷한 근거는 없다. 근거를 지어내지 말고, 대화에 나온 말(직업 주장, 보고 내용)을 따져 보며 가볍게 의견을 말해라. 이미 나온 말을 되풀이하지 마라."
-	if {_kind} is "mafia_push":
-		return "너는 마피아 팀이다(절대 밝히지 마라). 대화 흐름에 맞춰, 시민인 %{_tn}% 에게 그럴듯한 근거로 의심을 돌려라. 너무 티 나게 몰지 말고, 이미 의심받는 사람이 있으면 거기에 슬쩍 얹어도 된다."
+	if {_kind} is "mafia_push" or "mafia_push2":
+		return "너는 마피아 팀이다(절대 밝히지 마라). 대화 흐름에 맞춰 %{_tn}% 에게 슬쩍 의심을 돌려라. 대화를 보면 바로 거짓으로 드러나는 근거(그 사람이 하지 않은 말, 바뀌지 않은 말)는 지어내지 말고, 확인할 수 없는 직업 주장처럼 사실인 점이나 느낌으로만 말해라. 너무 티 나게 몰지 마라."
 	if {_kind} is "defend_role":
 		return "%{_tn}% 이(가) 너를 마피아로 몰았다. 네 직업 %{_rn}% 을(를) 밝히며 해명해라."
 	if {_kind} is "defend":
@@ -2291,7 +2323,7 @@ function mBotIntentEffect(b: text, kind: text, t: text):
 		stop
 	# 의심 말하기(봇 말은 AI 로 다시 읽지 않으니 늘 의도로 반영)
 	# 근거 없는 지목(흐릿한 의심, 마피아 쪽의 몰아가기, 억울하다는 반박)은 듣는 봇이 반만 믿는다({-mt::clw}, 근거 있는 지목은 사실 점수로 따로 센다)
-	if {_kind} is "accuse" or "mafia_push" or "defend":
+	if {_kind} is "accuse" or "mafia_push" or "mafia_push2" or "defend":
 		set {-mt::clw} to 4
 		mBotClaim({_b}, {_t}, "mafia")
 		delete {-mt::clw}
