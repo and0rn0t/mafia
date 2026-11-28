@@ -107,6 +107,7 @@ function mBotKOfRole(r: text) :: text:
 
 # 게임 시작 때 한 번: 의심 초기값, 마피아 팀은 서로 안다
 function mBotInit():
+	delete {-mt::dec::*}
 	delete {-mt::sum::*}
 	delete {-mtllm::sf}
 	delete {-mtllm::sd}
@@ -236,6 +237,9 @@ function mBotBest(b: text, c: texts, mode: text) :: text:
 # 밤 능력
 function mTestNight(id: text):
 	if mActCheck({_id}) is not "":
+		stop
+	# AI 가 이번 밤에 이미 정했으면(쓰지 않기로 한 것 포함) 그대로 둔다
+	if {-mt::dec::%{_id}%} is "%mState()%-%{-m::day}%":
 		stop
 	set {_role} to mActRole({_id})
 	set {_c::*} to mTargets({_id})
@@ -542,6 +546,9 @@ function mBotSay(b: text, msg: text):
 		send colored "&7<%{_nm}%&7> &f%{_msg}%" to loop-player
 	mLogAdd("*", {_line})
 	add 1 to {-mt::said::%{_b}%}
+	# AI 가 켜져 있으면 봇이 한 말도 사람 말처럼 뜻을 읽는다(봇끼리의 토론이 깊어지게)
+	if mBotLlmOn() is true:
+		mBotLlmParse({_b}, {_msg})
 
 # 조금 뒤에 할 말을 예약한다(spec = "종류|대상|두 번째|직업", 초 뒤)
 function mBotQueue(b: text, spec: text, sec: number):
@@ -818,20 +825,31 @@ function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 		return "방금 %{_tn}% 에게 투표했다고 짧게 말해라."
 	return "대화 흐름을 보고 지금 가장 자연스러운 한마디를 해라(질문에 답하기, 다른 사람 말에 반응하기, 직업을 밝힌 사람이 있으면 그 말을 따져 보기 등). 이미 나온 말을 되풀이하지 마라."
 
-# 봇이 아는 상황(시스템 지시)
-function mBotCtx(b: text) :: text:
-	set {_r} to {-m::role::%{_b}%}
+# AI 요청 글의 순서(확정): 고정 규칙(시스템) → 모두에게 공개된 기록(mBotHistory) → 그 봇만의 정보(mBotSelf) → 할 일.
+#   앞부분이 매번 똑같아서 Ollama 같은 내 PC 모델이 앞 요청에서 읽은 부분을 다시 읽지 않고 재사용한다(빨라짐). 고정 규칙에는 변수를 넣지 않는다.
+function mBotStatic() :: text:
+	set {_c} to "너는 한국어 채팅으로 하는 마인크래프트 마피아 게임의 참가자 한 명을 연기한다."
+	set {_c} to "%{_c}% 규칙: 밤에 마피아가 한 명을 죽이고, 낮에 토론한 뒤 투표로 한 명을 처형한다. 경찰은 밤마다 한 명이 마피아인지 조사하고, 의사는 한 명을 살린다. 마피아 팀(마피아와 접선한 보조 직업)은 표가 시민 팀 이상이면 이기고, 시민 팀은 마피아 팀이 모두 죽으면 이긴다."
+	set {_c} to "%{_c}% 대화를 읽는 법: 대화 전체를 이어서 이해해라. '노마피아', '마피아 아님' 은 그 사람을 변호하는 말이다. 경찰이라고 밝힌 사람의 결과 발표는 무겁게 보되, 경찰 주장이 둘이면 둘 중 하나는 거짓이다. 말이 바뀌거나 근거 없이 몰아가는 사람을 의심해라."
+	set {_c} to "%{_c}% 시민 팀이면 근거를 따져 마피아를 찾고, 믿을 만한 경찰 결과를 따르고, 억울하게 몰리는 사람은 변호한다. 마피아 팀이면 절대 정체를 밝히지 말고 시민처럼 추리하는 척하며, 팀원이 의심받으면 티 나지 않게 화제를 돌리고, 진짜 경찰로 보이는 사람의 신뢰를 깎는다."
+	set {_c} to "%{_c}% 말을 할 때: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 쓴다. 따옴표, 이름표, 괄호 지문(목소리·행동 묘사), 여러 후보, 설명, 이모지 없이 실제로 칠 말만. 사람을 가리킬 때는 번호와 이름을 쓴다(예: 3번 Alex). 게임 밖 이야기는 하지 않는다."
+	set {_c} to "%{_c}% 할 일에 JSON 으로 답하라고 하면 다른 글 없이 JSON 하나만 출력한다."
+	return {_c}
+
+# 그 봇만의 정보(이름, 진짜 직업과 팀, 같은 팀, 주장한 직업, 개인 기록, 아는 것, 살아 있는 사람)
+function mBotSelf(b: text) :: text:
 	set {_shown} to mActRole({_b})
-	set {_c} to "너는 한국어 채팅으로 하는 마피아 게임(마인크래프트)의 참가자 %mNum({_b})%번 %mNameOf({_b})% 이다. 지금 %{-m::day}%일차 낮이다."
-	set {_c} to "%{_c}% 네 진짜 직업은 %mRoleName({_shown})% 이다."
+	set {_c} to "너는 %mNum({_b})%번 %mNameOf({_b})% 이다. 지금은 %{-m::day}%일차다. 네 진짜 직업은 %mRoleName({_shown})% 이다."
 	if mBotEvilSide({_b}) is true:
 		loop {-m::players::*}:
 			if loop-value is not {_b}:
 				if {-m::team::%loop-value%} is "mafia":
 					add "%mNum(loop-value)%번 %mNameOf(loop-value)%(%mRoleName({-m::role::%loop-value%})%)" to {_mates::*}
-		set {_c} to "%{_c}% 너는 마피아 팀이다. 절대로 마피아라고 밝히지 말고 시민인 척해라."
+		set {_c} to "%{_c}% 너는 마피아 팀이다."
 		if size of {_mates::*} > 0:
-			set {_c} to "%{_c}% 같은 팀: %{_mates::*}%. 팀원을 감싸되 티 나지 않게."
+			set {_c} to "%{_c}% 같은 팀: %{_mates::*}%."
+	else if {-m::role::%{_b}%} is "jester":
+		set {_c} to "%{_c}% 너는 광대다. 투표로 처형당해야 이긴다(정체는 숨겨라)."
 	if {-mt::claim::%{_b}%} is set:
 		set {_c} to "%{_c}% 너는 사람들에게 %mRoleName({-mt::claim::%{_b}%})% 이라고 말해 두었다. 말이 엇갈리지 않게."
 	set {_pm} to mBotPMemText({_b})
@@ -850,63 +868,21 @@ function mBotCtx(b: text) :: text:
 	if size of {_kn::*} > 0:
 		set {_c} to "%{_c}% 네가 아는 것: %{_kn::*}%."
 	set {_c} to "%{_c}% 살아 있는 다른 사람: %{_al::*}%."
-	set {_c} to "%{_c}% 규칙: 밤에 마피아가 한 명을 죽이고, 낮에 토론한 뒤 투표로 한 명을 처형한다. 경찰은 밤마다 한 명이 마피아인지 조사한다."
-	set {_c} to "%{_c}% 대화를 읽는 법: 대화 전체를 이어서 이해해라. '노마피아', '마피아 아님' 은 그 사람을 변호하는 말이다. 경찰이라고 밝힌 사람의 결과 발표는 무겁게 보되, 경찰 주장이 둘이면 둘 중 하나는 거짓이다. 말이 바뀌거나 근거 없이 몰아가는 사람을 의심해라."
-	if mBotEvilSide({_b}) is true:
-		set {_c} to "%{_c}% 마피아 팀 전략: 시민처럼 추리하는 척하고, 팀원이 의심받으면 티 나지 않게 화제를 돌리고, 진짜 경찰로 보이는 사람의 신뢰를 깎아라."
-	else:
-		set {_c} to "%{_c}% 시민 전략: 근거를 따져 마피아를 찾고, 믿을 만한 경찰 결과는 따르고, 억울하게 몰리는 사람은 변호해라."
-	set {_c} to "%{_c}% 말하는 법: 실제 사람처럼 짧은 한국어 채팅 한 문장(40자 이내)만 써라. 따옴표, 이름표, 괄호 지문(목소리·행동 묘사), 여러 후보, 설명, 이모지 없이 실제로 칠 말만. 사람을 가리킬 때는 번호를 쓴다(예: 3번). 게임 밖 이야기는 하지 마라."
 	return {_c}
 
-# 최근 공개 채팅(기록의 전체 알림·채팅) 12줄
-function mBotRecent() :: text:
-	set {_n} to size of {-m::log::*}
-	set {_from} to {_n} - 11
-	if {_from} < 1:
-		set {_from} to 1
-	set {_out} to ""
-	set {_i} to 0
-	loop {-m::log::*}:
-		add 1 to {_i}
-		if {_i} >= {_from}:
-			set {_e::*} to split loop-value at "|"
-			if {_e::1} is "*":
-				set {_l} to loop-value
-				replace first "*|" in {_l} with ""
-				replace first "|" in {_l} with " "
-				set {_l} to {_l}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
-				set {_out} to "%{_out}%%{_l}%%nl%"
-	return {_out}
+# 요청의 사용자 글: 공개 기록 → (봇이면) 그 봇의 정보 → 할 일
+function mBotUser(b: text, task: text) :: text:
+	set {_u} to mBotHistory()
+	if {_b} is not "":
+		set {_u} to "%{_u}%%nl%[너에 대한 정보]%nl%%mBotSelf({_b})%"
+	return "%{_u}%%nl%[할 일]%nl%%{_task}%"
 
-# AI 에게 요청을 보낸다(비동기). 돌려주는 값: 보냈으면 true
+# 말하기 요청
 function mBotLlmSend(b: text, intent: text) :: boolean:
-	set {_root} to new JsonObject()
-	{_root}.addProperty("model", {mcfg::llm::model})
-	# 생각하는 모델(Gemini 등)은 생각에도 토큰을 써서 넉넉히 둔다(답은 mBotLlmText 가 60자로 자른다)
-	{_root}.addProperty("max_tokens", 600)
-	{_root}.addProperty("temperature", 0.9)
-	if {mcfg::llm::effort} is set:
-		{_root}.addProperty("reasoning_effort", {mcfg::llm::effort})
-	set {_msgs} to new JsonArray()
-	set {_sys} to new JsonObject()
-	{_sys}.addProperty("role", "system")
-	{_sys}.addProperty("content", mBotCtx({_b}))
-	{_msgs}.add({_sys})
-	set {_usr} to new JsonObject()
-	{_usr}.addProperty("role", "user")
-	{_usr}.addProperty("content", "%mBotHistory()%%nl%[이번에 할 말] %{_intent}%%nl%지금까지의 대화를 기억하고, 같은 말을 되풀이하지 말고, 앞뒤가 맞게 한 문장만 답해라.")
-	{_msgs}.add({_usr})
-	{_root}.add("messages", {_msgs})
-	set {_rb} to HttpRequest.newBuilder(URI.create({mcfg::llm::url}))
-	{_rb}.timeout(Duration.ofSeconds(mBotLlmWait()))
-	{_rb}.header("Content-Type", "application/json")
-	if {mcfg::llm::key} is set:
-		{_rb}.header("Authorization", "Bearer %{mcfg::llm::key}%")
-	{_rb}.POST(HBodyPub.ofString({_root}.toString()))
-	if {-mtllm::client} is not set:
-		set {-mtllm::client} to mBotLlmClient()
-	set {-mtllm::f::%{_b}%} to {-mtllm::client}.sendAsync({_rb}.build(), HBodyHand.ofString())
+	set {_f} to mBotLlmPost(mBotStatic(), mBotUser({_b}, "%{_intent}% 지금까지의 대화를 기억하고, 같은 말을 되풀이하지 말고, 앞뒤가 맞게 채팅 한 문장만 답해라."), 600)
+	if {_f} is not set:
+		return false
+	set {-mtllm::f::%{_b}%} to {_f}
 	set {-mtllm::t::%{_b}%} to {-mau::sec}
 	return true
 
@@ -950,6 +926,9 @@ function mBotLlmText(body: text) :: text:
 function mBotIntentEffect(b: text, kind: text, t: text):
 	if {_t} is "":
 		stop
+	# AI 가 켜져 있으면 봇이 한 말도 AI 가 읽으니(mBotLlmParse) 여기서는 반영하지 않는다(두 번 세지 않게)
+	if mBotLlmOn() is true:
+		stop
 	# 분명한 주장(경찰 결과, 사칭 반박, 해명 중 맞고발)만 반영한다. 의심 말하기는 AI 가 실제로 무슨 말을 할지 몰라 반영하지 않는다
 	if {_kind} is "police_mafia" or "fake_police" or "real_vs_fake":
 		mBotClaim({_b}, {_t}, "mafia")
@@ -988,6 +967,7 @@ function mBotLlmPar() :: number:
 
 function mBotLlmInflight() :: number:
 	set {_n} to size of {-mtllm::f::*}
+	add size of {-mtllm::df::*} to {_n}
 	add size of {-mtllm::pf::*} to {_n}
 	if {-mtllm::sf} is set:
 		add 1 to {_n}
@@ -1000,7 +980,16 @@ function mBotLlmDispatch():
 		add 1 to {_k}
 		if mBotLlmInflight() >= mBotLlmPar():
 			stop
-		if size of {-mtllm::q::*} > 0:
+		# 결정(밤 능력·투표)이 가장 먼저(시간 제한이 있음)
+		if size of {-mtllm::dq::*} > 0:
+			set {_db} to first element of {-mtllm::dq::*}
+			remove {_db} from {-mtllm::dq::*}
+			set {_dm} to {-mtllm::dqm::%{_db}%}
+			delete {-mtllm::dqm::%{_db}%}
+			if {-m::alive::%{_db}%} is true:
+				if {_dm} is mState():
+					mBotDecideNow({_db}, {_dm})
+		else if size of {-mtllm::q::*} > 0:
 			set {_b} to first element of {-mtllm::q::*}
 			remove {_b} from {-mtllm::q::*}
 			set {_f::*} to split {-mtllm::qd::%{_b}%} at "|"
@@ -1212,8 +1201,8 @@ function mBotSummarize(d: number):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "너는 한국어 마피아 게임의 하루 기록을 요약한다. 참가자: %{_ps}%. 공개된 사실만 6줄 이내로 써라. 사람은 '3번 이름'으로 쓴다. 빠뜨리지 말 것: 누가 어떤 직업을 주장했는지(경찰 결과 포함), 누가 누구를 의심하거나 변호했는지, 말이 바뀌거나 모순된 사람, 투표 결과와 처형, 밤 사망자, 공개된 직업. 추측이나 설명은 쓰지 마라."
-	set {-mtllm::sf} to mBotLlmPost({_sys}, "%{_d}%일차 기록:%nl%%{_txt}%", 900)
+	set {_sys} to "아래 하루 기록을 요약해라. 참가자: %{_ps}%. 공개된 사실만 6줄 이내로 써라. 사람은 '3번 이름'으로 쓴다. 빠뜨리지 말 것: 누가 어떤 직업을 주장했는지(경찰 결과 포함), 누가 누구를 의심하거나 변호했는지, 말이 바뀌거나 모순된 사람, 투표 결과와 처형, 밤 사망자, 공개된 직업. 추측이나 설명은 쓰지 마라."
+	set {-mtllm::sf} to mBotLlmPost(mBotStatic(), mBotUser("", "%{_sys}%%nl%[요약할 %{_d}%일차 기록]%nl%%{_txt}%"), 900)
 	set {-mtllm::sd} to {_d}
 	set {-mtllm::st} to {-mau::sec}
 
@@ -1285,7 +1274,7 @@ function mBotQueueReply(b: text, s: text, msg: text):
 	replace all "|" in {_m} with "/"
 	mBotQueue({_b}, "reply|%{_s}%||%{_m}%", random integer between 2 and 4)
 
-# 말 뜻 읽기: 자리가 없으면 줄을 세운다(최근 4개까지만, 오래된 것은 버림)
+# 말 뜻 읽기: 자리가 없으면 줄을 세운다(최근 6개까지만, 오래된 것은 버림)
 function mBotLlmParse(s: text, msg: text):
 	if mBotLlmInflight() < mBotLlmPar():
 		mBotLlmParseNow({_s}, {_msg})
@@ -1293,7 +1282,7 @@ function mBotLlmParse(s: text, msg: text):
 	set {_m} to {_msg}
 	replace all "|" in {_m} with "/"
 	add "%{_s}%|%{_m}%" to {-mtllm::pq::*}
-	if size of {-mtllm::pq::*} > 4:
+	if size of {-mtllm::pq::*} > 6:
 		remove first element of {-mtllm::pq::*} from {-mtllm::pq::*}
 
 # AI 로 사람 말의 뜻을 읽는다(비동기). 결과는 mBotLlmPoll 이 mBotApplyParse 로 넘긴다
@@ -1301,18 +1290,9 @@ function mBotLlmParseNow(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "너는 한국어 마피아 게임 채팅을 분석한다. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
-	# 앞 대화 10줄과 지금 말
-	set {_n} to size of {-mt::chat::*}
-	set {_from} to {_n} - 10
-	set {_i} to 0
-	set {_ctx} to ""
-	loop {-mt::chat::*}:
-		add 1 to {_i}
-		if {_i} >= {_from}:
-			if {_i} < {_n}:
-				set {_ctx} to "%{_ctx}%%loop-value%%nl%"
-	set {_f} to mBotLlmPost({_sys}, "[앞 대화]%nl%%{_ctx}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%", 300)
+	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
+	# 공개 기록(대화 포함, 앞 요청과 같은 앞부분) 뒤에 분석할 말을 붙인다
+	set {_f} to mBotLlmPost(mBotStatic(), mBotUser("", "%{_sys}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%%nl%JSON 하나만 답해라."), 300)
 	if {_f} is not set:
 		stop
 	add 1 to {-mtllm::pn}
@@ -1390,7 +1370,11 @@ function mBotApplyParse(s: text, msg: text, raw: text):
 				if {-m::num::%loop-value%} is {_no}:
 					if mIsBot(loop-value) is true:
 						if {-m::alive::%loop-value%} is true:
-							mBotQueueReply(loop-value, {_s}, {_msg})
+							# 봇이 봇을 부른 경우는 가끔만 대답(끝없이 주고받지 않게)
+							if mIsBot({_s}) is false:
+								mBotQueueReply(loop-value, {_s}, {_msg})
+							else if chance of 40%:
+								mBotQueueReply(loop-value, {_s}, {_msg})
 			add 1 to {_i}
 
 # 뜻 읽기 요청 확인(mBotLlmPoll 이 부른다)
@@ -1425,6 +1409,199 @@ function mBotParsePoll():
 every second:
 	if size of {-mtllm::pf::*} > 0:
 		mBotParsePoll()
+
+
+# ------------------------------------------------------------------ AI 결정: 밤 능력과 투표
+# 밤·투표가 시작되면 봇마다 결정 요청을 줄 세운다(말하기보다 먼저 보낸다). 답이 오면 바로 능력을 쓰거나 투표한다.
+# 답이 늦거나 이상하면 규칙(mTestNight/mTestVote)이 단계가 끝나기 직전에 대신 고른다. 마피아는 한 봇만 묻고 나머지는 같은 대상을 따른다.
+# 변수: {-mtllm::dq::*}(줄 선 봇) {-mtllm::dqm::봇}(night/vote) {-mtllm::df::봇}(보낸 요청) {-mtllm::dm::봇} {-mtllm::dt::봇} {-mtllm::dph::봇}(단계) {-mt::dec::봇}(AI 가 정한 단계)
+
+function mBotPhaseKey() :: text:
+	return "%mState()%-%{-m::day}%"
+
+# 직업별 고르는 요령
+function mBotRoleHint(r: text, mode: text) :: text:
+	if {_mode} is "vote":
+		return "지금까지의 대화와 아는 것을 보고 처형할 사람을 고른다. 마피아 팀이면 팀원을 고르지 말고 시민(특히 위협이 되는 사람)을 고른다."
+	if {_r} is "mafia":
+		return "죽일 시민을 고른다. 경찰이나 의사로 보이는 사람, 너희를 의심하는 사람을 먼저 노린다. 의사가 지킬 만한 뻔한 대상은 피해도 좋다."
+	if {_r} is "police":
+		return "마피아인지 조사할 사람을 고른다. 아직 모르는 사람 중 수상한 사람을 고른다."
+	if {_r} is "doctor":
+		return "오늘 밤 마피아가 노릴 것 같은 사람을 살린다(자기 자신도 된다)."
+	if {_r} is "spy" or "detective":
+		return "조사할 사람을 고른다. 아직 모르는 사람 중 수상한 사람."
+	if {_r} is "guardian":
+		return "지킬 사람을 고른다(그 사람 대신 네가 죽을 수 있다). 중요한 직업을 밝힌 사람."
+	if {_r} is "reporter":
+		return "직업을 공개할 사람을 고른다(게임 중 한 번). 수상한 사람을 공개하면 좋다. 아직 아끼려면 0."
+	if {_r} is "vigilante":
+		return "죽일 사람을 고른다(게임 중 한 번, 시민을 죽이면 너도 죽는다). 확실할 때만 쓰고 아니면 0."
+	if {_r} is "thief":
+		return "죽이고 직업을 훔칠 사람을 고른다(게임 중 한 번). 쓸 만한 직업이 있을 것 같은 사람. 아끼려면 0."
+	if {_r} is "assassin":
+		return "죽일 사람을 고른다. 너 혼자 남아야 이긴다."
+	if {_r} is "arsonist":
+		return "기름을 뿌릴 사람을 고르거나, 기름 젖은 사람이 충분하면 -1 로 점화한다. 너 혼자 남아야 이긴다."
+	if {_r} is "witch":
+		return "저주할 사람을 고른다(다음 날 투표 때 말을 못 한다). 너희를 의심하는 사람."
+	if {_r} is "thug":
+		return "협박할 사람을 고른다(다음 날 투표를 못 한다). 수상한 사람."
+	if {_r} is "shaman":
+		return "주술을 걸 사람을 고른다(그 사람을 노린 능력 하나를 무효로 만든다)."
+	return "능력을 쓸 대상을 고른다."
+
+function mBotDecideQueue(b: text, mode: text):
+	if mBotLlmOn() is false:
+		stop
+	if {-mtllm::dq::*} contains {_b}:
+		stop
+	if {-mtllm::df::%{_b}%} is set:
+		stop
+	# 마피아: 한 봇만 묻는다
+	if {_mode} is "night":
+		if mActRole({_b}) is "mafia":
+			loop {-m::players::*}:
+				if loop-value is not {_b}:
+					if mActRole(loop-value) is "mafia":
+						if {-mtllm::dq::*} contains loop-value:
+							stop
+						if {-mtllm::df::%loop-value%} is set:
+							stop
+	set {-mtllm::dqm::%{_b}%} to {_mode}
+	add {_b} to {-mtllm::dq::*}
+
+function mBotDecideNow(b: text, mode: text):
+	if {_mode} is "night":
+		set {_c::*} to mTargets({_b})
+	else:
+		if mVoteCan({_b}) is not "":
+			stop
+		loop {-m::players::*}:
+			if loop-value is not {_b}:
+				if {-m::alive::%loop-value%} is true:
+					add loop-value to {_c::*}
+	if size of {_c::*} is 0:
+		stop
+	set {_r} to mActRole({_b})
+	# 규칙 계산 추천(참고용)
+	set {_m} to "sus"
+	if {_mode} is "night":
+		if {_r} is "police" or "spy" or "detective":
+			set {_m} to "unknown"
+		else if {_r} is "doctor" or "guardian":
+			set {_m} to "protect"
+		else if {_r} is "mafia" or "assassin" or "thief" or "witch":
+			set {_m} to "threat"
+	else if mBotEvilSide({_b}) is true:
+		set {_m} to "threat"
+	set {_sug} to mBotBest({_b}, {_c::*}, {_m})
+	set {_list} to ""
+	loop {_c::*}:
+		set {_t} to loop-value
+		set {_x} to "%mNum({_t})%번 %mNameOf({_t})%"
+		if {_t} is {_b}:
+			set {_x} to "%{_x}%(너 자신)"
+		set {_list} to "%{_list}%%{_x}%, "
+	set {_what} to "%{-m::day}%일차 투표 시간이다. 처형할 사람에게 투표한다"
+	if {_mode} is "night":
+		set {_what} to "%{-m::day}%일차 밤이다. 네 직업(%mRoleName({_r})%) 능력을 쓸 대상을 고른다"
+	set {_task} to "[결정] %{_what}%. %mBotRoleHint({_r}, {_mode})% 후보: %{_list}%"
+	if {_sug} is not "":
+		set {_task} to "%{_task}% 참고로 계산상 추천은 %mNum({_sug})%번이다(따르지 않아도 된다)."
+	set {_task} to "%{_task}% JSON 하나만 답해라: {""target"": 번호} (고르지 않으려면 0"
+	if {_r} is "arsonist":
+		if {_mode} is "night":
+			set {_task} to "%{_task}%, 점화하려면 -1"
+	set {_task} to "%{_task}%)."
+	set {_f} to mBotLlmPost(mBotStatic(), mBotUser({_b}, {_task}), 200)
+	if {_f} is not set:
+		stop
+	set {-mtllm::df::%{_b}%} to {_f}
+	set {-mtllm::dm::%{_b}%} to {_mode}
+	set {-mtllm::dt::%{_b}%} to {-mau::sec}
+	set {-mtllm::dph::%{_b}%} to mBotPhaseKey()
+
+# 결정 답 적용
+function mBotDecideApply(b: text, mode: text, raw: text):
+	set {_a} to {_raw}.indexOf("{")
+	set {_z} to {_raw}.lastIndexOf("}")
+	if {_a} < 0:
+		stop
+	if {_z} <= {_a}:
+		stop
+	set {_o} to JsonParser.parseString({_raw}.substring({_a}, {_z} + 1)).getAsJsonObject()
+	if {_o}.has("target") is false:
+		stop
+	set {_no} to {_o}.get("target").getAsInt()
+	set {_key} to mBotPhaseKey()
+	if {_mode} is "night":
+		if {_no} is -1:
+			if mActRole({_b}) is "arsonist":
+				if mSetIgnite({_b}) is "":
+					set {-mt::dec::%{_b}%} to {_key}
+			stop
+		if {_no} is 0:
+			# 쓰지 않기로 함(규칙도 대신 쓰지 않게)
+			set {-mt::dec::%{_b}%} to {_key}
+			stop
+		set {_c::*} to mTargets({_b})
+		loop {_c::*}:
+			if {-m::num::%loop-value%} is {_no}:
+				set {_t} to loop-value
+		if {_t} is not set:
+			stop
+		if mSetAct({_b}, {_t}) is "":
+			set {-mt::dec::%{_b}%} to {_key}
+			if mActRole({_b}) is "mafia":
+				set {-mt::mk::%{-m::day}%} to {_t}
+		stop
+	if {_no} is 0:
+		set {-mt::dec::%{_b}%} to {_key}
+		stop
+	loop {-m::players::*}:
+		if {-m::num::%loop-value%} is {_no}:
+			set {_t} to loop-value
+	if {_t} is not set:
+		stop
+	if {_t} is {_b}:
+		stop
+	if mVoteCast({_b}, {_t}) is "":
+		set {-mt::dec::%{_b}%} to {_key}
+		if chance of 25%:
+			mBotSpeak({_b}, "vote", {_t}, "", "")
+
+function mBotDecidePoll():
+	loop indices of {-mtllm::df::*}:
+		set {_b} to loop-value
+		set {_f} to {-mtllm::df::%{_b}%}
+		set {_done} to false
+		set {_body} to ""
+		if {_f}.isDone() is true:
+			set {_done} to true
+			if {_f}.isCompletedExceptionally() is false:
+				set {_res} to {_f}.get()
+				if {_res}.statusCode() is 200:
+					set {_o} to JsonParser.parseString({_res}.body()).getAsJsonObject()
+					if {_o}.has("choices") is true:
+						set {_body} to {_o}.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString()
+		else if {-mau::sec} - {-mtllm::dt::%{_b}%} > mBotLlmWait() + 1:
+			set {_done} to true
+			{_f}.cancel(true)
+		if {_done} is true:
+			set {_m} to {-mtllm::dm::%{_b}%}
+			set {_ph} to {-mtllm::dph::%{_b}%}
+			delete {-mtllm::df::%{_b}%}
+			delete {-mtllm::dm::%{_b}%}
+			delete {-mtllm::dt::%{_b}%}
+			delete {-mtllm::dph::%{_b}%}
+			if {_body} is not "":
+				if {_ph} is mBotPhaseKey():
+					mBotDecideApply({_b}, {_m}, {_body})
+
+every second:
+	if size of {-mtllm::df::*} > 0:
+		mBotDecidePoll()
 
 # 사람 채팅 듣기(살아 있는 참가자가 낮·투표 시간에 한 말)
 on chat:
@@ -1465,6 +1642,9 @@ every second:
 		set {-mt::phase} to {_ph}
 		delete {-mt::when::*}
 		delete {-mt::talk::*}
+		# 지난 단계의 AI 결정 줄은 버린다(새 단계에서 다시 줄 세움)
+		delete {-mtllm::dq::*}
+		delete {-mtllm::dqm::*}
 		if {_s} is "loading":
 			mBotInit()
 		if {_s} is "day":
@@ -1483,6 +1663,15 @@ every second:
 				if {_max} < 2:
 					set {_max} to 2
 				set {-mt::when::%loop-value%} to random integer between 1 and {_max}
+				# AI 가 켜져 있으면 밤 능력·투표를 AI 에게 먼저 묻고, 규칙은 단계가 끝나기 직전에만 대신 고른다
+				if mBotLlmOn() is true:
+					if mIsBot(loop-value) is true:
+						if {_s} is "night" or "vote":
+							mBotDecideQueue(loop-value, {_s})
+							set {_late} to {-m::left} - 3
+							if {_late} < 2:
+								set {_late} to 2
+							set {-mt::when::%loop-value%} to {_late}
 				# 낮: 말할 때(아침 발표가 끝난 뒤 두 번)
 				if {_s} is "day":
 					if mIsBot(loop-value) is true:
@@ -1876,6 +2065,13 @@ command /mtest [<text>] [<text>] [<text>]:
 # 다시 불러오면 AI 접속 객체를 새로 만든다(설정이 바뀌었을 수 있음)
 on load:
 	delete {-mtllm::client}
+	delete {-mtllm::df::*}
+	delete {-mtllm::dq::*}
+	delete {-mtllm::dqm::*}
+	delete {-mtllm::q::*}
+	delete {-mtllm::pq::*}
+	delete {-mtllm::pf::*}
+	delete {-mtllm::sf}
 	delete {-mtllm::f::*}
 	delete {-mtllm::fb::*}
 	delete {-mtllm::t::*}
