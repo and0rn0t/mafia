@@ -38,12 +38,8 @@ function mVoteCast(v: text, t: text) :: text:
 		return "살아 있는 참가자에게만 투표할 수 있습니다."
 	set {-m::vote::%{_v}%} to {_t}
 	add mWeight({_v}) to {-m::votes::%{_t}%}
-	set {_n} to mNameOf({_t})
-	set {_c} to {-m::votes::%{_t}%}
-	loop {-m::players::*}:
-		set {_p} to mPlayerOf(loop-value)
-		if {_p} is set:
-			send "&f%{_n}%&7 님 &e%{_c}%표" to {_p}
+	# 투표 중에는 지금까지 모인 표 수를 보여 주지 않고 "누구 1표!" 알림만(누가 찍었는지, 표 무게(정치인 2표)도 숨김). 최종 개표는 mTally 가 알린다
+	mBc("%mNumName({_t})%&7 님 &e1표!")
 	return ""
 
 function mTally():
@@ -60,16 +56,26 @@ function mTally():
 						mContactNotify(loop-value, true)
 					else:
 						set {-m::sealed::%{_t}%} to true
-	# 종합 알림
+	# 최종 개표: 받은 표가 많은 순서로 모두 알린다(투표한 사람 수와 기권 수도)
 	set {_max} to 0
+	set {_cast} to 0
+	set {_can} to 0
 	loop {-m::players::*}:
+		if {-m::vote::%loop-value%} is set:
+			add 1 to {_cast}
+		if {-m::alive::%loop-value%} is true:
+			add 1 to {_can}
 		set {_v} to {-m::votes::%loop-value%}
 		if {_v} is set:
-			if {_v} > 0:
-				set {_nm} to mNameOf(loop-value)
-				mBc("&f%{_nm}%&7 님 &e%{_v}%표")
 			if {_v} > {_max}:
 				set {_max} to {_v}
+	mBc("&6&l[개표 결과] &7투표 %{_cast}%명 / 생존 %{_can}%명")
+	set {_k} to {_max}
+	while {_k} > 0:
+		loop {-m::players::*}:
+			if {-m::votes::%loop-value%} is {_k}:
+				mBc("&7 - %mNumName(loop-value)%&7: &e%{_k}%표")
+		subtract 1 from {_k}
 	if {_max} is 0:
 		mBc("&7투표한 사람이 없어 처형은 없습니다.")
 		stop
