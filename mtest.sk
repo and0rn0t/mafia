@@ -240,6 +240,16 @@ function mBotWhy(b: text, t: text) :: text:
 		set {-mt::whykey} to "%{_t}%|liar"
 		set {-mt::whyinf} to "시민을 쐈으면 자경단도 죽었을 거예요"
 		return "자경단이 %{_rt}% 처단했는데 자경단은 멀쩡해요"
+	# 가능한 세계 추론이 있으면: 이 사람의 확률을 가장 많이 올린 사실을 근거로 댄다(시민 쪽 봇은 자기 관점, 거짓말하는 쪽은 공개 관점)
+	set {_wk} to ""
+	if {_b} is not "":
+		if mBotLiar({_b}) is false:
+			set {_wk} to {_b}
+	set {_ww} to mWmWhy({_wk}, {_t})
+	if {_ww} is not "":
+		return {_ww}
+	set {-mt::whykey} to ""
+	set {-mt::whyinf} to ""
 	if {-mt::cxw::%{_t}%} is set:
 		set {-mt::whykey} to "%{_t}%|cx"
 		set {-mt::whyinf} to "말이 안 맞잖아요"
@@ -449,6 +459,10 @@ function mBotInit():
 	delete {-mt::wmf}
 	delete {-mt::wmc::*}
 	delete {-mt::wmok}
+	delete {-mt::wmx::*}
+	delete {-mt::ndd::*}
+	delete {-mt::pvh::*}
+	delete {-mt::wmmeas}
 	delete {-mt::cctgt}
 	loop {-m::players::*}:
 		set {_b} to loop-value
@@ -499,6 +513,7 @@ function mBotLearn():
 	# 밤에 죽은 사람은 대개 시민(마피아는 같은 편을 죽이지 않는다). 자경단이 처단했다고 밝히면 mBotRepApply 가 지운다
 	loop {-m::dead::*}:
 		set {-mt::nd::%loop-value%} to true
+		set {-mt::ndd::%loop-value%} to {-m::day}
 	# 밤 사망자를 어제 찍은 사람은 조금 수상
 	mBotDeathReview()
 	# 지난 보고들을 밤사이 공개된 직업·어제 투표와 맞춰 본다
@@ -563,16 +578,28 @@ function mWmFacts() :: text:
 			set {_s} to "%{_s}%;pub|%{_p}%|%mWmType({-m::pubrole::%{_p}%})%"
 		if {-mt::nd::%{_p}%} is set:
 			set {_s} to "%{_s}%;nd|%{_p}%"
+		if {-mt::ndd::%{_p}%} is set:
+			set {_s} to "%{_s}%;dd|%{_p}%|%{-mt::ndd::%{_p}%}%"
+		# 공개된 투표(말한 투표, 날마다)
+		loop {-m::day} times:
+			if {-mt::pvh::%loop-value-2%::%{_p}%} is set:
+				set {_s} to "%{_s}%;pv|%{_p}%|%{-mt::pvh::%loop-value-2%::%{_p}%}%"
 		if {-mt::liar::%{_p}%} is set:
 			set {_s} to "%{_s}%;liar|%{_p}%"
 		if {-mt::cxs::%{_p}%} is set:
 			set {_s} to "%{_s}%;cx|%{_p}%|%{-mt::cxs::%{_p}%}%"
-		loop {-mt::rep::%{_p}%::*}:
-			set {_f::*} to split loop-value-2 at "|"
-			if {_f::1} is "police":
-				if {_f::2} is not "-":
-					if {_f::3} is "mafia" or "town":
-						set {_s} to "%{_s}%;pol|%{_p}%|%{_f::2}%|%{_f::3}%"
+		loop {-m::day} times:
+			set {_d} to loop-value-2
+			set {_rs} to {-mt::rep::%{_p}%::%{_d}%}
+			if {_rs} is set:
+				set {_f::*} to split {_rs} at "|"
+				if {_f::1} is "police":
+					if {_f::2} is not "-":
+						if {_f::3} is "mafia" or "town":
+							set {_s} to "%{_s}%;pol|%{_p}%|%{_f::2}%|%{_f::3}%"
+				# 모든 밤 보고(탐정 보고와 각자의 보고를 맞춰 보고, 의사·수호자 보고와 밤 사망을 맞춰 본다)
+				set {_s} to "%{_s}%;rp|%{_p}%|%{_d}%|%{_rs}%"
+			delete {_rs}
 	return {_s}
 
 # 봇 b 의 관점 조건: 나는 시민 팀이고 내 진짜(라고 아는) 직업, 내가 아는 사람들
@@ -599,6 +626,7 @@ function mWmUpdate():
 	if {-mt::wmf} is not {_f}:
 		set {-mt::wmf} to {_f}
 		delete {-mt::wmc::*}
+		delete {-mt::wmx::*}
 		set {_cnt} to Brain.load({_f})
 		Brain.view("", "", "")
 		set {_new} to true
@@ -627,6 +655,63 @@ every second:
 	if mState() is "day" or "vote" or "execute" or "night":
 		if {-m::players::*} is set:
 			mWmUpdate()
+			# 빠른 시뮬레이션: 날마다 투표 시간에 추론이 얼마나 맞는지 잰다(mWmMeasure)
+			if {-msim::left} is set:
+				if mState() is "vote":
+					if {-mt::wmmeas} is not {-m::day}:
+						set {-mt::wmmeas} to {-m::day}
+						mWmMeasure()
+
+# 추론 정확도(시뮬레이션 요약용): 살아 있는 진짜 마피아(마피아 직업)에게 준 공개 관점 확률 합·수, 나머지 사람의 확률 합·수,
+#   공개 관점의 의심 1위가 진짜 마피아인 날 수, 시민 쪽 봇마다 자기 관점 1위가 진짜 마피아인 수
+function mWmMeasure():
+	if {-mt::wmok} is not set:
+		stop
+	set {_top} to ""
+	set {_tp} to -1
+	set {_anyM} to false
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {-m::alive::%{_p}%} is true:
+			if {-m::pubrole::%{_p}%} is not set:
+				set {_pm} to Brain.pm("", {_p})
+				if {_pm} >= 0:
+					if mLooksMafia({_p}) is true:
+						set {_anyM} to true
+						mSimAdd("wm_m", {_pm})
+						mSimAdd("wm_mn", 1)
+					else:
+						mSimAdd("wm_o", {_pm})
+						mSimAdd("wm_on", 1)
+					if {_pm} > {_tp}:
+						set {_tp} to {_pm}
+						set {_top} to {_p}
+	if {_anyM} is false:
+		stop
+	mSimAdd("wm_days", 1)
+	if {_top} is not "":
+		if mLooksMafia({_top}) is true:
+			mSimAdd("wm_top", 1)
+	loop {-m::players::*}:
+		set {_b} to loop-value
+		if mIsBot({_b}) is true:
+			if {-m::alive::%{_b}%} is true:
+				if mBotLiar({_b}) is false:
+					set {_bt} to ""
+					set {_bp} to -1
+					loop {-m::players::*}:
+						set {_p} to loop-value-2
+						if {_p} is not {_b}:
+							if {-m::alive::%{_p}%} is true:
+								if {-m::pubrole::%{_p}%} is not set:
+									set {_pm} to Brain.pm({_b}, {_p})
+									if {_pm} > {_bp}:
+										set {_bp} to {_pm}
+										set {_bt} to {_p}
+					if {_bt} is not "":
+						mSimAdd("wm_bn", 1)
+						if mLooksMafia({_bt}) is true:
+							mSimAdd("wm_btop", 1)
 
 # 관점 key 에서 본 t 의 세계 추론 점수(마피아 350, 보조·중립 140 비중, 평범한 사람은 대략 0). 계산 전이면 -9999
 function mWmScore(key: text, t: text) :: number:
@@ -653,6 +738,119 @@ function mWmRisk(extra: text, mates: text) :: number:
 	if {-mt::wmok} is not set:
 		return -1
 	return Brain.risk({_extra}, {_mates})
+
+# 추론 근거를 사람 말로: 확률을 가장 많이 올린 공개 사실(Brain.explain, 사실을 하나씩 빼 보고 확률이 얼마나 떨어지는지로 고른다)을 문장으로 바꾼다.
+#   b = 말하는 봇(그 봇의 관점), "" 이면 공개 관점(거짓말하는 쪽이 시민처럼 몰 때). 근거가 없으면 ""
+#   {-mt::whykey}(같은 근거 되풀이 막기) {-mt::whyinf}(결론 한 줄)도 정한다. 사실이 바뀔 때까지 결과를 기억한다({-mt::wmx::봇::대상})
+function mWmWhy(b: text, t: text) :: text:
+	if {-mt::wmok} is not set:
+		return ""
+	if {-mt::wmx::%{_b}%::%{_t}%} is set:
+		set {_x} to {-mt::wmx::%{_b}%::%{_t}%}
+	else:
+		set {_cons} to ""
+		if {_b} is not "":
+			set {_cons} to mWmCons({_b})
+		set {_x} to Brain.explain({_b}, {_cons}, {_t})
+		set {-mt::wmx::%{_b}%::%{_t}%} to {_x}
+	if {_x} is "":
+		return ""
+	# 이 관점에서 이 사람이 가장 유력한지
+	set {_top} to true
+	set {_pt} to Brain.pm({_b}, {_t})
+	loop {-m::players::*}:
+		if loop-value is not {_t}:
+			if loop-value is not {_b}:
+				if {-m::alive::%loop-value%} is true:
+					if {-m::pubrole::%loop-value%} is not set:
+						if Brain.pm({_b}, loop-value) > {_pt}:
+							set {_top} to false
+	set {_items::*} to split {_x} at "##"
+	loop {_items::*}:
+		set {_s} to mWmSay(loop-value, {_t})
+		if {_s} is not "":
+			set {-mt::whykey} to "%{_t}%|wm|%loop-value%"
+			if {_top} is true:
+				set {-mt::whyinf} to "따져 보면 %mBotRefS({_t})% 님이 제일 유력해요"
+			else:
+				set {-mt::whyinf} to "그래서 %mBotRefS({_t})% 님이 좀 의심돼요"
+			return {_s}
+	return ""
+
+# 사실 항목 하나 → t 를 의심하는 근거 문장(못 만들면 "")
+function mWmSay(item: text, t: text) :: text:
+	set {_f::*} to split {_item} at "|"
+	set {_rt} to mBotRef({_t})
+	set {_tc} to ""
+	if {-mt::claim::%{_t}%} is set:
+		set {_tc} to {-mt::claim::%{_t}%}
+	# 직업 주장·밤 사망: 같은 직업을 주장한 다른 사람과 겹친다
+	if {_f::1} is "cl" or "nd":
+		if {_tc} is "":
+			return ""
+		set {_o} to ""
+		if {_f::2} is not {_t}:
+			set {_o} to {_f::2}
+		else:
+			loop {-m::players::*}:
+				if loop-value is not {_t}:
+					if {-mt::claim::%loop-value%} is {_tc}:
+						set {_o} to loop-value
+		set {_rn} to mRoleName({_tc})
+		if {_o} is "":
+			return "%{_rt}% 님 %{_rn}% 주장이 다른 말이랑 안 맞아요"
+		if {-mt::claim::%{_o}%} is not {_tc}:
+			return ""
+		if {-mt::nd::%{_o}%} is set:
+			return "%mBotRef({_o})% 님이 %{_rn}%%mKoIra({_rn})% 했다가 밤에 죽었는데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
+		return "%{_rt}% 님이랑 %mBotRef({_o})% 님 둘 다 %{_rn}%%mKoIrae({_rn})%"
+	if {_f::1} is "pol":
+		if {_f::3} is {_t}:
+			if {_f::4} is "mafia":
+				return "경찰이라는 %mBotRef({_f::2})% 님이 %{_rt}% 님을 마피아로 지목했어요"
+			return ""
+		if {_f::2} is {_t}:
+			if {_f::4} is "mafia":
+				return "%{_rt}% 님이 경찰이라며 %mBotRef({_f::3})% 님을 마피아로 몰았는데 말이 안 맞아요"
+			return "%{_rt}% 님이 경찰이라며 %mBotRef({_f::3})% 님은 마피아가 아니라고 했는데 말이 안 맞아요"
+		return ""
+	if {_f::1} is "rp":
+		# rp|말한 사람|날|직업|대상|결과
+		set {_who} to {_f::2}
+		set {_rr} to {_f::4}
+		set {_x} to {_f::5}
+		set {_res} to {_f::6}
+		if {_rr} is "detective":
+			if {_who} is not {_t}:
+				if {_x} is {_t}:
+					if {_res} starts with "tgt:":
+						set {_y} to {_res}
+						replace all "tgt:" in {_y} with ""
+						if {_tc} is not "":
+							set {_rn} to mRoleName({_tc})
+							return "탐정이라는 %mBotRef({_who})% 님 말로는 %{_rt}% 님이 밤에 %mBotRef({_y})% 님에게 능력을 썼대요. %{_rn}%%mKoIra({_rn})% 했는데요"
+						return "탐정이라는 %mBotRef({_who})% 님 말로는 %{_rt}% 님이 밤에 %mBotRef({_y})% 님에게 능력을 썼대요"
+					if {_res} is "none":
+						return "탐정이라는 %mBotRef({_who})% 님 말로는 %{_rt}% 님은 밤에 아무것도 안 했대요. 보고랑 안 맞아요"
+				return ""
+			if {_x} is not "-":
+				return "%{_rt}% 님 탐정 보고가 %mBotRef({_x})% 님 말이랑 안 맞아요"
+			return ""
+		if {_who} is {_t}:
+			if {_x} is not "-":
+				if {_rr} is "doctor":
+					return "%{_rt}% 님이 %mBotRef({_x})% 님을 살렸다는데 %mBotRefS({_x})% 님이 그날 밤에 죽었어요"
+				if {_rr} is "guardian":
+					return "%{_rt}% 님이 %mBotRef({_x})% 님을 지켰다는데 %mBotRefS({_x})% 님만 죽고 %mBotRefS({_t})% 님은 살아 있어요"
+			return "%{_rt}% 님 밤 보고가 다른 말이랑 안 맞아요"
+		return ""
+	if {_f::1} is "cx":
+		if {-mt::cxw::%{_t}%} is set:
+			return {-mt::cxw::%{_t}%}
+		return ""
+	if {_f::1} is "liar":
+		return "자경단이 %{_rt}% 님을 처단했다는데 자경단은 멀쩡해요"
+	return ""
 
 # 거짓말하는 쪽(마피아 팀·중립 살해자·보조)이 본 t 의 위협 점수. 밤에 죽이거나 막을 사람, 낮에 몰 사람을 고를 때 쓴다(고수의 우선순위):
 #   1) 경찰(주장 하나뿐이거나 공개) > 탐정 > 의사·수호자 > 주술사·기자 > 자경단 순으로 위험하다. 팀원을 마피아로 지목한 경찰은 더 위험하다.
@@ -1016,12 +1214,14 @@ function mBotFxRun(b: text, fx: text):
 		if {_f::2} is "vote" or "vote_why":
 			if {_t} is not "":
 				set {-mt::pv::%{_b}%} to {_t}
+				set {-mt::pvh::%{-m::day}%::%{_b}%} to {_t}
 		mBotIntentEffect({_b}, {_f::2}, {_t})
 		stop
 	if {_f::1} is "decl":
 		set {_t} to {_f::2}
 		# 찍겠다고 밝힌 사람(봇은 밝힌 대로 찍는다)
 		set {-mt::pv::%{_b}%} to {_t}
+		set {-mt::pvh::%{-m::day}%::%{_b}%} to {_t}
 		set {_n} to 0
 		if {-mt::vdn::%{_t}%} is set:
 			set {_n} to {-mt::vdn::%{_t}%}
@@ -3350,6 +3550,7 @@ function mBotHearFlush(id: text):
 		loop {-m::players::*}:
 			if {-m::num::%loop-value%} is {_pvi}:
 				set {-mt::pv::%{_id}%} to loop-value
+				set {-mt::pvh::%{-m::day}%::%{_id}%} to loop-value
 	# 경찰이라고 한 사람이 "○번 마피아" / "○번 마피아 아님" 이라고 하면 조사 결과로 기록한다(AI 해석이 꺼져 있어도 가능한 세계 추론에 들어가게).
 	#   봇 경찰의 보고와 같은 무게로 다룬다. 오늘 이미 기록한 결과가 있으면 그대로 둔다
 	set {_pc} to false
@@ -3912,6 +4113,16 @@ function mSimSummary():
 	mSimLog("승리: 시민 %{_wc}%(%mSimPct({_wc}, {_g})%) / 마피아 %{_wm}%(%mSimPct({_wm}, {_g})%) / 중립 %{_wn}% / 무승부 %{_wd}%")
 	mSimLog("처형 %{_ex}%번: 시민 팀 %{_ec}%(%mSimPct({_ec}, {_ex})%) / 마피아 팀 %{_em}%(%mSimPct({_em}, {_ex})%) / 중립 %{_en}% / 접선 전 보조 %{_eo}%, 처형 없는 날 %{_ne}%")
 	mSimLog("1일차 처형 %{_d1}%번 중 시민 팀 %{_d1c}%(%mSimPct({_d1c}, {_d1})%), 경찰·의사 처형 %{_ek}%번, 평균 %{_avg}%일")
+	# 추론 정확도(mWmMeasure): 투표 시간마다 잰 것
+	set {_wm} to mSimGet("wm_m")
+	set {_wmn} to mSimGet("wm_mn")
+	set {_wo} to mSimGet("wm_o")
+	set {_won} to mSimGet("wm_on")
+	set {_wdy} to mSimGet("wm_days")
+	set {_wt} to mSimGet("wm_top")
+	set {_wbn} to mSimGet("wm_bn")
+	set {_wbt} to mSimGet("wm_btop")
+	mSimLog("추론(투표 시간 %{_wdy}%번): 진짜 마피아 평균 %mSimPct({_wm}, {_wmn})% / 나머지 평균 %mSimPct({_wo}, {_won})%, 공개 의심 1위 적중 %mSimPct({_wt}, {_wdy})%, 시민 봇 의심 1위 적중 %mSimPct({_wbt}, {_wbn})%")
 
 # 시뮬레이션을 끝내고 사람의 관전 선택을 되돌린다
 function mSimFinish():

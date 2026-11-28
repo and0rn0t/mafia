@@ -11,47 +11,66 @@ import java.util.*;
  *
  * 가중치(공개 사실과 맞는 정도):
  *  - 시민 팀(C)은 사실대로 말한다: 한 명뿐인 직업을 C 둘이 주장하면 거의 불가능(광인이 있을 수 있으면 조금 더 가능).
- *  - 경찰을 주장한 C 의 결과는 맞다("마피아" → 대상이 M, "아님" → 대상이 M 이 아님).
+ *  - 경찰·의사는 반드시 있다(그 직업을 주장했거나 직업을 안 밝힌 C 가 있어야 한다).
+ *  - 직업 주장의 가능성: C 는 자기 직업을(시민 팀 직업은 고르게), 거짓말하는 쪽은 경찰·주술사를 조금 더 자주 사칭한다.
+ *  - 경찰을 주장한 C 의 결과는 맞다. 거짓말하는 쪽이 경찰을 사칭해 "마피아"라고 지목하는 일은 드물다.
+ *  - 탐정을 주장한 C 의 보고는 맞다: 대상이 C 라면 그 사람의 직업 주장·보고(밤에 능력을 썼는지, 누구에게)와 맞아야 한다.
+ *  - 의사를 주장한 C 가 살렸다는 사람은 그 밤에 죽지 않는다. 수호자를 주장한 C 가 지킨 사람이 죽었는데 수호자가 살아 있으면 안 맞는다.
+ *  - 공개된 투표(말한 투표): 마피아 팀은 마피아 팀원을 잘 찍지 않는다.
  *  - 거짓말이 확인된 사람(liar), 모순이 쌓인 사람(cx)은 C 일 가능성이 낮다.
  *  - 밤에 죽은 사람은 마피아가 아닐 가능성이 크다(마피아는 같은 편을 죽이지 않는다. 중립 살해자는 있을 수 있다).
- *  - 마피아 팀(M, S)·중립(N)의 직업 주장은 아무 직업이나 될 수 있다(거짓말).
  *
  * 사실 문자열: 항목은 ';', 칸은 '|'.
- *   comp|마피아수|보조수|중립수   p|id(참가자, 순서대로 전부)   cl|id|직업   pub|id|M/S/N/C   nd|id   cx|id|점수   liar|id
- *   pol|경찰주장자|대상|mafia/town   mad|1(광인이 있을 수 있음)
- * 관점(view): me|M/S/N/C   role|내 진짜 직업(시민이면, 같은 직업 주장자는 가짜)   k|id|M(마피아)/T(마피아 아님)/E(시민 아님)/X(마피아 팀: M 또는 S)
+ *   comp|마피아수|보조수|중립수   p|id(참가자, 순서대로 전부)   mad|1(광인이 있을 수 있음)
+ *   cl|id|직업   pub|id|M/S/N/C   nd|id   dd|id|날(그날 아침 발표된 밤 사망)   cx|id|점수   liar|id
+ *   pol|경찰주장자|대상|mafia/town   rp|말한사람|날|직업|대상(-)|결과(-)   pv|투표한사람|대상
+ * 관점(view): me|M/S/N/C   role|내 진짜 직업(시민이면, 같은 직업 주장자는 가짜)   k|id|M(마피아)/T(마피아 아님)/E(시민 아님)/X(마피아 팀)/C(시민 팀)
  */
 public final class Brain {
     static final int M = 0, S = 1, N = 2, C = 3;
     static final Set<String> UNIQUE = new HashSet<>(Arrays.asList(
             "police", "doctor", "reporter", "detective", "soldier", "politician", "terrorist", "guardian", "shaman", "vigilante", "thug"));
+    /** 밤에 대상에게 능력을 쓰는 시민 팀 직업(탐정에게 "능력을 썼다"로 보일 수 있는 것) */
+    static final Set<String> ACTS = new HashSet<>(Arrays.asList(
+            "police", "doctor", "detective", "thug", "guardian", "shaman", "reporter", "vigilante"));
     static final int CAP = 40000;
+
+    /** 밤 보고 하나 */
+    static final class Rep {
+        int who, day, tgt = -1, y = -1; String role, res;
+    }
 
     /** 공개 사실 */
     static final class Facts {
         List<String> ids = new ArrayList<>();
         Map<String, Integer> idx = new HashMap<>();
+        List<String> items = new ArrayList<>();
         int m, s, nn;
         String[] claim;
-        int[] pub;
+        int[] pub, dd;
         boolean[] nd, liar;
         double[] cx;
         List<int[]> pol = new ArrayList<>(); // {경찰주장자, 대상, 1=마피아}
+        List<int[]> pv = new ArrayList<>();  // {투표한 사람, 대상}
+        List<Rep> rp = new ArrayList<>();
         boolean mad;
 
         Facts copy() {
             Facts f = new Facts();
             f.ids = ids; f.idx = idx; f.m = m; f.s = s; f.nn = nn; f.mad = mad;
-            f.claim = claim.clone(); f.pub = pub.clone(); f.nd = nd.clone(); f.liar = liar.clone(); f.cx = cx.clone();
-            f.pol = new ArrayList<>(pol);
+            f.items = new ArrayList<>(items);
+            f.claim = claim.clone(); f.pub = pub.clone(); f.dd = dd.clone(); f.nd = nd.clone(); f.liar = liar.clone(); f.cx = cx.clone();
+            f.pol = new ArrayList<>(pol); f.pv = new ArrayList<>(pv); f.rp = new ArrayList<>(rp);
             return f;
         }
 
         void alloc() {
             int n = ids.size();
-            claim = new String[n]; pub = new int[n]; Arrays.fill(pub, -1);
+            claim = new String[n]; pub = new int[n]; Arrays.fill(pub, -1); dd = new int[n];
             nd = new boolean[n]; liar = new boolean[n]; cx = new double[n];
         }
+
+        Integer id(String s) { return s == null ? null : idx.get(s); }
 
         void apply(String item) {
             if (item.isEmpty()) return;
@@ -61,11 +80,12 @@ public final class Brain {
                 case "cl": if (a != null && f.length > 2) claim[a] = f[2].isEmpty() || f[2].equals("-") ? null : f[2]; break;
                 case "pub": if (a != null && f.length > 2) pub[a] = type(f[2]); break;
                 case "nd": if (a != null) nd[a] = true; break;
+                case "dd": if (a != null && f.length > 2) dd[a] = (int) num(f[2]); break;
                 case "liar": if (a != null) liar[a] = true; break;
                 case "cx": if (a != null && f.length > 2) cx[a] = num(f[2]); break;
                 case "pol":
                     if (a != null && f.length > 3) {
-                        Integer t = idx.get(f[2]);
+                        Integer t = id(f[2]);
                         if (t != null) {
                             int r = f[3].equals("mafia") ? 1 : 0;
                             boolean dup = false;
@@ -74,9 +94,28 @@ public final class Brain {
                         }
                     }
                     break;
+                case "pv":
+                    if (a != null && f.length > 2) { Integer t = id(f[2]); if (t != null) pv.add(new int[]{a, t}); }
+                    break;
+                case "rp":
+                    if (a != null && f.length > 5) {
+                        Rep r = new Rep();
+                        r.who = a; r.day = (int) num(f[2]); r.role = f[3];
+                        Integer t = id(f[4]); r.tgt = t == null ? -1 : t;
+                        r.res = f[5];
+                        if (r.res.startsWith("tgt:")) { Integer y = id(r.res.substring(4)); r.y = y == null ? -1 : y; }
+                        rp.add(r);
+                    }
+                    break;
                 case "mad": mad = true; break;
                 default: break;
             }
+        }
+
+        /** 그날 x 의 보고(없으면 null) */
+        Rep repOf(int x, int day) {
+            for (Rep r : rp) if (r.who == x && r.day == day) return r;
+            return null;
         }
     }
 
@@ -104,7 +143,7 @@ public final class Brain {
             if (p[0].equals("comp") && p.length > 3) { f.m = (int) num(p[1]); f.s = (int) num(p[2]); f.nn = (int) num(p[3]); }
         }
         f.alloc();
-        for (String it : items) f.apply(it);
+        for (String it : items) { f.apply(it); f.items.add(it); }
         return f;
     }
 
@@ -179,7 +218,6 @@ public final class Brain {
         for (int i = 0; i < n; i++) order.add(i);
         Collections.shuffle(order, rnd);
         int[] want = {f.m, f.s, f.nn};
-        // 공개된 직업 먼저
         for (int i = 0; i < n; i++) if (f.pub[i] >= 0 && f.pub[i] != C) { if (want[f.pub[i]] <= 0) return null; cur[i] = (byte) f.pub[i]; want[f.pub[i]]--; }
         for (int t = M; t <= N; t++) {
             for (int i : order) {
@@ -196,7 +234,6 @@ public final class Brain {
         int n = f.ids.size();
         double eps = f.mad ? 0.15 : 0.04;
         double[] w = new double[count];
-        // 한 명뿐인 직업별 주장자
         Map<String, List<Integer>> byRole = new HashMap<>();
         for (int i = 0; i < n; i++) if (f.claim[i] != null && UNIQUE.contains(f.claim[i])) byRole.computeIfAbsent(f.claim[i], k -> new ArrayList<>()).add(i);
         double[] cw = new double[n];
@@ -206,11 +243,36 @@ public final class Brain {
             if (f.cx[i] > 0) x *= Math.max(0.03, Math.exp(-f.cx[i] / 110.0));
             cw[i] = x;
         }
-        // 직업 주장의 가능성: 시민 팀은 자기 진짜 직업을 말하고(시민 팀 직업은 고르게 나온다), 거짓말하는 쪽은 경찰·주술사를 조금 더 자주 사칭한다
         int cTot = Math.max(1, n - f.m - f.s - f.nn);
         double lc = 1.0 / cTot;
         double[] ll = new double[n];
         for (int i = 0; i < n; i++) ll[i] = f.claim[i] == null ? 1 : ("police".equals(f.claim[i]) || "shaman".equals(f.claim[i]) ? 0.10 : 0.08);
+
+        // 탐정 보고: (탐정, 대상) 쌍마다 "탐정이 C 이고 대상도 C 면 말이 안 맞는가"를 미리 계산
+        List<int[]> detBad = new ArrayList<>(); // {탐정, 대상}
+        for (Rep r : f.rp) {
+            if (!"detective".equals(r.role) || r.tgt < 0 || r.tgt == r.who) continue;
+            if (!"detective".equals(f.claim[r.who])) continue;
+            int x = r.tgt;
+            String xc = f.claim[x];
+            Rep xr = f.repOf(x, r.day);
+            boolean bad = false;
+            if ("none".equals(r.res)) {
+                if (xr != null && xr.tgt >= 0) bad = true;
+            } else if (r.res != null && r.res.startsWith("tgt:")) {
+                if (xc != null && !ACTS.contains(xc)) bad = true;
+                else if (xr != null && xr.tgt != r.y) bad = true;
+            }
+            if (bad) detBad.add(new int[]{r.who, x});
+        }
+        // 의사·수호자 보고: C 라면 말이 안 맞는 보고
+        List<int[]> protBad = new ArrayList<>(); // {말한 사람}
+        for (Rep r : f.rp) {
+            if (r.tgt < 0 || f.dd[r.tgt] != r.day || r.day <= 0) continue;
+            if ("doctor".equals(r.role) && "doctor".equals(f.claim[r.who])) protBad.add(new int[]{r.who});
+            if ("guardian".equals(r.role) && "guardian".equals(f.claim[r.who]) && r.tgt != r.who && f.dd[r.who] != r.day) protBad.add(new int[]{r.who});
+        }
+
         for (int k = 0; k < count; k++) {
             int o = k * n;
             double x = 1;
@@ -219,7 +281,6 @@ public final class Brain {
                 int t = worlds[o + i];
                 if (t == C) {
                     x *= cw[i];
-                    // 경찰·의사는 반드시 있다(시민 팀): 그 직업을 주장했거나 아직 직업을 안 밝힌 시민 팀이 있어야 한다
                     if (f.claim[i] == null || "police".equals(f.claim[i])) polOk = true;
                     if (f.claim[i] == null || "doctor".equals(f.claim[i])) docOk = true;
                 } else if (f.nd[i]) {
@@ -236,43 +297,54 @@ public final class Brain {
                 for (int j = 1; j < c; j++) x *= eps;
             }
             for (int[] p : f.pol) {
-                if (worlds[o + p[0]] != C || !"police".equals(f.claim[p[0]])) continue;
-                boolean isM = worlds[o + p[1]] == M;
-                if ((p[2] == 1) != isM) x *= eps;
+                if (!"police".equals(f.claim[p[0]])) continue;
+                if (worlds[o + p[0]] == C) {
+                    boolean isM = worlds[o + p[1]] == M;
+                    if ((p[2] == 1) != isM) x *= eps;
+                } else {
+                    x *= p[2] == 1 ? 0.2 : 0.8;
+                }
             }
-            // 거짓말하는 쪽의 경찰 결과: "마피아" 라고 지목하는 일은 드물다(대개 "아니에요")
-            for (int[] p : f.pol) {
-                if (worlds[o + p[0]] == C || !"police".equals(f.claim[p[0]])) continue;
-                x *= p[2] == 1 ? 0.2 : 0.8;
+            for (int[] d : detBad) if (worlds[o + d[0]] == C && worlds[o + d[1]] == C) x *= eps;
+            for (int[] d : protBad) if (worlds[o + d[0]] == C) x *= 0.15;
+            for (int[] v : f.pv) {
+                int a = worlds[o + v[0]], b = worlds[o + v[1]];
+                if (b == M && a == M) x *= 0.45;
+                else if (b == M && a == S) x *= 0.75;
             }
             w[k] = x;
         }
         return w;
     }
 
-    /** 관점 하나(봇 id, 공개 관점은 "")의 확률을 계산해 둔다. 맞는 세계가 없으면 공개 관점 그대로 */
-    public static synchronized boolean view(String key, String me, String constraints) {
-        if (base == null) return false;
-        Facts f = base;
-        int n = f.ids.size();
-        int meI = me == null || me.isEmpty() ? -1 : f.idx.getOrDefault(me, -1);
-        int meT = -1;
-        String myRole = null;
-        Map<Integer, Character> k = new HashMap<>();
+    // ---- 관점
+    static final class Cons {
+        int meI = -1, meT = -1; String myRole; Map<Integer, Character> k = new HashMap<>();
+    }
+
+    static Cons cons(Facts f, String me, String constraints) {
+        Cons c = new Cons();
+        c.meI = me == null || me.isEmpty() ? -1 : f.idx.getOrDefault(me, -1);
         for (String it : constraints.split(";")) {
             String[] p = it.split("\\|", -1);
-            if (p[0].equals("me") && p.length > 1) meT = type(p[1]);
-            else if (p[0].equals("role") && p.length > 1 && !p[1].isEmpty()) myRole = p[1];
-            else if (p[0].equals("k") && p.length > 2) { Integer a = f.idx.get(p[1]); if (a != null && !p[2].isEmpty()) k.put(a, p[2].charAt(0)); }
+            if (p[0].equals("me") && p.length > 1) c.meT = type(p[1]);
+            else if (p[0].equals("role") && p.length > 1 && !p[1].isEmpty()) c.myRole = p[1];
+            else if (p[0].equals("k") && p.length > 2) { Integer a = f.idx.get(p[1]); if (a != null && !p[2].isEmpty()) c.k.put(a, p[2].charAt(0)); }
         }
+        return c;
+    }
+
+    /** 관점 c 에서의 확률 [종류][참가자]. 맞는 세계가 없으면 null */
+    static double[][] compute(Facts f, double[] w, Cons c) {
+        int n = f.ids.size();
         double eps = f.mad ? 0.15 : 0.04;
         double[][] r = new double[3][n];
         double tot = 0;
-        for (int w = 0; w < count; w++) {
-            int o = w * n;
-            if (meI >= 0 && meT >= 0 && worlds[o + meI] != meT) continue;
+        for (int q = 0; q < count; q++) {
+            int o = q * n;
+            if (c.meI >= 0 && c.meT >= 0 && worlds[o + c.meI] != c.meT) continue;
             boolean ok = true;
-            for (Map.Entry<Integer, Character> e : k.entrySet()) {
+            for (Map.Entry<Integer, Character> e : c.k.entrySet()) {
                 int t = worlds[o + e.getKey()];
                 switch (e.getValue()) {
                     case 'M': ok = t == M; break;
@@ -285,10 +357,9 @@ public final class Brain {
                 if (!ok) break;
             }
             if (!ok) continue;
-            double x = weight[w];
-            // 내 진짜 직업(한 명뿐)을 다른 사람이 주장하면 그 사람은 시민 팀이 아니다(광인이면 조금 가능)
-            if (myRole != null && UNIQUE.contains(myRole) && meT == C) {
-                for (int i = 0; i < n; i++) if (i != meI && myRole.equals(f.claim[i]) && worlds[o + i] == C) x *= eps;
+            double x = w[q];
+            if (c.myRole != null && UNIQUE.contains(c.myRole) && c.meT == C) {
+                for (int i = 0; i < n; i++) if (i != c.meI && c.myRole.equals(f.claim[i]) && worlds[o + i] == C) x *= eps;
             }
             if (x <= 0) continue;
             tot += x;
@@ -297,11 +368,19 @@ public final class Brain {
                 if (t < C) r[t][i] += x;
             }
         }
-        if (tot <= 0) {
+        if (tot <= 0) return null;
+        for (int t = 0; t < 3; t++) for (int i = 0; i < n; i++) r[t][i] /= tot;
+        return r;
+    }
+
+    /** 관점 하나(봇 id, 공개 관점은 "")의 확률을 계산해 둔다. 맞는 세계가 없으면 공개 관점 그대로 */
+    public static synchronized boolean view(String key, String me, String constraints) {
+        if (base == null) return false;
+        double[][] r = compute(base, weight, cons(base, me, constraints));
+        if (r == null) {
             if (!key.isEmpty() && views.containsKey("")) { views.put(key, views.get("")); return true; }
             return false;
         }
-        for (int t = 0; t < 3; t++) for (int i = 0; i < n; i++) r[t][i] /= tot;
         views.put(key, r);
         return true;
     }
@@ -322,6 +401,46 @@ public final class Brain {
     public static synchronized double pn(String key, String id) { return get(key, id, N); }
 
     /**
+     * 근거 찾기: 관점(me, constraints)에서 id 의 "마피아 팀(M·S) 확률"을 가장 많이 올린 공개 사실 항목(최대 2개, "##"로 나눔).
+     * 그 사실을 하나씩 빼 보고 확률이 얼마나 떨어지는지로 잰다. 뚜렷한 것(5%p 넘게)이 없으면 ""
+     */
+    public static synchronized String explain(String me, String constraints, String id) {
+        if (base == null) return "";
+        Integer ti = base.idx.get(id);
+        if (ti == null) return "";
+        Cons c = cons(base, me, constraints);
+        double[][] r0 = compute(base, weight, c);
+        if (r0 == null) return "";
+        double p0 = r0[M][ti] + r0[S][ti];
+        String best = "", second = "";
+        double bd = 0.05, sd = 0.05;
+        for (int i = 0; i < base.items.size(); i++) {
+            String it = base.items.get(i);
+            String head = it.split("\\|", 2)[0];
+            if (!(head.equals("cl") || head.equals("nd") || head.equals("cx") || head.equals("liar") || head.equals("pol") || head.equals("rp") || head.equals("pv"))) continue;
+            // 이 사람과 관련된 사실만 따진다(빠르게): 이 사람이 나오는 항목, 같은 직업을 주장한 사람의 주장·밤 사망
+            boolean rel = it.contains(id);
+            String tc = base.claim[ti];
+            if (!rel && tc != null) {
+                String[] p = it.split("\\|", -1);
+                Integer a = p.length > 1 ? base.idx.get(p[1]) : null;
+                if (a != null && tc.equals(base.claim[a]) && (head.equals("cl") || head.equals("nd"))) rel = true;
+            }
+            if (!rel) continue;
+            StringBuilder sb = new StringBuilder();
+            for (int j = 0; j < base.items.size(); j++) if (j != i) sb.append(base.items.get(j)).append(';');
+            Facts f = parse(sb.toString());
+            double[][] r = compute(f, weigh(f), cons(f, me, constraints));
+            if (r == null) continue;
+            double d = p0 - (r[M][ti] + r[S][ti]);
+            if (d > bd) { second = best; sd = bd; best = it; bd = d; }
+            else if (d > sd) { second = it; sd = d; }
+        }
+        if (best.isEmpty()) return "";
+        return second.isEmpty() ? best : best + "##" + second;
+    }
+
+    /**
      * 미리 따져 보기(마피아 팀 봇): 공개 사실에 extra(같은 형식의 항목들)를 더했을 때, 시민 쪽(공개 관점)이 보는 mates(쉼표로 나눈 id)의
      * "마피아 팀(M 또는 S)일 확률" 합. 계산할 수 없으면 -1
      */
@@ -335,8 +454,7 @@ public final class Brain {
         if (extra != null && !extra.isEmpty()) {
             f = base.copy();
             for (String it : extra.split(";")) f.apply(it);
-            boolean pubChanged = !Arrays.equals(f.pub, base.pub);
-            if (pubChanged) { build(f); rebuilt = true; }
+            if (!Arrays.equals(f.pub, base.pub)) { build(f); rebuilt = true; }
             w = weigh(f);
         }
         int n = f.ids.size();
