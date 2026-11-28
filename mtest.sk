@@ -1128,6 +1128,8 @@ function mBotReport(b: text):
 	# 보고는 뜻이 정해져 있으니 AI 로 다시 읽지 않는다
 	set {-mt::noparse::%{_b}%} to true
 	set {_txt} to mBotRepText({_b}, {_spec})
+	# 타자 지연 중에도 보고 순서가 바뀌지 않게(mBotTypeWait)
+	set {-mt::isrep::%{_b}%} to true
 	# 시민 직업을 훔친 도둑: 이제 시민 팀이니 정체를 털어놓고 진짜 직업으로 보고한다(앞서 한 거짓 주장을 정리)
 	if {-m::orig::%{_b}%} is "thief":
 		if {-m::stolen::%{_b}%} is set:
@@ -1405,8 +1407,59 @@ function mBotFill(line: text, t: text, u: text, r: text) :: text:
 		replace all "@r" in {_s} with mRoleName({_r})
 	return {_s}
 
-# 봇이 채팅에 말한다(생존자 대화처럼 모두에게 보이고 기록에도 남는다). 낮마다 다섯 마디까지(대답 포함)
+# ------------------------------------------------------------------ 봇 타자 속도
+# 봇 말은 사람이 치는 만큼 기다렸다가 나온다: 1.5초 + 글자당 0.12초(최대 8초) + 0~1초. 한 봇이 이미 치고 있으면 그 뒤에 이어서 친다.
+#   아침 보고는 번호 순서가 바뀌지 않게 앞 사람 보고보다 1초 이상 뒤에 나온다({-mt::repnext}).
+#   치는 사이에 밤이 되거나(낮 말), 낮이 되면(마피아 팀 말) 버린다. 변수: {-mt::typeuntil::봇}(치기 끝나는 초), {-mt::isrep::봇}
+function mBotTypeSec(msg: text) :: number:
+	set {_n} to mBotPlain({_msg}).length()
+	set {_s} to 1.5 + ({_n} * 0.12)
+	if {_s} > 8:
+		set {_s} to 8
+	return {_s} + random number between 0 and 1
+
+# 이번에 칠 말이 나오기까지 기다릴 초(같은 봇의 앞 말, 보고 순서까지 계산)
+function mBotTypeWait(b: text, msg: text) :: number:
+	set {_now} to {-mau::sec}
+	set {_d} to mBotTypeSec({_msg})
+	if {-mt::typeuntil::%{_b}%} is set:
+		set {_busy} to {-mt::typeuntil::%{_b}%} - {_now}
+		if {_busy} > 0:
+			add {_busy} to {_d}
+	if {-mt::isrep::%{_b}%} is set:
+		delete {-mt::isrep::%{_b}%}
+		if {-mt::repnext} is set:
+			set {_min} to {-mt::repnext} - {_now} + 1
+			if {_min} > {_d}:
+				set {_d} to {_min}
+		set {-mt::repnext} to {_now} + {_d}
+	set {-mt::typeuntil::%{_b}%} to {_now} + {_d}
+	return {_d}
+
 function mBotSay(b: text, msg: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	set {_d} to mBotTypeWait({_b}, {_msg})
+	set {_ticks} to rounded ({_d} * 20)
+	set {_ts} to "%{_ticks}% ticks" parsed as timespan
+	wait {_ts}
+	if mState() is not "day" or "vote" or "execute":
+		stop
+	mBotSayNow({_b}, {_msg})
+
+function mBotMafiaSay(b: text, msg: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	set {_d} to mBotTypeWait({_b}, {_msg})
+	set {_ticks} to rounded ({_d} * 20)
+	set {_ts} to "%{_ticks}% ticks" parsed as timespan
+	wait {_ts}
+	if mState() is not "night":
+		stop
+	mBotMafiaSayNow({_b}, {_msg})
+
+# 봇이 채팅에 말한다(생존자 대화처럼 모두에게 보이고 기록에도 남는다). 낮마다 다섯 마디까지(대답 포함)
+function mBotSayNow(b: text, msg: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	# 같은 날 같은 말을 되풀이하지 않는다
@@ -2687,7 +2740,7 @@ on chat:
 # 변수: {-mt::mplan}(제안까지 남은 초), {-mt::msync::사람}(마지막으로 맞춘 사람 마피아의 선택)
 
 # 마피아 팀 채널로 봇이 말한다(마피아 팀과 사망자·관전자가 받는다. mchat.sk 와 같은 모양)
-function mBotMafiaSay(b: text, msg: text):
+function mBotMafiaSayNow(b: text, msg: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	loop all players:
@@ -2875,6 +2928,9 @@ every second:
 			mBotInit()
 		delete {-mt::repdue::*}
 		delete {-mt::noparse::*}
+		delete {-mt::repnext}
+		delete {-mt::typeuntil::*}
+		delete {-mt::isrep::*}
 		if {_s} is "day":
 			delete {-mt::said::*}
 			delete {-mt::saidtxt::*}
@@ -2926,7 +2982,8 @@ every second:
 						if {_rat::%loop-value%} is set:
 							set {_t1} to {_ms} + 1 + ({_rat::%loop-value%} * 3)
 							set {-mt::repdue::%loop-value%} to true
-							set {_re} to {_ms} + 1 + ({_ri} * 3)
+							# 보고는 치는 시간이 있어 한 사람에 6초쯤 잡는다
+							set {_re} to {_ms} + 1 + ({_ri} * 6)
 							set {_t2} to {_re} + random integer between 4 and 25
 						set {-mt::talk::%loop-value%::1} to {_t1}
 						set {-mt::talk::%loop-value%::2} to {_t2}
