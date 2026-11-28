@@ -8,6 +8,7 @@
 #   같은 마피아 팀원(서로 아는 사이)은 진짜 직업 / 자기 자신은 표시 없음.
 # 변수: {-m::memo::보는사람::대상} = 직업 id (mReset 이 지운다)
 # 탭 목록은 mbody.sk 의 mBodyInfo 가 받는 사람마다 이 표시를 붙여 보낸다(이름이 다시 보내질 때). 메모를 바꾸면 탭을 다시 보낸다.
+# 채팅·기록: 대화는 기록({-m::log::*})에 말한 사람 자리 {{n:uuid}} 로 남고, 보여 줄 때 보는 사람의 메모로 바꾼다(mcore.sk mLogRender). 메모를 바꾸면 채팅창을 비우고 최근 기록 60줄을 새 표시로 다시 보낸다(mChatRedraw).
 # 미검증: PlayerCustomClickEvent, Dialog 버튼(custom click).
 # ==============================================================================
 
@@ -94,6 +95,8 @@ on PlayerCustomClickEvent:
 			send action bar colored "&7메모: %mNumName({_t})% &7= %mTeamColor(mRolePool({_f::4}))%%mRoleName({_f::4})%" to {_p}
 		mSound({_p}, "ui.button.click", 0.4, 1.6)
 		mMemoRefresh()
+		# 이미 받은 채팅에도 새 표시가 보이게 채팅창을 다시 그린다(mcore.sk mChatRedraw)
+		mChatRedraw({_p})
 		# 계속 메모할 수 있게 참가자 목록을 다시 연다
 		mMemoOpen({_p})
 

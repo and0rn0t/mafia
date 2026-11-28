@@ -328,6 +328,69 @@ function mBc(t: text):
 function mLogP(id: text, t: text):
 	mLogAdd({_id}, {_t})
 
+# 기록 한 줄을 볼 수 있는지. who: "*"(모두), uuid(본인), "@dead"(사망자·관전자 대화), "@mafia"(마피아 팀 대화: 팀원과 사망자·관전자)
+#   대화 채널은 지금 상태로 판단한다(mchat.sk 의 채널 규칙과 같게)
+function mLogSees(viewer: text, who: text) :: boolean:
+	if {_who} is "*" or {_viewer}:
+		return true
+	set {_living} to false
+	if {-m::players::*} contains {_viewer}:
+		if {-m::alive::%{_viewer}%} is true:
+			set {_living} to true
+	if {_who} is "@dead":
+		if {_living} is false:
+			return true
+	if {_who} is "@mafia":
+		if {_living} is false:
+			return true
+		if {-m::team::%{_viewer}%} is "mafia":
+			return true
+	return false
+
+# 기록 속 말한 사람 자리 {{n:uuid}} 를 보는 사람 기준 "번호 이름 + 메모 표시"로 바꾼다(메모를 바꾸면 기록에도 바로 반영)
+function mLogRender(viewer: text, line: text) :: text:
+	set {_s} to {_line}
+	set {_k} to 0
+	while {_k} < 4:
+		add 1 to {_k}
+		set {_a} to {_s}.indexOf("{{n:")
+		if {_a} < 0:
+			return {_s}
+		set {_a4} to {_a} + 4
+		set {_z} to {_s}.indexOf("}}", {_a4})
+		if {_z} < 0:
+			return {_s}
+		set {_sid} to {_s}.substring({_a4}, {_z})
+		set {_nm} to mNumName({_sid})
+		set {_tag} to mMemoTag({_viewer}, {_sid})
+		if {_tag} is not "":
+			set {_nm} to "%{_nm}% %{_tag}%"
+		replace all "{{n:%{_sid}%}}" in {_s} with {_nm}
+	return {_s}
+
+# 채팅창 다시 그리기: 채팅을 비우고 그 사람이 볼 수 있는 최근 기록(공지·본인 결과·대화)을 지금의 메모 표시로 다시 보낸다
+#   (마인크래프트는 이미 보낸 채팅을 고칠 수 없어서 새로 보낸다. 기록에 남지 않는 안내 문구는 다시 나오지 않는다)
+function mChatRedraw(p: player):
+	set {_id} to "%uuid of {_p}%"
+	loop {-m::log::*}:
+		set {_e::*} to split loop-value at "|"
+		if mLogSees({_id}, {_e::1}) is true:
+			set {_line} to loop-value
+			replace first "%{_e::1}%|%{_e::2}%|" in {_line} with ""
+			add {_line} to {_mine::*}
+	set {_n} to size of {_mine::*}
+	set {_first} to 1
+	if {_n} > 60:
+		set {_first} to {_n} - 59
+	set {_blank} to 100 - ({_n} - {_first} + 1)
+	loop {_blank} times:
+		send " " to {_p}
+	set {_i} to {_first}
+	while {_i} <= {_n}:
+		set {_ln} to mLogRender({_id}, {_mine::%{_i}%})
+		send colored {_ln} to {_p}
+		add 1 to {_i}
+
 # 기록 창(대화창 dialog). 채팅에 쓰지 않아 채팅이 밀리지 않는다. 최근 것이 아래, 길면 창 안에서 스크롤. ESC 나 확인 버튼으로 닫는다.
 # Paper Dialog API: Dialog.create(Consumer) 는 proxy 로 만든다(받는 함수 mLogDlgAccept 가 {-mlogdlg::base} 를 넣는다).
 function mLogDlgAccept(px: object, f: object):
@@ -365,11 +428,11 @@ function mLogShow(p: player):
 	set {_id} to "%uuid of {_p}%"
 	loop {-m::log::*}:
 		set {_e::*} to split loop-value at "|"
-		if {_e::1} is "*" or {_id}:
+		if mLogSees({_id}, {_e::1}) is true:
 			set {_line} to loop-value
 			replace first "%{_e::1}%|" in {_line} with ""
 			replace first "|" in {_line} with " "
-			add {_line} to {_mine::*}
+			add mLogRender({_id}, {_line}) to {_mine::*}
 	set {_n} to size of {_mine::*}
 	if {_n} is 0:
 		set {_t} to "&7아직 기록이 없습니다."

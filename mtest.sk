@@ -1002,7 +1002,7 @@ function mBotSay(b: text, msg: text):
 	if {-mt::said::%{_b}%} is set:
 		if {-mt::said::%{_b}%} >= 5:
 			stop
-	set {_line} to "&7<%mNumName({_b})%&7> &f%{_msg}%"
+	set {_line} to "&7<{{n:%{_b}%}}&7> &f%{_msg}%"
 	mBotChatAdd({_b}, {_msg})
 	# 받는 사람마다 그 사람의 메모를 봇 이름 옆에 붙인다(사람 채팅과 같은 모양)
 	loop all players:
