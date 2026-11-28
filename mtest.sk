@@ -201,34 +201,35 @@ function mBotScore(b: text, t: text) :: number:
 		add 150 to {_s}
 	return {_s}
 
-# b 가 t 를 의심하는 가장 강한 근거(전제) 한 문장(색 있는 채팅 글, 없으면 ""). 말할 때와 AI 에게 줄 때(색 빼고) 쓴다.
+# b 가 t 를 의심하는 가장 강한 근거(전제) 한 문장(색 있는 채팅 글, 없으면 ""). 말할 때와 AI 에게 줄 때(색 빼고) 쓴다. 사람처럼 짧게.
 #   b = "" 이면 모두가 아는 공개 정보로만 본다(마피아 팀·중립 봇이 시민처럼 그럴듯하게 몰 때).
-#   근거의 종류를 {-mt::whykey} 에(같은 근거를 여러 봇이 되풀이하지 않게, mBotTopicSay), 전제에서 결론으로 가는 추론 한 문장을 {-mt::whyinf} 에 남긴다.
+#   근거의 종류를 {-mt::whykey} 에(같은 근거를 여러 봇이 되풀이하지 않게, mBotTopicSay), 전제에서 결론으로 가는 짧은 추론을 {-mt::whyinf} 에 남긴다.
 function mBotWhy(b: text, t: text) :: text:
 	set {-mt::whykey} to ""
 	set {-mt::whyinf} to ""
 	set {_rt} to mBotRef({_t})
+	set {_rs} to mBotRefS({_t})
 	if {_b} is not "":
 		if mBotK({_b}, {_t}) is "mafia":
 			if mBotEvilSide({_b}) is false:
 				if mActRole({_b}) is "police":
 					set {-mt::whykey} to "%{_t}%|own"
-					set {-mt::whyinf} to "제 조사 결과는 직접 확인한 거라 확실해요"
-					return "제가 경찰인데 %{_rt}% 님 조사 결과가 마피아였어요"
+					set {-mt::whyinf} to "제가 직접 조사한 거예요"
+					return "저 경찰인데 %{_rt}% 마피아 나왔어요"
 	set {_pr} to {-m::pubrole::%{_t}%}
 	if {_pr} is set:
 		if mRolePool({_pr}) is not "citizen":
 			set {_pn} to mRoleName({_pr})
 			set {-mt::whykey} to "%{_t}%|pub"
-			set {-mt::whyinf} to "공개된 직업은 확정이라 더 따질 것도 없어요"
-			return "%{_rt}% 님은 %{_pn}%%mKoIra({_pn})% 이미 공개됐어요"
+			set {-mt::whyinf} to "공개된 거라 확실해요"
+			return "%{_rt}% 직업이 %{_pn}%%mKoIra({_pn})% 공개됐잖아요"
 	if {-mt::liar::%{_t}%} is set:
 		set {-mt::whykey} to "%{_t}%|liar"
-		set {-mt::whyinf} to "시민을 처단했다면 자경단도 같이 죽었을 테니, 살아 있다는 건 대상이 시민이 아니었다는 뜻이에요"
-		return "자경단이 %{_rt}% 님을 처단했는데 자경단은 살아 있어요"
+		set {-mt::whyinf} to "시민을 쐈으면 자경단도 죽었을 거예요"
+		return "자경단이 %{_rt}% 처단했는데 자경단은 멀쩡해요"
 	if {-mt::cxw::%{_t}%} is set:
 		set {-mt::whykey} to "%{_t}%|cx"
-		set {-mt::whyinf} to "사실과 보고가 어긋나면 둘 중 하나는 거짓말이고, 거짓말할 이유가 있는 건 마피아 쪽이에요"
+		set {-mt::whyinf} to "말이 안 맞잖아요"
 		return {-mt::cxw::%{_t}%}
 	set {_tc} to ""
 	if {-mt::claim::%{_t}%} is set:
@@ -246,10 +247,10 @@ function mBotWhy(b: text, t: text) :: text:
 								if {_f::2} is {_t}:
 									if {_f::3} is "mafia":
 										set {-mt::whykey} to "%{_t}%|pol"
-										set {-mt::whyinf} to "경찰 주장이 하나뿐이고 보고도 어긋난 게 없어서 믿을 만해요"
+										set {-mt::whyinf} to "경찰이 한 명뿐이라 믿을 만해요"
 										if {_cr} < 80:
-											set {-mt::whyinf} to "경찰 주장이 겹치긴 하지만 지금까지 보고를 보면 이쪽이 더 믿을 만해요"
-										return "경찰 %mBotRef({_p})% 님이 %{_rt}% 님을 조사했더니 마피아였대요"
+											set {-mt::whyinf} to "경찰이 둘이긴 한데 이쪽이 더 믿겨요"
+										return "경찰 %mBotRef({_p})% 님이 %{_rt}% 마피아래요"
 			if {_tc} is not "":
 				if mBotUniqueRole({_tc}) is true:
 					if {-mt::claim::%{_p}%} is {_tc}:
@@ -258,21 +259,21 @@ function mBotWhy(b: text, t: text) :: text:
 						if {_b} is not "":
 							if {_p} is {_b}:
 								if mActRole({_b}) is {_tc}:
-									set {-mt::whyinf} to "%{_rn}%%mKoEun({_rn})% 한 명뿐인데 제가 진짜니 같은 주장을 한 사람은 가짜일 수밖에 없어요"
-									return "진짜 %{_rn}%%mKoEun({_rn})% 저인데 %{_rt}% 님도 %{_rn}%%mKoIra({_rn})% 했어요"
+									set {-mt::whyinf} to "%{_rn}%%mKoEun({_rn})% 한 명뿐이니까 가짜예요"
+									return "진짜 %{_rn}%%mKoEun({_rn})% 저인데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
 						if {-mt::nd::%{_p}%} is set:
-							set {-mt::whyinf} to "마피아는 자기 편을 죽이지 않으니 밤에 죽은 쪽이 진짜였을 거고, 그럼 남은 쪽이 가짜예요"
-							return "%{_rn}%%mKoIra({_rn})% 한 %mBotRef({_p})% 님이 밤에 죽었는데 %{_rt}% 님도 %{_rn}%%mKoIra({_rn})% 했어요"
+							set {-mt::whyinf} to "마피아가 자기 편을 죽일 리 없잖아요"
+							return "%{_rn}% 주장한 %mBotRef({_p})% 님이 밤에 죽었는데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
 						if {-m::pubrole::%{_p}%} is {_tc}:
-							set {-mt::whyinf} to "%{_rn}%%mKoEun({_rn})% 한 명뿐인데 진짜가 공개됐으니 같은 주장을 한 사람은 가짜예요"
-							return "%mBotRef({_p})% 님이 %{_rn}%%mKoIra({_rn})% 공개됐는데 %{_rt}% 님도 %{_rn}%%mKoIra({_rn})% 했어요"
+							set {-mt::whyinf} to "진짜는 이미 공개됐어요"
+							return "%mBotRef({_p})% 님이 %{_rn}%%mKoIra({_rn})% 공개됐는데 %{_rt}% 님도 %{_rn}%%mKoIrae({_rn})%"
 						# 둘 다 살아 있고 단서가 없으면 근거로 쓰지 않는다(둘 중 아무나 몰지 않게. 충돌 지적은 conflict 로 한 번만)
 						set {-mt::whykey} to ""
 	# 투표로 드러난 행동(시민을 찍음, 나를 찍음, 밤에 죽은 사람을 찍음)
 	if {_b} is not "":
 		if {-mt::susr::%{_b}%::%{_t}%} is set:
 			set {-mt::whykey} to "%{_t}%|vote"
-			set {-mt::whyinf} to "근거 없이 시민 쪽에 표를 몰아간 건 마피아 쪽이 하는 행동이에요"
+			set {-mt::whyinf} to "시민한테 표를 준 거잖아요"
 			return {-mt::susr::%{_b}%::%{_t}%}
 	return ""
 
@@ -284,7 +285,7 @@ function mBotTopicSay(b: text, t: text, why: text) :: boolean:
 	set {_inf} to {-mt::whyinf}
 	set {_full} to {_why}
 	if {_inf} is not "":
-		set {_full} to "%{_why}%. %{_inf}%"
+		set {_full} to "%{_why}%^%{_inf}%"
 	if {_wk} is "":
 		set {_wk} to "%{_t}%|misc"
 	set {_key} to "%{-m::day}%|%{_wk}%"
@@ -749,7 +750,7 @@ function mBotDeclare(b: text):
 	if {_why} is not "":
 		set {_full} to {_why}
 		if {_inf} is not "":
-			set {_full} to "%{_why}%. %{_inf}%"
+			set {_full} to "%{_why}%^%{_inf}%"
 		mBotSpeak({_b}, "decl_why", {_t}, "", {_full})
 	else:
 		mBotSpeak({_b}, "decl", {_t}, "", "")
@@ -924,9 +925,13 @@ function mKoEun(w: text) :: text:
 function mKoI(w: text) :: text:
 	return mKoJ({_w}, "이", "가")
 
+# "이래요/래요"(남의 말을 옮길 때)
+function mKoIrae(w: text) :: text:
+	return mKoJ({_w}, "이래요", "래요")
+
 # 색 코드를 뺀 글(AI 에게 줄 때)
 function mBotPlain(s: text) :: text:
-	return {_s}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+	return {_s}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "").replace("^", " ")
 
 # 거짓 보고를 하는 봇인지: 시민 팀이 아니면(마피아 팀, 접선 전 보조, 중립) 거짓. 광인은 자기가 시민인 줄 안다
 function mBotLiar(b: text) :: boolean:
@@ -1130,7 +1135,7 @@ function mBotRepText(s: text, spec: text) :: text:
 	set {_t} to {_f::2}
 	set {_res} to {_f::3}
 	set {_rn} to mRoleName({_r})
-	set {_head} to "%{_rn}%%mKoIe({_rn})%."
+	set {_head} to "%{_rn}%%mKoIe({_rn})%^"
 	set {_tr} to ""
 	if {_t} is not "-":
 		set {_tr} to mBotRef({_t})
@@ -1216,7 +1221,7 @@ function mBotReport(b: text):
 					set {_pre} to "사실 저는 도둑이었어요. 직업을 훔쳐서 이제 %{_sn}%%mKoIe({_sn})%"
 					if {_vic} is not "":
 						set {_pre} to "사실 저는 도둑이었어요. 어젯밤 %mBotRef({_vic})% 님 직업을 훔쳐서 이제 %{_sn}%%mKoIe({_sn})%"
-					set {_txt} to "%{_pre}%. 앞에 한 말은 정체를 숨기려던 거예요. %{_txt}%"
+					set {_txt} to "%{_pre}%^앞에 한 말은 정체 숨기려던 거예요^%{_txt}%"
 	mBotSpeak({_b}, "report", {_t}, "", {_txt})
 
 # 보고를 기록하고 직업 주장·모순 검사를 한다. fx = 경찰 결과를 고발/변호로 반영(봇의 보고. 사람 말은 AI 해석이 이미 반영)
@@ -1291,7 +1296,7 @@ function mBotContraOne(s: text, d: number, dl: number):
 							if loop-value ends with "|%{_t}%":
 								set {_burn} to true
 					if {_burn} is false:
-						mBotContra({_s}, "", "save-%{_s}%-%{_d}%", "%{_rs}% 님이 어젯밤 %{_rt}% 님을 지켰다는데 %{_rt}% 님이 죽었어요", 60, {_dl})
+						mBotContra({_s}, "", "save-%{_s}%-%{_d}%", "%{_rs}% 님이 어젯밤 %{_rt}% 님을 지켰다는데 %mBotRefS({_t})% 님이 죽었어요", 60, {_dl})
 	# 경찰 결과가 나중에 공개된 직업과 다름
 	if {_r} is "police":
 		set {_tp} to {-m::pubrole::%{_t}%}
@@ -1392,78 +1397,93 @@ function mBotContraSweep():
 				if {_f::1} is "thug":
 					if {_f::2} is not "-":
 						if {-mt::lastvote::%{_f::2}%} is set:
-							mBotContra({_p}, "", "thug-%{_p}%-%{_pd}%", "%mBotRef({_p})% 님이 %mBotRef({_f::2})% 님을 협박했다는데 %mBotRef({_f::2})% 님이 투표했어요", 60, {_dl})
+							mBotContra({_p}, "", "thug-%{_p}%-%{_pd}%", "%mBotRef({_p})% 님이 %mBotRef({_f::2})% 님을 협박했다는데 %mBotRefS({_f::2})% 님이 투표했어요", 60, {_dl})
 
 # ------------------------------------------------------------------ 봇 채팅
 
 # 말 고르기: 종류마다 여러 문장 중 하나. @t = 대상, @u = 두 번째 대상, @r = 직업 이름
 function mBotLine(kind: text) :: text:
+	# 사람처럼 짧게: "^" 는 채팅 줄 나눔(mBotSay 가 한 줄씩 나눠 친다). 사람은 처음 부를 때만 "3번 Alex", 다음부터 "3번"(mBotFill)
 	if {_kind} is "police_mafia":
-		set {_l::*} to "경찰입니다. @t 마피아에요!", "경찰인데 어젯밤 @t 조사했어요. 마피아입니다", "@t 마피아 확정이에요. 제가 경찰이에요", "다들 들어 보세요, 경찰인데 @t 마피아 나왔어요"
+		set {_l::*} to "경찰이에요^@t 마피아 나왔어요!", "@t 마피아예요. 저 경찰이에요"
 	else if {_kind} is "police_town":
-		set {_l::*} to "경찰인데 @t 님은 시민 확인했어요", "@t 님 조사했는데 시민이에요. 저 경찰이에요", "경찰입니다. @t 님은 믿으셔도 돼요"
+		set {_l::*} to "@t 조사했는데 시민 나왔어요", "경찰인데 @t 님은 시민이에요"
 	else if {_kind} is "accuse":
-		# 근거가 흐릿할 때: 왜 의심하는지 + 그래서 어떻게 할지
-		# 시민 쪽 봇이 쓰는 말이라 지어낸 근거를 넣지 않는다(근거가 없다고 솔직하게 말하고 해명을 요구)
-		set {_l::*} to "@t 님한테 의심이 많이 모였는데, 저도 확실한 근거는 없어요. @t 님 해명부터 들어 보고 정할게요", "딱 꼬집을 근거는 없지만 지금 흐름으로는 @t 님이 제일 걸려요. @t 님 이야기 좀 더 들어 봐요"
-	else if {_kind} is "accuse_old":
-		set {_l::*} to "@t 님이 제일 수상해요. 마피아 같아요", "저는 @t 님 의심돼요", "@t 님 말이 좀 이상해요. 마피아 아닐까요", "@t 님 오늘 좀 조용하신데 마피아 같네요", "솔직히 @t 님 마피아 같아요"
+		# 시민 쪽 봇이 근거 없이 의심할 때: 지어낸 근거 없이 솔직하게
+		set {_l::*} to "@t 님 쪽으로 의심이 몰리는데 저도 근거는 없어요^일단 @t 님 얘기 들어 봐요", "확실한 건 없는데 @t 님이 좀 걸려요"
 	else if {_kind} is "mafia_push":
-		set {_l::*} to "@t 님 보고는 확인할 방법이 없는 내용이에요. 증명이 안 되는 주장만 하는 건 수상해요. 저는 @t 님 의심해요", "@t 님은 지목만 하고 근거는 안 대요. 시민이면 근거를 댈 텐데요. @t 님 쪽이 마음에 걸려요", "@t 님 말이 아침 보고랑 조금 달라요. 말이 바뀌는 건 거짓말일 때가 많아요. @t 님 해명 들어 봐야 해요"
+		set {_l::*} to "@t 님 보고는 확인할 방법이 없잖아요^좀 의심돼요", "@t 님 근거 없이 지목만 하네요^수상해요", "@t 님 아침이랑 말이 좀 달라요"
 	else if {_kind} is "defend_role":
-		set {_l::*} to "저 @r~ie. 저 아니에요", "@r인데 왜 저를요? 다른 사람 봐 주세요", "저 진짜 @r~ie. 제 보고 다시 보세요"
+		set {_l::*} to "저 @r~ie. 아니에요", "@r인데 왜 저예요?^다른 사람 봐 주세요", "진짜 @r~ie^제 보고 다시 봐 주세요"
 	else if {_kind} is "defend":
-		set {_l::*} to "저 시민이에요. @t 님이 더 수상해요", "저 아니에요! @t 님이 저 몰아가는 거예요", "왜 저예요? 저 시민이에요", "저 마피아 아니에요. @t 님 이상해요"
+		set {_l::*} to "저 시민이에요^오히려 @t 님이 수상해요", "왜 저예요? 저 아니에요", "저 몰아가지 마세요^@t 님이 더 이상해요"
 	else if {_kind} is "fake_police":
-		set {_l::*} to "제가 경찰인데요, @t 님이 마피아에요. 저 몰아가는 거예요", "경찰입니다. 오히려 @t 님이 마피아 나왔어요", "제가 진짜 경찰이에요. @t 님 거짓말이에요"
+		set {_l::*} to "저 경찰인데요^@t 님 마피아 나왔어요", "제가 진짜 경찰이에요^@t 님 거짓말이에요"
 	else if {_kind} is "agree":
-		set {_l::*} to "@t 님 저도 좀 걸렸어요", "@t 님 해명 한번 들어 보죠", "저도 @t 님 쪽이 의심돼요"
+		set {_l::*} to "@t 님 저도 좀 걸려요", "@t 님 해명 들어 봐요", "저도 @t 님 의심돼요"
 	else if {_kind} is "conflict":
-		set {_l::*} to "@r~i 둘이네요? @t 님, @u 님 중 한 명은 거짓말이에요", "@t 님이랑 @u 님 둘 다 @r~ira요? 하나는 가짜네요", "@r 주장이 두 명이에요. 누가 진짜인지 가려야 해요"
+		set {_l::*} to "@r~i 둘이네요?^@t 님, @u 님 중 하나는 가짜예요", "@r 주장이 둘이에요^누가 진짜인지 봐야 해요"
 	else if {_kind} is "real_vs_fake":
-		set {_l::*} to "제가 진짜 @r~ie. @t 님이 거짓말하는 거예요", "@t 님이 @r 사칭하는 거예요. 마피아 쪽이에요", "진짜 @r~eun 저예요. @t 님 투표해요"
+		set {_l::*} to "제가 진짜 @r~ie^@t 님 거짓말이에요", "진짜 @r~eun 저예요^@t 님 사칭이에요"
 	else if {_kind} is "jester":
 		set {_l::*} to "음... 저 뽑으셔도 괜찮아요 ㅎㅎ", "제가 마피아일 수도 있죠~", "저 찍어 보실래요?", "ㅋㅋ 저 수상하죠?"
 	else if {_kind} is "reply":
-		set {_l::*} to "@t 님, 저요? 저는 시민이에요", "@t 님 왜 저를 부르세요?", "@t 님 생각은 어떠세요?", "음... @t 님 말 좀 더 들어 볼게요", "@t 님, 저는 아직 확신이 없어요"
+		set {_l::*} to "@t 님, 저요? 저 시민이에요", "@t 님 왜요?", "@t 님 생각은 어때요?", "음... 좀 더 들어 볼게요", "저도 아직 확신은 없어요"
 	else if {_kind} is "decl_why":
 		# 토론 끝 무렵 투표 결론(근거 → 결론)
-		set {_l::*} to "정리하면 @x. 저는 @t 님 투표할게요", "제 결론은 이래요. @x. 그래서 @t 님 찍을게요"
+		set {_l::*} to "정리할게요^@x^저는 @t 님 찍을게요", "@x^그래서 저는 @t 님 투표요"
 	else if {_kind} is "decl":
-		set {_l::*} to "확실한 근거는 없지만 지금까지 흐름으로는 @t 님이 제일 걸려요. 저는 @t 님 투표할게요", "아직 애매하지만 나온 얘기들을 보면 @t 님 쪽이에요. 저는 @t 님 찍을게요"
+		set {_l::*} to "확실하진 않은데 저는 @t 님 찍을게요", "근거는 약하지만 @t 님 쪽으로 갈게요"
 	else if {_kind} is "decl_same":
-		set {_l::*} to "@u 님이랑 같은 결론이에요. 저도 @t 님 투표할게요", "저도 @t 님이요. @u 님 말에 동의해요"
+		set {_l::*} to "저도 @t 님이요", "@u 님이랑 같아요^@t 님 찍을게요"
 	else if {_kind} is "vote_why":
-		set {_l::*} to "@x. 그래서 @t 님 찍었어요", "@x. 저는 @t 님한테 투표했어요"
+		set {_l::*} to "@t 님 찍었어요^@x"
 	else if {_kind} is "vote":
-		set {_l::*} to "@t 갑니다", "저는 @t", "@t 찍었어요", "@t 님 투표했어요"
+		set {_l::*} to "@t 님 찍었어요", "저는 @t 님", "@t 님 투표했어요"
 	else if {_kind} is "idle":
-		set {_l::*} to "아직 확실한 건 없네요", "보고 내용 겹치는 사람부터 봐야 할 것 같아요", "다들 의심 가는 사람 있어요?"
+		set {_l::*} to "아직 확실한 건 없네요", "보고 겹치는 사람부터 봐요", "다들 누구 의심해요?"
 	else if {_kind} is "agree_why":
-		# 같은 근거를 먼저 말한 사람(@u)에게 동의
-		set {_l::*} to "@u 님 말 맞아요. @x. 저도 @t 님 찍을게요", "저도 같은 생각이에요. @x. @t 님 투표해요", "동의해요. @x. 그러니 @t 님이에요"
+		# 같은 근거를 먼저 말한 사람(@u)에게 동의(@x = 추론)
+		set {_l::*} to "@u 님 말 맞아요^@x^저도 @t 님 찍을게요", "맞아요. @x^저도 @t 님이요"
 	else if {_kind} is "counter_clash":
 		# 마피아 팀: 직업이 겹친 팀원(@u)을 감싸고 상대(@t)를 사칭자로
-		set {_l::*} to "진짜 @r~eun @u 님 같아요. @t 님이 사칭하는 거예요", "@u 님 보고가 더 말이 돼요. @t 님 가짜 같아요", "@t 님 @r 주장 수상해요. @u 님 믿어요"
+		set {_l::*} to "진짜 @r~eun @u 님 같아요^@t 님 사칭 같아요", "@u 님 보고가 더 말이 돼요^@t 님 가짜 같아요"
 	else if {_kind} is "accuse_why":
-		# @x = 근거(mBotWhy)
-		set {_l::*} to "@x. 그러니 @t 님 투표해요", "@x. 그래서 저는 @t 님이 마피아라고 봐요", "@x. 결론은 @t 님이에요"
+		# @x = 근거^추론(mBotTopicSay)
+		set {_l::*} to "@x^그래서 @t 님 투표해요", "@x^@t 님 마피아 같아요", "@x^저는 @t 님 찍을래요"
 	else if {_kind} is "confirmed":
-		set {_l::*} to "@t 님 직업은 이미 공개됐어요(@r). 시민이니 다른 사람 봐요", "@t 님은 확정 시민(@r)이에요. 표 낭비하지 마세요"
+		set {_l::*} to "@t 님 직업 공개됐잖아요(@r)^시민이니까 다른 사람 봐요", "@t 님은 확정 시민이에요(@r)^표 아깝게 쓰지 마요"
 	else if {_kind} is "report":
 		# @x = 보고 문장(mBotRepText)
 		set {_l::*} to "@x"
 	else if {_kind} is "contra":
 		# @x = 모순 내용
-		set {_l::*} to "잠깐만요, @x. @t 님 설명해 보세요", "이상한데요? @x", "@x. @t 님 거짓말하는 거 아니에요?"
+		set {_l::*} to "잠깐만요^@x^@t 님 설명해 주세요", "이상한데요?^@x"
 	if size of {_l::*} is 0:
 		return ""
 	return random element of {_l::*}
 
 # 문장에 대상·직업을 넣는다
-# 사람 부르는 말: "3번 민준"(번호와 이름을 같이)
+# 사람 부르는 말: 처음은 "3번 Alex"(번호와 이름), 같은 말 안에서 다시 부르면 "3번"
 function mBotRef(t: text) :: text:
 	return "&6%mNum({_t})%번 &f%mNameOf({_t})%&r"
+
+function mBotRefS(t: text) :: text:
+	return "&6%mNum({_t})%번&r"
+
+# 같은 말 안에서 이 사람을 처음은 길게, 다음부터는 짧게 부르도록 @ 자리를 채운다(이미 길게 부른 적이 있으면 전부 짧게)
+function mBotFillRef(s: text, tok: text, t: text) :: text:
+	set {_x} to {_s}
+	set {_full} to mBotRef({_t})
+	if {_x} does not contain {_full}:
+		if {_x} contains {_tok}:
+			set {_i} to {_x}.indexOf({_tok})
+			set {_j} to {_i} + {_tok}.length()
+			set {_a} to {_x}.substring(0, {_i})
+			set {_b} to {_x}.substring({_j})
+			set {_x} to "%{_a}%%{_full}%%{_b}%"
+	replace all {_tok} in {_x} with mBotRefS({_t})
+	return {_x}
 
 function mBotFill(line: text, t: text, u: text, r: text) :: text:
 	set {_s} to {_line}
@@ -1479,9 +1499,9 @@ function mBotFill(line: text, t: text, u: text, r: text) :: text:
 		replace all "@r~ira" in {_s} with "%{_rn}%%mKoIra({_rn})%"
 		replace all "@r~i" in {_s} with "%{_rn}%%mKoI({_rn})%"
 	if {_t} is not "":
-		replace all "@t" in {_s} with mBotRef({_t})
+		set {_s} to mBotFillRef({_s}, "@t", {_t})
 	if {_u} is not "":
-		replace all "@u" in {_s} with mBotRef({_u})
+		set {_s} to mBotFillRef({_s}, "@u", {_u})
 	if {_r} is not "":
 		replace all "@r" in {_s} with mRoleName({_r})
 	return {_s}
@@ -1515,7 +1535,25 @@ function mBotTypeWait(b: text, msg: text) :: number:
 	set {-mt::typeuntil::%{_b}%} to {_now} + {_d}
 	return {_d}
 
+# "^" 로 나눈 말은 사람이 끊어 치듯 한 줄씩 차례로 친다(줄마다 타자 시간)
 function mBotSay(b: text, msg: text):
+	if {_msg} contains "^":
+		set {_parts::*} to split {_msg} at "^"
+		# 아침 보고면 줄마다 보고 순서를 지킨다(다음 사람 보고가 중간에 끼지 않게)
+		set {_rep} to false
+		if {-mt::isrep::%{_b}%} is set:
+			set {_rep} to true
+		loop {_parts::*}:
+			if {_rep} is true:
+				set {-mt::isrep::%{_b}%} to true
+			set {_pt} to loop-value
+			set {_pt} to {_pt}.trim()
+			if {_pt} is not "":
+				mBotSayPart({_b}, "%{_pt}%")
+		stop
+	mBotSayPart({_b}, {_msg})
+
+function mBotSayPart(b: text, msg: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	set {_d} to mBotTypeWait({_b}, {_msg})
@@ -1546,7 +1584,7 @@ function mBotSayNow(b: text, msg: text):
 		stop
 	add {_msg} to {-mt::saidtxt::%{_b}%::*}
 	if {-mt::said::%{_b}%} is set:
-		if {-mt::said::%{_b}%} >= 6:
+		if {-mt::said::%{_b}%} >= 15:
 			stop
 	set {_line} to "&7<@@N:%{_b}%@@&7> &f%{_msg}%"
 	mBotChatAdd({_b}, {_msg})
