@@ -1,0 +1,263 @@
+# 머리 위 체력바 (플레이어 + 몬스터/동물 등 모든 생명체)
+# 모든 모드 공통: 적(아군이 아닌 모든 대상, 몹/더미 포함)의 바는 빨강, 아군(isAlly)의 바는 초록. 보는 사람마다 다르게 보이도록
+# 대상마다 TEXT_DISPLAY 를 2개(빨강 {-hpbar_d} / 초록 {-hpbar_g}) 달고 Player#showEntity/hideEntity 로 시청자별로 고른다(0.25초마다 맞춤).
+# 검 피해 막기 준비 중이면 바 양끝에 흰색 괄호 [ ].
+# 주의: 기존 healthbar.sk 와 동시에 켜지 마세요 (기존 파일은 이름을 -healthbar.sk 로 바꿔 비활성화).
+
+import:
+	org.bukkit.Bukkit
+
+options:
+	bar-length: 10
+	player-bar-height: 0.6   # 플레이어용 높이
+	mob-bar-height: 0.3      # 몬스터용 높이 (몹마다 키가 달라서 테스트하며 조절)
+	show-percent: false
+	mob-hide-full: true      # true: 몹은 체력이 가득 차 있으면 바를 숨김 (맞아서 깎이면 표시)
+	mob-radius: 24           # 플레이어 주변 이 거리 안의 몹에만 바를 띄움
+	check-interval: 5 ticks
+	show-damage: true        # 맞았을 때 데미지 숫자를 띄움
+	damage-height: 0.9       # 데미지 숫자가 뜨기 시작하는 높이 (눈 위치 기준)
+
+# id = 엔티티 UUID 문자열
+function hpbar_remove(id: string):
+	set {_d} to {-hpbar_d::%{_id}%}
+	if {_d} is set:
+		delete entity within {_d}
+	set {_g} to {-hpbar_g::%{_id}%}
+	if {_g} is set:
+		delete entity within {_g}
+	delete {-hpbar_d::%{_id}%}
+	delete {-hpbar_g::%{_id}%}
+	delete {-hpbar_key::%{_id}%}
+
+function hpbar_show(e: living entity):
+	if {_e} is dead:
+		stop
+
+	set {_max} to {_e}'s max health
+	set {_hp} to {_e}'s health
+	# 검(sword.sk)의 피해 막기가 준비된 동안은 체력바를 하늘색으로 보여준다. 체력이 그대로여도 색이 바뀌면 갱신되게 키에 넣는다.
+	set {_sw} to "n"
+	if swordReady({_e}) is true:
+		set {_sw} to "y"
+	set {_key} to "%{_hp}%/%{_max}%/%{_sw}%"
+	set {_id} to "%uuid of {_e}%"
+
+	# 관전 모드(킬 연출 포함)인 플레이어는 체력바를 숨긴다(관전 카메라 앞에 체력바가 보이는 문제). 모드가 돌아오면 다음 갱신에서 다시 생김.
+	if {_e} is a player:
+		if gamemode of {_e} is spectator:
+			if {-hpbar_d::%{_id}%} is set:
+				hpbar_remove({_id})
+			stop
+
+	# 투명 포션 효과 중인 플레이어는 체력바를 숨긴다(효과가 끝나면 다음 갱신에서 다시 생김). {-invis} 는 potions.sk 가 관리.
+	if {_e} is a player:
+		if {-invis::%{_id}%} is set:
+			if {-invis::%{_id}%} > now:
+				if {-hpbar_d::%{_id}%} is set:
+					hpbar_remove({_id})
+				stop
+
+	# 꿀벌 조종(bee.sk) 중인 플레이어의 체력바는 꿀벌 위에 앉은 투명한 본인이 아니라 본체 더미에 상시 표시한다. {_host} 가 바를 다는 엔티티.
+	set {_host} to {_e}
+	if {_e} is a player:
+		if {-beemode::%{_id}%} is "drive":
+			if {-beebody::%{_id}%} is set:
+				set {_host} to {-beebody::%{_id}%}
+
+	# 몹은 체력이 가득 차 있으면 바를 숨김
+	if {_e} is not a player:
+		if "{@mob-hide-full}" is "true":
+			if {_hp} >= {_max}:
+				if {-hpbar_d::%{_id}%} is set:
+					hpbar_remove({_id})
+				stop
+
+	set {_d} to {-hpbar_d::%{_id}%}
+	set {_new} to false
+	if {_d} is not set:
+		set {_new} to true
+	else if {_d} is dead:
+		set {_new} to true
+	else if {-hpbar_g::%{_id}%} is not set:
+		set {_new} to true
+	else if {-hpbar_g::%{_id}%} is dead:
+		set {_new} to true
+	else if vehicle of {_d} is not {_host}:
+		set {_new} to true
+
+	if {_new} is true:
+		# 낡은 바(빨강/초록 한 쌍)를 모두 정리하고 새로 만든다
+		hpbar_remove({_id})
+	if {_new} is false:
+		if {-hpbar_key::%{_id}%} is {_key}:
+			stop
+
+	set {_ratio} to min({_hp} / {_max}, 1)
+	set {_filled} to round({_ratio} * {@bar-length})
+	if {_hp} > 0:
+		if {_filled} < 1:
+			set {_filled} to 1
+
+	# 바 문자열을 두 색으로 만든다: 채워진 칸 빨강(적이 보는 바)/초록(아군이 보는 바), 빈 칸 회색
+	set {_barr} to ""
+	set {_barg} to ""
+	loop {@bar-length} times:
+		if loop-number <= {_filled}:
+			set {_barr} to "%{_barr}%&c█"
+			set {_barg} to "%{_barg}%&a█"
+		else:
+			set {_barr} to "%{_barr}%&8█"
+			set {_barg} to "%{_barg}%&8█"
+	if "{@show-percent}" is "true":
+		set {_barr} to "%{_barr}% &f%round({_ratio} * 100)%%%"
+		set {_barg} to "%{_barg}% &f%round({_ratio} * 100)%%%"
+	# 검 피해 막기 준비 중이면 바 양끝에 흰색 괄호(테두리)
+	if {_sw} is "y":
+		set {_barr} to "&f[%{_barr}%&f]"
+		set {_barg} to "&f[%{_barg}%&f]"
+
+	if {_new} is true:
+		# 청크 언로드 등으로 남아 있던 이 엔티티의 낡은 체력바 제거 (중복 방지)
+		loop passengers of {_host}:
+			set {_old} to loop-value
+			if {_old} has scoreboard tag "hpbar":
+				delete entity within {_old}
+		if {_e} is a player:
+			set {_h} to {@player-bar-height}
+		else:
+			set {_h} to {@mob-bar-height}
+		spawn a text display at location of {_host}
+		set {_d} to last spawned entity
+		add "hpbar" to scoreboard tags of {_d}
+		set billboard of {_d} to center
+		set transformation translation of {_d} to vector(0, {_h}, 0)
+		add {_d} to passengers of {_host}
+		set {-hpbar_d::%{_id}%} to {_d}
+		# 초록 바(아군용): 기본은 아무에게도 안 보이고 hpbar_vis 가 아군 시청자에게만 보여준다
+		spawn a text display at location of {_host}
+		set {_g} to last spawned entity
+		{_g}.setVisibleByDefault(false)
+		add "hpbar" to scoreboard tags of {_g}
+		set billboard of {_g} to center
+		set transformation translation of {_g} to vector(0, {_h}, 0)
+		add {_g} to passengers of {_host}
+		set {-hpbar_g::%{_id}%} to {_g}
+
+	set text of {_d} to {_barr}
+	set text of {-hpbar_g::%{_id}%} to {_barg}
+	set {-hpbar_key::%{_id}%} to {_key}
+
+# 시청자별 색 맞춤: 본인을 포함한 아군에게는 초록 바만, 그 밖에는 빨강 바만 보이게 한다. 대상이 몹/더미면 항상 빨강.
+function hpbar_vis():
+	set {_pg} to Bukkit.getPluginManager().getPlugin("Skript")
+	loop {-hpbar_d::*}:
+		set {_id} to loop-index
+		set {_r} to loop-value
+		set {_g} to {-hpbar_g::%{_id}%}
+		if {_g} is not set:
+			continue
+		loop all players:
+			set {_v} to loop-value-2
+			set {_vid} to "%uuid of {_v}%"
+			set {_ally} to false
+			if {_vid} is {_id}:
+				set {_ally} to true
+			else if isAlly({_vid}, {_id}) is true:
+				set {_ally} to true
+			if {_ally} is true:
+				{_v}.hideEntity({_pg}, {_r})
+				{_v}.showEntity({_pg}, {_g})
+			else:
+				{_v}.showEntity({_pg}, {_r})
+				{_v}.hideEntity({_pg}, {_g})
+
+every {@check-interval}:
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		hpbar_show(loop-player)
+		loop all living entities in radius {@mob-radius} around loop-player:
+			set {_e} to loop-entity-2
+			if {_e} is not a player:
+				if {_e} is not an armor stand:
+					# 킬 연출용 마네킹(killcine.sk, 지금은 스켈레톤을 쓰며 체력이 가득이라 몹 규칙으로 숨겨짐)에는 체력바를 달지 않는다
+					if {_e}.getType().name() is not "MANNEQUIN":
+						# 꿀벌 드론(bee.sk)에는 체력바를 달지 않는다
+						if {-beeown::%uuid of {_e}%} is not set:
+							hpbar_show({_e})
+	hpbar_vis()
+
+# 주인이 사라져 떠돌게 된 체력바 정리 (몹 사망, 디스폰 등)
+every 2 seconds:
+	loop all text displays:
+		set {_t} to loop-entity
+		if {_t} has scoreboard tag "hpbar":
+			if vehicle of {_t} is not set:
+				delete entity within {_t}
+
+# 맞았을 때 데미지 숫자가 위로 떠올랐다가 사라짐
+on damage:
+	if pvpEnt(victim) is false:
+		stop
+	if "{@show-damage}" is "false":
+		stop
+	if event is cancelled:
+		stop
+	set {_v} to victim
+	if {_v} is not a living entity:
+		stop
+	if {_v} is an armor stand:
+		stop
+	# 다른 스크립트/플러그인의 데미지 계산이 끝난 뒤 실제로 깎인 체력을 표시하기 위해 1틱 대기
+	set {_before} to {_v}'s health
+	wait 1 tick
+	set {_after} to {_v}'s health
+	set {_dmg} to round(({_before} - {_after}) * 10) / 10 *2
+	if {_dmg} <= 0:
+		stop
+	# 꿀벌 조종 중인 플레이어가 맞으면 숫자도 꿀벌 위 투명한 본인이 아니라 본체 더미 위에 띄운다
+	set {_hv} to {_v}
+	if {_v} is a player:
+		if {-beemode::%uuid of {_v}%} is "drive":
+			if {-beebody::%uuid of {_v}%} is set:
+				set {_hv} to {-beebody::%uuid of {_v}%}
+	set {_loc} to eye location of {_hv} offset by vector(random number between -0.4 and 0.4, {@damage-height}, random number between -0.4 and 0.4)
+	spawn a text display at {_loc}
+	set {_t} to last spawned entity
+	add "hpdmg" to scoreboard tags of {_t}
+	set billboard of {_t} to center
+	set text of {_t} to "&c-%{_dmg}%"
+	set interpolation duration of {_t} to 16 ticks
+	wait 2 ticks
+	set transformation translation of {_t} to vector(0, 1, 0)
+	wait 18 ticks
+	delete entity within {_t}
+
+on death:
+	hpbar_remove("%uuid of victim%")
+
+on quit:
+	hpbar_remove("%uuid of player%")
+
+on load:
+	loop all text displays:
+		set {_e} to loop-entity
+		if {_e} has scoreboard tag "hpbar":
+			delete entity within {_e}
+		else if {_e} has scoreboard tag "hpdmg":
+			delete entity within {_e}
+	delete {-hpbar_d::*}
+	delete {-hpbar_g::*}
+	delete {-hpbar_key::*}
+
+on unload:
+	loop {-hpbar_d::*}:
+		set {_e} to loop-value
+		delete entity within {_e}
+	loop {-hpbar_g::*}:
+		set {_e} to loop-value
+		delete entity within {_e}
+	delete {-hpbar_d::*}
+	delete {-hpbar_g::*}
+	delete {-hpbar_key::*}

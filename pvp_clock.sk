@@ -1,0 +1,118 @@
+# [clock.sk] 시계 아이템(분류 6 유틸, 표시 쿨 60초 = 낮/밤 주기)
+# 게임 시작 후 60초마다 낮 <-> 밤이 번갈아 바뀐다(첫 시간대는 낮). 시계를 구성(로드아웃 1~4번)에 넣은 플레이어만 효과를 받는다(들고 있을 필요 없음).
+#   낮 : 근접 공격으로 받는 피해 x0.75 / 원거리 공격으로 가하는 피해 x0.5
+#   밤 : 원거리 공격으로 가하는 피해 x1.25 / 근접 공격으로 가하는 피해 x0.75 / 도약 스태미너 소모량 +20(30 -> 50)
+#   원거리 = 활/쇠뇌 화살(projectile 이 arrow) + 블레이즈 지팡이 화염구 폭발({-fbhit}). 근접 = 플레이어가 무기로 직접 때린 피해(ENTITY_ATTACK/ENTITY_SWEEP_ATTACK, 스킬 피해 제외).
+#   낮/밤이 바뀌면 시계가 있는 플레이어에게 소리 + 액션바, 모든 시계 아이템의 겉모습(item_model mck:clock_day / mck:clock_night)이 바뀐다.
+# 이 파일이 쓰는 변수: {-clockstart}(게임 시작 시각, game.sk 의 gameStart 가 set), {-clockphase}("day"/"night", 바뀜 감지용)
+# 리소스팩: textures/item/clock_day.png, clock_night.png + models/item + items(mck 팩). 팩을 다시 빌드/업로드해야 겉모습이 보인다.
+# 미검증: 전부(데미지 보정 priority high 순서, ITEM_MODEL 교체, 소리/액션바, 도약 비용). 시계 겉모습이 안 보이면 팩 해시 갱신 여부부터 확인.
+
+import:
+	io.papermc.paper.datacomponent.DataComponentTypes
+	net.kyori.adventure.key.Key
+
+# 지금이 밤인가(게임 중이 아니거나 시작 시각이 없으면 낮)
+function clockNight() :: boolean:
+	# 마피아 서버: 게임 진행이 없으니 처음 쓸 때부터 낮/밤 주기를 돈다(pvp.sk)
+	if {-clockstart} is not set:
+		set {-clockstart} to now
+	set {_nd} to now
+	set {_ms} to {_nd}.getTimestamp() - {-clockstart}.getTimestamp()
+	set {_n} to floor({_ms} / 60000)
+	# mod 문법은 검증하지 못해서 뺄셈으로 홀짝을 구한다
+	set {_r} to {_n} - 2 * floor({_n} / 2)
+	if {_r} is 1:
+		return true
+	return false
+
+function clockModel() :: text:
+	if clockNight() is true:
+		return "clock_night"
+	return "clock_day"
+
+# 시계가 구성(1~4번)에 들어 있는가
+function clockHas(p: player) :: boolean:
+	loop integers from 1 to 4:
+		if loadoutGet({_p}, loop-value) is "clock":
+			return true
+	return false
+
+# 도약 스태미너 총 소모량(기본 30, 밤에 시계가 있으면 +20)
+function jumpCost(p: player) :: number:
+	if clockNight() is true:
+		if clockHas({_p}) is true:
+			return 50
+	return 30
+
+# 인벤토리의 시계 아이템 겉모습을 지금 시간대로 바꾼다
+function clockSetModels(p: player):
+	set {_m} to clockModel()
+	loop integers from 0 to 40:
+		set {_it} to {_p}.getInventory().getItem(loop-value)
+		if {_it} is set:
+			if {_it}.getType().name() is "CLOCK":
+				{_it}.setData(DataComponentTypes.ITEM_MODEL, Key.key("mck", {_m}))
+				{_p}.getInventory().setItem(loop-value, {_it})
+
+every 5 ticks:
+	set {_ph} to "day"
+	if clockNight() is true:
+		set {_ph} to "night"
+	if {-clockphase} is {_ph}:
+		stop
+	set {-clockphase} to {_ph}
+	loop all players:
+		clockSetModels(loop-player)
+	if {_ph} is set:
+		loop all players:
+			set {_p} to loop-player
+			if pvpIn({_p}) is true:
+				if clockHas({_p}) is true:
+					if {_ph} is "night":
+						play sound "block.note_block.bell" with volume 1 and pitch 0.6 to {_p}
+						send action bar colored "&9밤이 되었습니다" to {_p}
+					else:
+						play sound "block.note_block.bell" with volume 1 and pitch 1.6 to {_p}
+						send action bar colored "&e낮이 되었습니다" to {_p}
+
+# 데미지 보정: 다른 처리(석궁의 화살 피해 덮어쓰기, main.sk 의 무기 보정/모루)가 끝난 뒤 마지막에 곱하려고 priority high 로 둔다.
+on damage with priority high:
+	if pvpEnt(victim) is false:
+		stop
+	set {_k} to ""
+	if projectile is set:
+		set {_pj} to projectile
+		if {_pj} is an arrow:
+			set {_k} to "ranged"
+	else if attacker is a player:
+		if {-skilldmg::%attacker's uuid%} is set:
+			if {-fbhit::%victim's uuid%} is set:
+				set {_k} to "ranged"
+		else:
+			set {_ev} to event
+			set {_cz} to {_ev}.getCause().name()
+			if {_cz} is "ENTITY_ATTACK" or "ENTITY_SWEEP_ATTACK":
+				set {_k} to "melee"
+	if {_k} is "":
+		stop
+	set {_night} to clockNight()
+	set {_m} to 1
+	if {_k} is "melee":
+		if victim is a player:
+			if {_night} is false:
+				if clockHas(victim) is true:
+					set {_m} to {_m} * 0.75
+		if attacker is a player:
+			if {_night} is true:
+				if clockHas(attacker) is true:
+					set {_m} to {_m} * 0.75
+	else:
+		if attacker is a player:
+			if clockHas(attacker) is true:
+				if {_night} is true:
+					set {_m} to 1.25
+				else:
+					set {_m} to 0.5
+	if {_m} is not 1:
+		set damage to damage * {_m}

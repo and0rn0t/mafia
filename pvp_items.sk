@@ -1,0 +1,1178 @@
+# [items.sk] 아이템 시스템: 카탈로그(이름/재료/설명 lore), 플레이어별 구성(변수 저장), 무기고(9번 슬롯 상자) GUI, 아이템 변경 GUI, /itemorder 순서 편집, 탭리스트 아이콘
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것. (탭 아이콘은 killlog.sk 의 killIcon() 함수를 쓴다)
+# 이 파일이 쓰는 변수: {-ingame}(게임 진행 여부, 지금은 아무도 안 켬. 게임 설계 때 true/false 로 사용),
+#   {loadout::uuid::1~20}(플레이어별 아이템 구성 id, 4세트: 저장칸은 세트당 5칸씩 1~5/6~10/11~15/16~20 이고 각 세트의 앞 4칸만 쓴다(5번째 칸은 예전 5개 구성 때 값이 남은 것, 무시)), {loadoutset::uuid}(사용 중인 로드아웃 1~4, 아이템 호출은 loadoutGet 이 사용 중인 세트를 읽음)(구성 id, 앞에 대시가 없어서 재시작해도 유지됨. 최초 접속 시 itemDefaults() 로 초기화),
+#   {itemorder::*}(GUI 표시 순서, 저장됨), {-itemgui::uuid}(열린 GUI 종류 armory/select/order), {-itemguislot::uuid}(변경 중인 구성 번호 1~4),
+#   {-itemguimap::uuid::칸}(GUI 칸 -> armory 는 구성 번호, select/order 는 아이템 id), {-itemguipick::uuid}(순서 편집에서 고른 칸), {-grand::uuid::1~4}(랜덤 아이템 모드로 게임 중 뽑은 구성, loadoutGet 이 게임 중에만 우선해서 읽음)
+#
+# ===== 사용법 =====
+#   - 게임 중이 아닐 때({-ingame} 가 true 가 아닐 때) 핫바 9번 슬롯은 "무기고" 상자로 고정된다(1초마다 확인해서 되돌림. 못 옮기고 못 버리고 못 놓음).
+#   - 무기고를 우클릭하면 2줄 GUI 가 열린다(상자 여는 소리). 윗줄 3~6번째 칸이 로드아웃 1~4번 유리판, 아랫줄 3~6번째 칸이 사용 중인 로드아웃의 구성 1~4번 아이템.
+#   - 구성 칸을 클릭하면 4줄 선택 GUI 가 열리고, 아이템을 고르면 그 구성 칸이 바뀐 뒤 무기고 GUI 로 돌아온다. 구성 1~4번 안에 같은 아이템은 중복이라 못 고른다.
+#   - 선택 GUI: 위 3줄(27칸)은 아이템, 맨 아래 1줄은 나중에 페이지 넘기기 자리(지금은 회색 유리판). 빈 칸은 전부 회색 색유리판(이름 공백)이고 클릭해도 아무 일도 안 일어난다.
+#   - 아이템이 27개를 넘으면 페이지 기능을 추가해야 한다(지금은 27개까지만 표시).
+#   - 모든 GUI 칸 클릭에 UI 버튼 소리가 난다.
+#   - op 는 핫바 8번 슬롯에 관리자 메뉴 아이템이 고정된다(우클릭하면 /admin 메뉴). 무기고와 같은 조건(게임 중이 아닐 때)이고, 게임이 시작되면 무기고와 함께 사라진다(armoryClear).
+#   - 구성 1~4번 아이템은 실제 인벤토리에도 지급된다(loadoutGive). 입장, 리스폰, 구성 변경 때만 확인해서 없는 아이템을 채우고, 핫바 어느 칸에 두든 자유다.
+#     처음 넣는 칸은 loadoutSlot() 의 선호 칸이 비었으면 거기, 아니면 빈 칸. 게임 중이 아닐 때는 구성 아이템을 버릴 수 없다(잃어버려도 다시 확인하지 않아서).
+#   - 구성 1~4번 아이템은 탭리스트의 플레이어 이름 옆에 아이콘으로 표시된다(킬로그와 같은 방식).
+#   - 정렬 기준: GUI 와 탭 아이콘은 분류 순서(금속 -> 나무 -> cc기 -> 포션류 -> 양동이류, itemCategory)로 정렬된다. 새 아이템이 이 분류에 안 맞으면 사용자에게 정렬 기준을 물어볼 것.
+#   - /itemorder (op 전용): 같은 분류 안에서 GUI 에 나오는 순서를 바꾸는 편집 GUI(분류가 다른 아이템끼리는 못 바꿈). 아이템을 클릭 -> 바꿀 다른 아이템 클릭 하면 두 아이템의 자리가 서로 바뀌고 저장된다.
+#
+# ===== 직접 고치는 곳 =====
+#   - 아이템 목록/이름/재료: itemIds(), itemName(), itemBase() 에 아이템 한 종류당 한 줄씩. 새 아이템은 세 곳에 id 를 똑같이 추가.
+#   - 설명(lore): 1번째 줄은 itemDamageText(id)(붉은 칼 아이콘 + 수치) / itemCooldownText(id)(시계 아이콘 + 초), 2번째 줄부터는 itemLoreLines(id) 의 텍스트(합니다체, 짙은 회색은 itemBuild 가 입힘, 색 코드 쓰지 않음, 줄마다 따로 적는다).
+#   - 탭 아이콘 모양: itemSprite(id)(스프라이트 이름은 미검증, 틀리면 보라/검정 체크무늬). 표시 순서: /itemorder GUI (목록에 새로 추가된 아이템은 맨 뒤에 붙고, 삭제된 아이템은 순서에서 빠진다).
+#   - 금속 재료 도구/무기는 모두 네더라이트 도구/무기로 통일하되(재료만 네더라이트, id 는 저장된 구성 호환을 위해 iron_ 그대로) 이름에는 '철'을 붙이지 않는다(도끼/곡괭이/괭이/창). 철퇴(mace)는 원래 금속 등급이 없다.
+#
+# 미검증 문법: item_model 컴포넌트(네더라이트를 철 겉모습으로), 무기고 클릭 방어(reflect), skull owner, playerListName(reflect), 아이콘 스프라이트 이름(특히 포션은 색이 안 나옴), 아이템 이름 비교(name of), lore 리스트 설정, 아이템 플래그(with item flags), netherite spear/ominous bottle/potion of ~ 별칭,
+#   event.getRawSlot()/getHeldItemSlot() (skript-reflect), chest inventory with 4 rows named, 클릭/드래그 취소. 오류가 나면 콘솔 로그를 보내줘.
+#   아이템을 만드는 기능에서 문제가 생기면 itemBuild() 를 먼저 의심할 것.
+# 같은 아이템인지는 이름으로 구분한다(itemIdAt). 이름 앞에 색 코드를 붙여도 itemName() 이 같은 값을 쓰므로 일치한다.
+
+import:
+	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+	io.papermc.paper.datacomponent.DataComponentTypes
+	io.papermc.paper.datacomponent.item.TooltipDisplay
+	io.papermc.paper.datacomponent.item.ChargedProjectiles
+	io.papermc.paper.datacomponent.item.ItemLore
+	net.kyori.adventure.key.Key
+	org.bukkit.Material
+	io.papermc.paper.datacomponent.item.PotionContents
+	org.bukkit.potion.PotionType
+	org.bukkit.inventory.ItemStack
+
+# 카탈로그 id 목록(기본 순서. 실제 GUI 순서는 {itemorder::*} 를 따름)
+function itemIds() :: texts:
+	return "crossbow", "fishing_rod", "iron_axe", "iron_pickaxe", "iron_hoe", "iron_shovel", "mace", "iron_spear", "iron_sword", "tnt", "nether_star", "ominous_bottle", "potion_heal", "potion_stamina", "potion_invis", "totem", "anvil", "bow", "blaze_rod", "wind_charge", "flint_steel", "trident", "bee", "splash", "milk" and "clock"
+
+# 아이템 이름
+function itemName(id: text) :: text:
+	if {_id} is "crossbow":
+		return "&f석궁"
+	if {_id} is "fishing_rod":
+		return "&f낚싯대"
+	if {_id} is "iron_axe":
+		return "&f도끼"
+	if {_id} is "iron_pickaxe":
+		return "&f곡괭이"
+	if {_id} is "iron_hoe":
+		return "&f괭이"
+	if {_id} is "iron_shovel":
+		return "&f삽"
+	if {_id} is "mace":
+		return "&f철퇴"
+	if {_id} is "iron_spear":
+		return "&f창"
+	if {_id} is "iron_sword":
+		return "&f검"
+	if {_id} is "tnt":
+		return "&cTNT"
+	if {_id} is "nether_star":
+		return "&f네더의 별"
+	if {_id} is "ominous_bottle":
+		return "&5불길한 병"
+	if {_id} is "splash":
+		return "&1첨벙첨벙"
+	if {_id} is "milk":
+		return "&f우유"
+	if {_id} is "radar":
+		return "&b레이더"
+	if {_id} is "potion_heal":
+		return "&c체력 포션"
+	if {_id} is "potion_stamina":
+		return "&a스태미너 포션"
+	if {_id} is "potion_invis":
+		return "&b투명 포션"
+	if {_id} is "totem":
+		return "&e불사의 토템"
+	if {_id} is "anvil":
+		return "&f모루"
+	if {_id} is "bow":
+		return "&f활"
+	if {_id} is "blaze_rod":
+		return "&6블레이즈 지팡이"
+	if {_id} is "wind_charge":
+		return "&b연막탄"
+	if {_id} is "flint_steel":
+		return "&c부싯돌과 부시"
+	if {_id} is "trident":
+		return "&f삼지창"
+	if {_id} is "bee":
+		return "&e꿀벌"
+	if {_id} is "bee_sting":
+		return "&a독침"
+	if {_id} is "bee_bomb":
+		return "&c자폭"
+	if {_id} is "bee_stop":
+		return "&f조종 중지"
+	if {_id} is "clock":
+		return "&f시계"
+	return "&f%{_id}%"
+
+# 아이템 재료(포션은 바닐라 포션 종류가 스킬 판정에 쓰이므로 종류를 바꾸지 말 것: skill_core.sk 의 potionKind)
+function itemBase(id: text) :: itemtype:
+	if {_id} is "crossbow":
+		return crossbow
+	if {_id} is "fishing_rod":
+		return fishing rod
+	if {_id} is "iron_axe":
+		return netherite axe
+	if {_id} is "iron_pickaxe":
+		return netherite pickaxe
+	if {_id} is "iron_hoe":
+		return netherite hoe
+	if {_id} is "iron_shovel":
+		return netherite shovel
+	if {_id} is "mace":
+		return mace
+	if {_id} is "iron_spear":
+		return netherite spear
+	if {_id} is "iron_sword":
+		return netherite sword
+	if {_id} is "tnt":
+		return tnt
+	if {_id} is "nether_star":
+		return nether star
+	if {_id} is "ominous_bottle":
+		return ominous bottle
+	if {_id} is "splash":
+		return water bucket
+	if {_id} is "milk":
+		return milk bucket
+	if {_id} is "radar":
+		return recovery compass
+	if {_id} is "potion_heal":
+		return potion of healing
+	if {_id} is "potion_stamina":
+		return potion of leaping
+	if {_id} is "potion_invis":
+		return potion of invisibility
+	if {_id} is "totem":
+		return totem of undying
+	if {_id} is "anvil":
+		return anvil
+	if {_id} is "bow":
+		return bow
+	if {_id} is "blaze_rod":
+		return blaze rod
+	if {_id} is "wind_charge":
+		return wind charge
+	if {_id} is "flint_steel":
+		return flint and steel
+	if {_id} is "trident":
+		return trident
+	if {_id} is "bee":
+		return bee spawn egg
+	if {_id} is "bee_sting":
+		return arrow
+	if {_id} is "bee_bomb":
+		return skeleton skull
+	if {_id} is "bee_stop":
+		return barrier
+	if {_id} is "clock":
+		return clock
+	return stone
+
+# 아이템 설명(lore) 양식: 1번째 줄은 [붉은 칼 아이콘 + 데미지] [시계 아이콘 + 쿨타임](해당하는 것만, 아래 itemDamageText / itemCooldownText), 2번째 줄부터가 아래 설명이다("<dmg>" 를 쓰면 그 자리에 [붉은 칼 아이콘 + 데미지] 가 들어간다).
+#   설명은 합니다체. 색은 itemBuild 가 짙은 회색으로 입히므로 여기엔 색 코드를 쓰지 않는다. 줄마다 따로 적는다(퍼센트는 %% 로).
+#   데미지/쿨타임 수치는 현재 코드 기준(2026-11): 체력 숫자는 하트가 아니라 기획서의 실제 체력.
+function itemLoreLines(id: text) :: texts:
+	if {_id} is "fishing_rod":
+		return "찌를 던져 맞은 적을 5초간 구속합니다.", "구속이 종료되면 <dmg>의 피해를 입힙니다."
+	if {_id} is "iron_axe":
+		return "체력이 80%% 이상인 적에게 1.5배의 피해를 입힙니다."
+	if {_id} is "iron_pickaxe":
+		return "타격할 때마다 '채굴' 중첩이 쌓입니다.", "'채굴' 중첩 하나당 2의 피해를 추가로 입힙니다."
+	if {_id} is "iron_hoe":
+		return "체력이 50%% 이하인 적에게 2배의 피해를 입힙니다."
+	if {_id} is "iron_shovel":
+		return "3초간 땅을 파고 들어가 잠복합니다.", "무적이지만 행동할 수 없습니다."
+	if {_id} is "iron_sword":
+		return "들고 있으면 받는 피해를 한 번 막습니다."
+	if {_id} is "tnt":
+		return "TNT를 투척해 적을 3초간 기절시키고 피해를 입힙니다."
+	if {_id} is "nether_star":
+		return "6초간 저항, 힘, 재생, 신속 1 효과를 얻습니다."
+	if {_id} is "ominous_bottle":
+		return "7초간 가하는 피해의 30%%를 흡혈하고, 스태미너가 초당 20 회복됩니다.", "지속 시간이 끝나면 탈진해 스태미너를 전부 소진하고, 5초간 자연 회복되지 않습니다."
+	if {_id} is "splash":
+		return "3초간 날아오는 모든 투사체를 흡수합니다."
+	if {_id} is "milk":
+		return "걸린 모든 해로운 효과를 해제합니다.", "기절 상태에서도 사용할 수 있습니다."
+	if {_id} is "radar":
+		return "사용 시 주변 30칸 내 적들을 감지합니다."
+	if {_id} is "potion_heal":
+		return "체력 5를 회복합니다."
+	if {_id} is "potion_stamina":
+		return "스태미너 50을 회복합니다."
+	if {_id} is "totem":
+		return "5초간 피해를 받지 않습니다.", "지속시간동안 더블 점프를 사용할 수 없습니다."
+	if {_id} is "bow":
+		return "차징할수록 데미지가 강해집니다."
+	if {_id} is "blaze_rod":
+		return "화염구를 발사해 범위 피해를 입힙니다.", "3번째 시전마다 화염구 폭격을 가합니다."
+	if {_id} is "wind_charge":
+		return "10초간 연막을 생성합니다."
+	if {_id} is "flint_steel":
+		return "주변의 적을 불태워 5초간 받는 피해를 20%% 증가시킵니다."
+	if {_id} is "anvil":
+		return "게임이 끝날 때까지 가하는 피해가 10%% 증가합니다.", "무한히 중첩 가능합니다."
+	if {_id} is "potion_invis":
+		return "4초간 투명해집니다.", "피해를 입거나 입히면 해제됩니다."
+	if {_id} is "mace":
+		return "도약 공격 시 강한 피해를 입힙니다."
+	if {_id} is "crossbow":
+		return "화살을 발사합니다."
+	if {_id} is "bee":
+		return "꿀벌 드론을 소환합니다."
+	if {_id} is "bee_sting":
+		return "피해를 입힌 대상을 7초간 중독시킵니다."
+	if {_id} is "bee_bomb":
+		return "꿀벌 드론을 자폭시켜 주변 적에게 피해를 입힙니다."
+	if {_id} is "bee_stop":
+		return "꿀벌 드론을 그 자리에 멈추고 본체로 돌아옵니다."
+	if {_id} is "trident":
+		return "바라보는 방향으로 빠르게 이동합니다.", "이동한 지점 근처에 <dmg4>의 피해를 입힙니다."
+	if {_id} is "clock":
+		return "게임 시작 후 60초마다 낮과 밤이 번갈아 바뀝니다.", "낮: 근접 공격으로 받는 피해가 25%% 감소하고, 원거리 공격으로 가하는 피해가 50%% 감소합니다.", "밤: 원거리 공격으로 가하는 피해가 25%% 증가하고, 근접 공격으로 가하는 피해가 25%% 감소하며, 도약 스태미나 소모량이 20 증가합니다.", "원거리는 활, 쇠뇌, 블레이즈 지팡이입니다."
+	return "설명 없음"
+
+# 1번째 줄에 붉은 칼 아이콘과 같이 보여줄 데미지 수치(무기만). 없으면 "". 수치만 적는다(범위는 3~12 처럼).
+function itemDamageText(id: text) :: text:
+	if {_id} is "crossbow":
+		return "3"
+	if {_id} is "fishing_rod":
+		return "4"
+	if {_id} is "iron_axe":
+		return "6"
+	if {_id} is "iron_pickaxe":
+		return "3"
+	if {_id} is "iron_hoe":
+		return "3"
+	if {_id} is "iron_shovel":
+		return "3"
+	if {_id} is "iron_spear":
+		return "5 / 6"
+	if {_id} is "iron_sword":
+		return "6"
+	if {_id} is "tnt":
+		return "2"
+	if {_id} is "bow":
+		return "3~12"
+	if {_id} is "blaze_rod":
+		return "5"
+	if {_id} is "mace":
+		return "3 / 5~"
+	if {_id} is "trident":
+		return "7"
+	if {_id} is "bee_sting":
+		return "3"
+	if {_id} is "bee_bomb":
+		return "10"
+	return ""
+
+# 1번째 줄에 시계 아이콘과 같이 보여줄 쿨타임 수치(초 단위 숫자만). 없으면 "".
+function itemCooldownText(id: text) :: text:
+	if {_id} is "crossbow":
+		return "0.8"
+	if {_id} is "fishing_rod":
+		return "9"
+	if {_id} is "iron_sword":
+		return "30"
+	if {_id} is "tnt":
+		return "12"
+	if {_id} is "nether_star":
+		return "45"
+	if {_id} is "ominous_bottle":
+		return "30"
+	if {_id} is "splash":
+		return "15"
+	if {_id} is "iron_shovel":
+		return "15"
+	if {_id} is "milk":
+		return "15"
+	if {_id} is "radar":
+		return "20"
+	if {_id} is "potion_heal":
+		return "12"
+	if {_id} is "potion_stamina":
+		return "12"
+	if {_id} is "totem":
+		return "60"
+	if {_id} is "bow":
+		return "2"
+	if {_id} is "blaze_rod":
+		return "4"
+	if {_id} is "wind_charge":
+		return "30"
+	if {_id} is "flint_steel":
+		return "20"
+	if {_id} is "anvil":
+		return "90"
+	if {_id} is "potion_invis":
+		return "18"
+	if {_id} is "trident":
+		return "18"
+	if {_id} is "bee":
+		return "75"
+	if {_id} is "bee_sting":
+		return "4"
+	if {_id} is "clock":
+		return "60"
+	return ""
+
+# 낚싯대처럼 데미지를 설명 줄 중간(<dmg>)에 쓰는 아이템은 1번째 줄에 데미지를 따로 안 보여준다.
+function itemDamageInline(id: text) :: boolean:
+	if {_id} is "fishing_rod":
+		return true
+	return false
+
+# [붉은 칼 아이콘][데미지 수치] 컴포넌트 JSON 조각 둘(아이콘, 흰 숫자). 칼 아이콘은 철 칼 스프라이트에 빨간 색을 입힌 것(미검증).
+function itemDmgPiece(id: text) :: text:
+	return itemDmgPieceV(itemDamageText({_id}))
+
+# 수치를 직접 넘기는 버전(설명 줄 안에서 <dmg4> 처럼 다른 수치를 보여줄 때)
+function itemDmgPieceV(v: text) :: text:
+	set {_sw} to killIcon("iron_sword")
+	replace "}" in {_sw} with ",""color"":""red""}"
+	return "%{_sw}%,{""text"":"" %{_v}%"",""color"":""white""}"
+
+# 설명 1번째 줄 컴포넌트 JSON: [붉은 칼 아이콘][데미지] [시계 아이콘][쿨타임]. 둘 다 없으면 "".
+#   시계는 item/clock_00 스프라이트(미검증). 색을 white 로 명시해서 원본 색 그대로 나오게 한다(앞의 빨간색이 번지지 않게).
+function itemLoreHeader(id: text) :: text:
+	set {_dm} to itemDamageText({_id})
+	if itemDamageInline({_id}) is true:
+		set {_dm} to ""
+	set {_cd} to itemCooldownText({_id})
+	set {_ex} to ""
+	if {_dm} is not "":
+		set {_ex} to itemDmgPiece({_id})
+	if {_cd} is not "":
+		if {_ex} is not "":
+			set {_ex} to "%{_ex}%,{""text"":""   ""},"
+		set {_ck} to killIcon("clock_00")
+		replace "}" in {_ck} with ",""color"":""white""}"
+		set {_ex} to "%{_ex}%%{_ck}%,{""text"":"" %{_cd}%"",""color"":""white""}"
+	if {_ex} is "":
+		return ""
+	return "{""text"":"""",""italic"":false,""extra"":[%{_ex}%]}"
+
+# 아이템 생성. extra 가 비어 있지 않으면 설명 맨 아래에 한 줄 덧붙인다(편집 GUI 의 '선택됨' 표시용).
+# 바닐라 설명(공격력/공격속도 등 속성, 포션 효과 설명)은 아이템 플래그로 숨긴다.
+function itemBuild(id: text, extra: text = "") :: itemtype:
+	set {_i} to itemBase({_id})
+	set {_l::*} to itemLoreLines({_id})
+	set {_i} to {_i} named itemName({_id})
+	set {_i} to {_i} with item flags hide attributes and hide additional tooltip
+	# 이후 모든 데이터 컴포넌트 작업은 ItemStack {_st} 하나로 한다(getRandom() 은 아이템타입에서 한 번만 부를 수 있다: ItemStack 에 또 부르면 오류가 나서 아이템이 안 만들어졌다).
+	set {_st} to {_i}.getRandom()
+	# 설명(lore)은 컴포넌트로 직접 만든다(아이콘 스프라이트를 넣으려고). 1번째 줄 = 데미지/쿨타임, 2번째 줄부터 설명(짙은 회색, 기울임 없음).
+	# 설명 줄 안의 <dmg> 는 [붉은 칼 아이콘 + 데미지 수치] 로 바뀐다(낚싯대처럼 데미지를 설명 중간에 쓸 때).
+	# extra("&e▶ ..." 형태)는 노란색 한 줄로 맨 아래에 붙인다. LORE 데이터 컴포넌트(ItemLore)는 미검증.
+	set {_lb} to ItemLore.lore()
+	set {_hd} to itemLoreHeader({_id})
+	if {_hd} is not "":
+		{_lb}.addLine(GsonComponentSerializer.gson().deserialize({_hd}))
+	loop {_l::*}:
+		set {_ln} to loop-value
+		if {_ln} contains "<dmg4>":
+			set {_pp::*} to split {_ln} at "<dmg4>"
+			set {_lj} to "{""text"":"""",""italic"":false,""extra"":[{""text"":""%{_pp::1}%"",""color"":""dark_gray""},%itemDmgPieceV("4")%,{""text"":""%{_pp::2}%"",""color"":""dark_gray""}]}"
+		else if {_ln} contains "<dmg>":
+			set {_pp::*} to split {_ln} at "<dmg>"
+			set {_lj} to "{""text"":"""",""italic"":false,""extra"":[{""text"":""%{_pp::1}%"",""color"":""dark_gray""},%itemDmgPiece({_id})%,{""text"":""%{_pp::2}%"",""color"":""dark_gray""}]}"
+		else:
+			set {_lj} to "{""text"":"""",""italic"":false,""extra"":[{""text"":""%{_ln}%"",""color"":""dark_gray""}]}"
+		{_lb}.addLine(GsonComponentSerializer.gson().deserialize({_lj}))
+	if {_extra} is not "":
+		set {_xt} to {_extra}
+		replace "&e" in {_xt} with ""
+		set {_xj} to "{""text"":"""",""italic"":false,""extra"":[{""text"":""%{_xt}%"",""color"":""yellow""}]}"
+		{_lb}.addLine(GsonComponentSerializer.gson().deserialize({_xj}))
+	{_st}.setData(DataComponentTypes.LORE, {_lb}.build())
+	# 불길한 병의 기본 설명(불길한 징조 N)은 위 플래그로 안 숨겨져서, 툴팁에서 해당 컴포넌트를 직접 숨긴다(Paper 데이터 컴포넌트, 미검증).
+	# 이 방법이 안 되면 {_st}.unsetData(DataComponentTypes.OMINOUS_BOTTLE_AMPLIFIER) 로 컴포넌트 자체를 지우는 방법으로 바꿀 것.
+	if {_id} is "ominous_bottle":
+		set {_td} to TooltipDisplay.tooltipDisplay().addHiddenComponents(DataComponentTypes.OMINOUS_BOTTLE_AMPLIFIER).build()
+		{_st}.setData(DataComponentTypes.TOOLTIP_DISPLAY, {_td})
+	# 시계(clock.sk): 낮/밤에 따라 겉모습(아이템 모델)이 바뀐다. 지금 시간대의 모델로 만든다(미검증).
+	if {_id} is "clock":
+		{_st}.setData(DataComponentTypes.ITEM_MODEL, Key.key("mck", clockModel()))
+	# 불사의 토템: 진짜 토템이라 들고 죽으면 부활하고 소모되므로 death_protection 컴포넌트를 지운다(미검증).
+	if {_id} is "totem":
+		{_st}.unsetData(DataComponentTypes.DEATH_PROTECTION)
+	# 금속 도구/무기: 재질은 네더라이트지만 겉모습(아이템 모델)은 철 도구/무기로 보이게 한다(item_model 컴포넌트, 미검증).
+	# id 가 iron_axe 처럼 철 이름이라 id 가 곧 모델 이름이다. 데미지는 코드에서 고정이라 재질과 무관하다.
+	if {_id} starts with "iron_":
+		{_st}.setData(DataComponentTypes.ITEM_MODEL, Key.key("minecraft", {_id}))
+	# 꿀벌 독침(bee.sk): 화살 재질을 독 화살(TIPPED_ARROW)로 바꾸고 독 포션 효과를 붙인다(툴팁은 위 플래그로 숨김, 미검증)
+	if {_id} is "bee_sting":
+		{_st}.setType(Material.TIPPED_ARROW)
+		{_st}.setData(DataComponentTypes.POTION_CONTENTS, PotionContents.potionContents().potion(PotionType.POISON).build())
+	# 석궁: 화살이 장전된 상태로 만든다(charged_projectiles 컴포넌트, 미검증). 발사는 crossbow.sk 가 우클릭을 취소하고 직접 하므로 장전 상태는 계속 유지된다.
+	# 장전 화살 설명 줄은 툴팁에서 숨긴다.
+	if {_id} is "crossbow":
+		set {_arrow} to new ItemStack(Material.ARROW)
+		set {_cp} to ChargedProjectiles.chargedProjectiles().add({_arrow}).build()
+		{_st}.setData(DataComponentTypes.CHARGED_PROJECTILES, {_cp})
+		set {_td3} to TooltipDisplay.tooltipDisplay().addHiddenComponents(DataComponentTypes.CHARGED_PROJECTILES).build()
+		{_st}.setData(DataComponentTypes.TOOLTIP_DISPLAY, {_td3})
+	return {_st}
+
+# 플레이어 인벤토리 s 번 칸(0부터)의 아이템이 카탈로그의 어떤 아이템인지. 아니면 "".
+function itemIdAt(p: player, s: number) :: text:
+	set {_n} to name of slot {_s} of {_p}'s inventory
+	if {_n} is not set:
+		return ""
+	loop itemIds():
+		set {_v} to itemName(loop-value)
+		if {_n} is {_v}:
+			return loop-value
+	return ""
+
+# 아이템 분류 번호. GUI 와 탭리스트 정렬 기준이다: 1 금속 무기/도구 -> 2 나무 무기/도구 -> 3 cc기 -> 4 포션류(버프 아이템 포함) -> 5 양동이류(첨벙첨벙, 우유) -> 0 미분류(맨 뒤).
+# 새 아이템이 이 분류에 해당하지 않으면 임의로 정하지 말고 사용자에게 정렬 기준을 먼저 물어볼 것.
+function itemCategory(id: text) :: number:
+	if {_id} is "iron_axe":
+		return 1
+	if {_id} is "iron_pickaxe":
+		return 1
+	if {_id} is "iron_hoe":
+		return 1
+	if {_id} is "iron_shovel":
+		return 1
+	if {_id} is "iron_spear":
+		return 1
+	if {_id} is "mace":
+		return 1
+	if {_id} is "iron_sword":
+		return 1
+	if {_id} is "trident":
+		return 1
+	if {_id} is "bee":
+		return 2
+	if {_id} is "crossbow":
+		return 2
+	if {_id} is "fishing_rod":
+		return 2
+	if {_id} is "tnt":
+		return 3
+	if {_id} is "bow":
+		return 2
+	if {_id} is "blaze_rod":
+		return 2
+	if {_id} is "wind_charge":
+		return 3
+	if {_id} is "flint_steel":
+		return 3
+	if {_id} is "nether_star":
+		return 4
+	if {_id} is "ominous_bottle":
+		return 4
+	if {_id} is "splash":
+		return 5
+	if {_id} is "milk":
+		return 5
+	if {_id} is "radar":
+		return 2
+	if {_id} is "potion_heal":
+		return 4
+	if {_id} is "potion_stamina":
+		return 4
+	if {_id} is "potion_invis":
+		return 4
+	if {_id} is "totem":
+		return 4
+	if {_id} is "anvil":
+		return 4
+	if {_id} is "clock":
+		return 6
+	return 0
+
+# blaze_rod(블레이즈 지팡이)는 사용자 지정으로 활/쇠뇌류와 같은 분류(2)다.
+# ids 중 분류가 c 인 것만 순서 그대로 돌려준다.
+function itemCatPick(ids: texts, c: number) :: texts:
+	loop {_ids::*}:
+		if itemCategory(loop-value) is {_c}:
+			add loop-value to {_r::*}
+	return {_r::*}
+
+# GUI 표시 순서. 저장된 순서에서 없어진 id 는 빼고, 새 id 는 뒤에 붙여서 저장 후 돌려준다.
+function itemOrder() :: texts:
+	set {_ids::*} to itemIds()
+	loop {itemorder::*}:
+		if {_ids::*} contains loop-value:
+			if {_o::*} does not contain loop-value:
+				add loop-value to {_o::*}
+	loop {_ids::*}:
+		if {_o::*} does not contain loop-value:
+			add loop-value to {_o::*}
+	# 분류 순서(1 금속, 2 나무(활/쇠뇌류 포함), 3 cc기, 4 포션류, 5 양동이류, 6 유틸(시계), 0 미분류)로 안정 정렬한다. 같은 분류 안에서는 저장된 순서를 유지.
+	set {_r::*} to itemCatPick({_o::*}, 1)
+	add itemCatPick({_o::*}, 2) to {_r::*}
+	add itemCatPick({_o::*}, 3) to {_r::*}
+	add itemCatPick({_o::*}, 4) to {_r::*}
+	add itemCatPick({_o::*}, 5) to {_r::*}
+	add itemCatPick({_o::*}, 6) to {_r::*}
+	add itemCatPick({_o::*}, 0) to {_r::*}
+	delete {itemorder::*}
+	set {itemorder::*} to {_r::*}
+	return {_r::*}
+
+# 순서 편집: a 번째와 b 번째(1부터) 아이템의 자리를 바꾼다.
+function itemOrderSwap(a: number, b: number):
+	set {_o::*} to itemOrder()
+	set {_t} to {_o::%{_a}%}
+	set {_o::%{_a}%} to {_o::%{_b}%}
+	set {_o::%{_b}%} to {_t}
+	delete {itemorder::*}
+	set {itemorder::*} to {_o::*}
+
+# 탭리스트/아이콘용 스프라이트 이름(killIcon 에 넘김. "block/" 로 시작하면 블럭 텍스처). 미검증: 이름이 틀리면 체크무늬가 뜬다. 포션은 병 스프라이트에 itemTint() 색을 입힌다(미검증).
+function itemSprite(id: text) :: text:
+	if {_id} is "crossbow":
+		return "crossbow_arrow"
+	if {_id} is "fishing_rod":
+		return "fishing_rod"
+	if {_id} is "iron_axe":
+		return "iron_axe"
+	if {_id} is "iron_pickaxe":
+		return "iron_pickaxe"
+	if {_id} is "iron_hoe":
+		return "iron_hoe"
+	if {_id} is "iron_shovel":
+		return "iron_shovel"
+	if {_id} is "mace":
+		return "mace"
+	if {_id} is "iron_spear":
+		return "iron_spear"
+	if {_id} is "iron_sword":
+		return "iron_sword"
+	if {_id} is "tnt":
+		return "block/tnt_side"
+	if {_id} is "nether_star":
+		return "nether_star"
+	if {_id} is "ominous_bottle":
+		return "ominous_bottle"
+	if {_id} is "splash":
+		return "water_bucket"
+	if {_id} is "milk":
+		return "milk_bucket"
+	if {_id} is "radar":
+		return "mck:recovery_compass"
+	if {_id} is "potion_heal":
+		return "mck:potion_heal"
+	if {_id} is "potion_stamina":
+		return "mck:potion_stamina"
+	if {_id} is "potion_invis":
+		return "mck:potion_invis"
+	if {_id} is "totem":
+		return "totem_of_undying"
+	if {_id} is "anvil":
+		return "block/anvil"
+	if {_id} is "bow":
+		return "bow"
+	if {_id} is "blaze_rod":
+		return "blaze_rod"
+	if {_id} is "wind_charge":
+		return "wind_charge"
+	if {_id} is "flint_steel":
+		return "flint_and_steel"
+	if {_id} is "trident":
+		return "trident"
+	if {_id} is "bee":
+		return "bee_spawn_egg"
+	if {_id} is "clock":
+		return "mck:clock_day"
+	return "barrier"
+
+# 처음 접속한 플레이어에게 줄 기본 구성(1~4번). 서로 달라야 한다.
+function itemDefaults() :: texts:
+	return "crossbow", "iron_axe", "mace", "tnt" and "potion_heal"
+
+# 로드아웃은 4세트(1번=저장칸 1~4, 2번=6~9, 3번=11~14, 4번=16~19. 세트당 5칸 간격 그대로라 예전 저장값이 그대로 이어진다). 사용 중인 세트 번호는 {loadoutset::uuid}(저장, 기본 1).
+function loadoutSet(p: player) :: number:
+	set {_v} to {loadoutset::%{_p}'s uuid%}
+	if {_v} is 2:
+		return 2
+	if {_v} is 3:
+		return 3
+	if {_v} is 4:
+		return 4
+	return 1
+
+# 사용 중인 세트의 구성 k 번(1~4)이 저장되는 실제 칸 번호(간격 5)
+function loadoutIdx(p: player, k: number) :: number:
+	return (loadoutSet({_p}) - 1) * 5 + {_k}
+
+# 플레이어의 구성 k 번(1~4) 아이템 id(사용 중인 로드아웃 기준). 저장값이 없거나 카탈로그에서 사라진 id 면 기본값.
+function loadoutGet(p: player, k: number) :: text:
+	# 랜덤 아이템 모드로 진행 중인 게임이면 그 게임에서 뽑은 구성({-grand}, game.sk 의 gRollLoadout)이 우선한다. 저장된 구성({loadout})은 건드리지 않는다.
+	if {-ingame} is true:
+		set {_g} to {-grand::%{_p}'s uuid%::%{_k}%}
+		if {_g} is set:
+			return {_g}
+	set {_ri} to loadoutIdx({_p}, {_k})
+	set {_id} to {loadout::%{_p}'s uuid%::%{_ri}%}
+	set {_ids::*} to itemIds()
+	if {_id} is set:
+		if {_ids::*} contains {_id}:
+			return {_id}
+	set {_d::*} to itemDefaults()
+	return {_d::%{_k}%}
+
+# 인벤토리(0~35칸)에서 카탈로그 아이템(itemIdAt 이 알아보는 것)을 전부 치운다. 랜덤 아이템 모드가 시작/끝날 때 구성을 갈아 끼우려고 쓴다.
+function loadoutClearAll(p: player):
+	loop integers from 0 to 35:
+		if itemIdAt({_p}, loop-value) is not "":
+			set slot loop-value of {_p}'s inventory to air
+	# 왼손(칸 40)에 있는 구성 아이템도 치운다
+	if itemIdAt({_p}, 40) is not "":
+		set slot 40 of {_p}'s inventory to air
+
+# 최초 접속 시 구성 초기화(저장값이 없는 칸만 채움)
+function loadoutInit(p: player):
+	set {_d::*} to itemDefaults()
+	loop integers from 1 to 20:
+		set {_k} to loop-value
+		if {loadout::%{_p}'s uuid%::%{_k}%} is not set:
+			set {_dk} to mod({_k} - 1, 5) + 1
+			set {loadout::%{_p}'s uuid%::%{_k}%} to {_d::%{_dk}%}
+
+# 탭 아이콘 색(텍스트 색으로 스프라이트를 물들임, 미검증: 색이 안 입혀지면 itemSprite 에서 포션마다 다른 아이템 스프라이트를 쓰는 방법으로 바꿀 것).
+# 색을 안 입힐 아이템은 "" 를 돌려준다. 색은 #RRGGBB.
+function itemTint(id: text) :: text:
+	# 포션 3종은 리소스팩의 전용 스프라이트(mck:potion_heal/stamina/invis, 액체 색이 이미 칠해져 있음)라 색조를 안 쓴다
+	return ""
+
+# 탭 아이콘 컴포넌트 JSON 한 조각(킬로그 killIcon 에 색만 덧붙임)
+function itemIcon(id: text) :: text:
+	set {_j} to killIcon(itemSprite({_id}))
+	set {_c} to itemTint({_id})
+	if {_c} is not "":
+		replace "}" in {_j} with ",""color"":""%{_c}%""}"
+	return {_j}
+
+# 구성 k 번(1~4)을 처음 지급할 때 넣을 핫바 번호(1~9). 그 칸이 비어 있을 때만 쓰고, 이후 플레이어가 핫바에서 자유롭게 옮겨도 된다. 9번은 무기고 자리라 쓰지 말 것.
+function loadoutSlot(k: number) :: number:
+	if {_k} is 1:
+		return 1
+	if {_k} is 2:
+		return 2
+	if {_k} is 3:
+		return 3
+	if {_k} is 4:
+		return 4
+	return 5
+
+# 구성 아이템이 인벤토리 어디에 있는지(첫 번째 칸, 0부터, 왼손은 40). 없으면 -1.
+function loadoutFind(p: player, id: text) :: number:
+	loop integers from 0 to 35:
+		if itemIdAt({_p}, loop-value) is {_id}:
+			return loop-value
+	# 왼손(칸 40)에 들고 있어도 "있음"으로 본다(그래야 중복 지급을 하지 않는다)
+	if itemIdAt({_p}, 40) is {_id}:
+		return 40
+	return -1
+
+# 구성 아이템을 넣을 빈 칸(0부터). 선호 칸(pref)이 비어 있으면 그 칸, 아니면 핫바, 그 다음 인벤토리 순. 없으면 -1.
+# 게임 중이 아닐 때 7/8/9번 칸(인덱스 6/7/8)은 게임 관전 블록/준비 블록/무기고 자리라 쓰지 않는다. op 는 6번 칸(인덱스 5)도 관리자 메뉴 자리다.
+function loadoutEmpty(p: player, pref: number) :: number:
+	set {_res} to true
+	if {-ingame} is not true:
+		if {_pref} is 6:
+			set {_res} to false
+		if {_pref} is 7:
+			set {_res} to false
+		if {_pref} is 8:
+			set {_res} to false
+		if {_pref} is 5:
+			set {_res} to false
+		if {_pref} is 4:
+			set {_res} to false
+	if {_res} is true:
+		if slot {_pref} of {_p}'s inventory is air:
+			return {_pref}
+	loop integers from 0 to 35:
+		set {_s} to loop-value
+		set {_ok} to true
+		if {-ingame} is not true:
+			if {_s} is 6:
+				set {_ok} to false
+			if {_s} is 7:
+				set {_ok} to false
+			if {_s} is 8:
+				set {_ok} to false
+			if {_s} is 5:
+				set {_ok} to false
+			if {_s} is 4:
+				set {_ok} to false
+		if {_ok} is true:
+			if slot {_s} of {_p}'s inventory is air:
+				return {_s}
+	return -1
+
+# 구성 1~4번 아이템이 인벤토리에 없으면 채운다. 이미 어디든 있으면 건드리지 않는다(핫바 어느 칸에 두든 자유).
+# 새로 넣을 때 칸은 (게임 중이고 로비에서 정리해 둔 칸이 기억돼 있으면 그 칸, 아니면) loadoutSlot() 이 정한 선호 칸이 비어 있으면 거기, 아니면 빈 칸. 확인하는 때: 입장, 리스폰, 구성 변경(이 파일의 호출부).
+function loadoutGive(p: player):
+	# PVP 월드에서만 지급한다(pvp.sk)
+	if pvpIn({_p}) is false:
+		stop
+	loop integers from 1 to 4:
+		set {_k} to loop-value
+		set {_id} to loadoutGet({_p}, {_k})
+		if loadoutFind({_p}, {_id}) < 0:
+			set {_pf} to loadoutSlot({_k}) - 1
+			# 게임 중에는 로비에서 정리해 둔 칸(game.sk 의 gSlotRemember)이 있으면 그 칸에 먼저 넣는다
+			if {-ingame} is true:
+				if {-gslot::%{_p}'s uuid%::%{_id}%} is a number:
+					set {_pf} to {-gslot::%{_p}'s uuid%::%{_id}%}
+			set {_s} to loadoutEmpty({_p}, {_pf})
+			if {_s} < 0:
+				send "&c인벤토리가 가득 차서 %itemName({_id})% &c을(를) 지급하지 못했습니다." to {_p}
+			else:
+				set slot {_s} of {_p}'s inventory to itemBuild({_id})
+
+# 로비(게임 중이 아님)에서 준비 상태를 닉네임 색으로: 준비됨 = 녹색, 준비 안 됨 = 붉은색, 게임 관전 = 회색. 컴포넌트 JSON 에 덧붙일 조각(,"color":"#...")을 돌려준다. 해당 없으면 빈 문자열.
+function readyColorJ(p: player) :: text:
+	if readyActive() is not true:
+		return ""
+	# 게임 관전을 고른 사람은 준비와 상관없이 회색(spectate.sk)
+	if specOn({_p}) is true:
+		return ",""color"":""#aaaaaa"""
+	if readyOn({_p}) is true:
+		return ",""color"":""#55ff55"""
+	return ",""color"":""#ff5555"""
+
+# 탭리스트의 플레이어 이름 옆에 구성 1~4번 아이콘을 붙인다(킬로그와 같은 스프라이트 컴포넌트, 미검증).
+function tabUpdate(p: player):
+	# 마피아 서버: 탭 목록은 마피아 쪽(mTabUpdate)이 만든다
+	stop
+	# 게임 중 참가자의 탭 이름은 gametab.sk 가 만든다(전적 표시)
+	if gInGame({_p}) is true:
+		stop
+	set {_gap} to "{""text"":"" ""}"
+	set {_nm} to name of {_p}
+	set {_pre} to tierPreJ("%uuid of {_p}%")
+	set {_nc} to readyColorJ({_p})
+	set {_ex} to "%{_pre}%,{""text"":""%{_nm}%""%{_nc}%}"
+	# 아이콘 순서는 구성 번호와 상관없이 GUI 정렬 순서(itemOrder: 금속 -> 나무 -> cc기 -> 포션류)를 따른다.
+	loop integers from 1 to 4:
+		add loadoutGet({_p}, loop-value) to {_ld::*}
+	loop itemOrder():
+		if {_ld::*} contains loop-value:
+			set {_ic} to itemIcon(loop-value)
+			set {_ex} to "%{_ex}%,%{_gap}%,%{_ic}%"
+	set {_json} to "{""text"":"""",""extra"":[%{_ex}%]}"
+	{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
+
+# 무기고 아이템(상자). 이름은 아래 armoryName() 하나로 통일.
+function armoryName() :: text:
+	return "&6PVP 무기고"
+
+function armoryItem() :: itemtype:
+	set {_i} to chest named armoryName()
+	set lore of {_i} to "&7PVP 아이템 구성을 바꿉니다."
+	return {_i}
+
+# 게임 중이 아닐 때 9번 슬롯(인덱스 8)을 무기고로 고정하고, 다른 칸/왼손에 있는 무기고는 치운다.
+function armoryEnsure(p: player):
+	# 빈 슬롯은 이름이 없어서(unset) 비교가 불안정하므로 ok 표시로 따로 판정한다.
+	set {_ok} to false
+	set {_n} to name of slot 8 of {_p}'s inventory
+	if {_n} is set:
+		if {_n} is armoryName():
+			set {_ok} to true
+	if {_ok} is false:
+		set slot 8 of {_p}'s inventory to armoryItem()
+	set {_o} to name of slot 40 of {_p}'s inventory
+	if {_o} is set:
+		if {_o} is armoryName():
+			clear slot 40 of {_p}'s inventory
+
+# op 는 6번 슬롯(인덱스 5)에 관리자 메뉴 아이템을 고정한다(게임 중이 아닐 때). op 가 아니면 그 칸의 관리자 아이템을 치운다.
+function adminItemEnsure(p: player):
+	set {_n} to name of slot 5 of {_p}'s inventory
+	set {_has} to false
+	if {_n} is set:
+		if {_n} is adminItemName():
+			set {_has} to true
+	if {_p} is op:
+		if {_has} is false:
+			set slot 5 of {_p}'s inventory to adminItem()
+	else:
+		if {_has} is true:
+			clear slot 5 of {_p}'s inventory
+	set {_o} to name of slot 40 of {_p}'s inventory
+	if {_o} is set:
+		if {_o} is adminItemName():
+			clear slot 40 of {_p}'s inventory
+
+# 게임이 시작되면 무기고/관리자 메뉴 아이템을 치운다(고정 칸과 왼손).
+function armoryClear(p: player):
+	loop 3 times:
+		set {_s} to 5
+		if loop-value is 2:
+			set {_s} to 8
+		if loop-value is 3:
+			set {_s} to 40
+		set {_n} to name of slot {_s} of {_p}'s inventory
+		if {_n} is set:
+			if {_n} is armoryName():
+				clear slot {_s} of {_p}'s inventory
+			else if {_n} is adminItemName():
+				clear slot {_s} of {_p}'s inventory
+
+# GUI 를 채운다(선택/순서 편집용). 36칸을 한 번에 다시 그린다. 아이템이 들어가지 않는 칸은 전부 회색 색유리판(이름 공백).
+# 아래 1줄(27~35번 칸)은 나중에 페이지 넘기기 버튼 자리라서 지금은 회색 유리판.
+function itemGuiFill(p: player, inv: inventory, mode: text):
+	set {_uid} to "%{_p}'s uuid%"
+	delete {-itemguimap::%{_uid}%::*}
+	loop 36 times:
+		set {_s} to loop-value - 1
+		set slot {_s} of {_inv} to gray stained glass pane named " "
+	set {_o::*} to itemOrder()
+	set {_n} to size of {_o::*}
+	if {_n} > 27:
+		set {_n} to 27
+	loop integers from 1 to {_n}:
+		set {_k} to loop-value
+		set {_s} to {_k} - 1
+		set {_id} to {_o::%{_k}%}
+		set {_x} to ""
+		if {_mode} is "order":
+			if {-itemguipick::%{_uid}%} is {_s}:
+				set {_x} to "&e▶ 자리를 바꿀 아이템"
+		set slot {_s} of {_inv} to itemBuild({_id}, {_x})
+		set {-itemguimap::%{_uid}%::%{_s}%} to {_id}
+	# 아이템 변경(select) 화면: 4번째 줄 가운데(칸 31)에 "돌아가기" 방벽. 누르면 무기고 기본 화면으로 돌아간다(클릭 처리의 "__back").
+	if {_mode} is "select":
+		set slot 31 of {_inv} to barrier named "&c돌아가기"
+		set {-itemguimap::%{_uid}%::31} to "__back"
+
+# n 번 로드아웃(1~4)의 구성 k 번(1~4) 아이템 id. 랜덤 아이템 모드와 상관없이 저장된 값 기준(저장값이 없거나 카탈로그에서 사라진 id 면 기본값).
+function loadoutIdOf(p: player, n: number, k: number) :: text:
+	set {_ri} to ({_n} - 1) * 5 + {_k}
+	set {_id} to {loadout::%{_p}'s uuid%::%{_ri}%}
+	set {_ids::*} to itemIds()
+	if {_id} is set:
+		if {_ids::*} contains {_id}:
+			return {_id}
+	set {_d::*} to itemDefaults()
+	return {_d::%{_k}%}
+
+# 무기고 GUI 의 로드아웃 선택 유리판: 사용 중이면 초록, 아니면 파랑. 설명란에 그 로드아웃에 들어 있는 아이템 4개의 아이콘을 한 줄로 보여 준다(itemIcon 스프라이트, 미검증).
+function loadoutPane(p: player, n: number, cur: number) :: object:
+	if {_n} is {_cur}:
+		set {_g} to lime stained glass pane named "&a%{_n}%번 로드아웃"
+	else:
+		set {_g} to blue stained glass pane named "&9%{_n}%번 로드아웃"
+	set {_st} to {_g}.getRandom()
+	set {_lb} to ItemLore.lore()
+	if {_n} is {_cur}:
+		set {_h} to "{""text"":""사용 중"",""italic"":false,""color"":""green""}"
+	else:
+		set {_h} to "{""text"":""미사용"",""italic"":false,""color"":""gray""}"
+	{_lb}.addLine(GsonComponentSerializer.gson().deserialize({_h}))
+	set {_ic} to ""
+	loop integers from 1 to 4:
+		set {_k} to loop-value
+		set {_oid} to loadoutIdOf({_p}, {_n}, {_k})
+		set {_pc} to itemIcon({_oid})
+		if {_ic} is "":
+			set {_ic} to {_pc}
+		else:
+			set {_ic} to "%{_ic}%,{""text"":""  ""},%{_pc}%"
+	set {_lj} to "{""text"":"""",""italic"":false,""color"":""white"",""extra"":[%{_ic}%]}"
+	{_lb}.addLine(GsonComponentSerializer.gson().deserialize({_lj}))
+	if {_n} is not {_cur}:
+		{_lb}.addLine(GsonComponentSerializer.gson().deserialize("{""text"":"" "",""italic"":false}"))
+		{_lb}.addLine(GsonComponentSerializer.gson().deserialize("{""text"":""▶ 클릭해서 이 로드아웃 사용"",""italic"":false,""color"":""yellow""}"))
+	{_st}.setData(DataComponentTypes.LORE, {_lb}.build())
+	return {_st}
+
+# 무기고 GUI(2줄): 윗줄 3~6번째 칸(칸 2~5)이 로드아웃 1~4번 유리판(사용 중 = 초록, 미사용 = 파랑), 아랫줄 3~6번째 칸(칸 11~14)이 사용 중인 로드아웃의 구성 1~4번(두 줄이 세로로 줄이 맞는다). 나머지는 회색 색유리판.
+function armoryFill(p: player, inv: inventory):
+	set {_uid} to "%{_p}'s uuid%"
+	delete {-itemguimap::%{_uid}%::*}
+	loop 18 times:
+		set {_s} to loop-value - 1
+		set slot {_s} of {_inv} to gray stained glass pane named " "
+	set {_cur} to loadoutSet({_p})
+	loop integers from 1 to 4:
+		set {_n} to loop-value
+		set {_g} to loadoutPane({_p}, {_n}, {_cur})
+		set {_s} to {_n} + 1
+		set slot {_s} of {_inv} to {_g}
+		set {-itemguimap::%{_uid}%::%{_s}%} to "__set%{_n}%"
+	loop integers from 1 to 4:
+		set {_k} to loop-value
+		set {_s} to {_k} + 10
+		set slot {_s} of {_inv} to itemBuild(loadoutGet({_p}, {_k}), "&e▶ 클릭해서 변경")
+		set {-itemguimap::%{_uid}%::%{_s}%} to {_k}
+	# 즉시 사용 토글(칸 17, 아랫줄 맨 오른쪽): 우클릭 <-> 칸 바꾸면 즉시 사용(quickuse.sk)
+	set slot 17 of {_inv} to quickUseItem({_p})
+	set {-itemguimap::%{_uid}%::17} to "__quick"
+	# 도움말(칸 8, 윗줄 맨 오른쪽): 기초 조작/튜토리얼 내용(tutorial.sk 의 helpDialog)
+	set slot 8 of {_inv} to helpItem()
+	set {-itemguimap::%{_uid}%::8} to "__help"
+
+# 즉시 사용 토글 메뉴 아이템(대상: 무기류 제외 버프/디버프/포션류, TNT 포함)
+function quickUseItem(p: player) :: itemtype:
+	if quickUseOn({_p}) is true:
+		set {_i} to ender eye named colored "&b아이템 사용 방식: &a즉시 사용"
+		set {_i} to {_i} with lore (colored "&7버프/디버프/포션류 아이템으로 칸을 바꾸면 바로 사용합니다."), (colored "&8무기류는 해당하지 않습니다."), (colored "&e숙련자 추천"), "" and (colored "&e▶ 클릭해서 우클릭 사용으로 변경")
+	else:
+		set {_i} to ender eye named colored "&b아이템 사용 방식: &a우클릭"
+		set {_i} to {_i} with lore (colored "&7우클릭해서 아이템을 사용합니다."), (colored "&8칸을 바꾸는 것만으로는 사용되지 않습니다."), (colored "&e초심자 추천"), "" and (colored "&e▶ 클릭해서 즉시 사용으로 변경")
+	return {_i}
+
+# GUI 열기. mode: armory(무기고) / select(아이템 변경, idx = 구성 번호 1~4) / order(순서 편집).
+# 상태 변수와 내용은 inventory 를 연 다음에 둔다(이전 GUI 가 닫히며 지우는 것을 피하려고).
+function itemGuiOpen(p: player, mode: text, idx: number = 0):
+	set {_uid} to "%{_p}'s uuid%"
+	if {_mode} is "armory":
+		set {_inv} to chest inventory with 2 rows named "무기고"
+	else if {_mode} is "order":
+		set {_inv} to chest inventory with 4 rows named "아이템 순서 편집 (관리자)"
+	else:
+		set {_inv} to chest inventory with 4 rows named "아이템 변경"
+	open {_inv} to {_p}
+	set {-itemgui::%{_uid}%} to {_mode}
+	set {-itemguislot::%{_uid}%} to {_idx}
+	delete {-itemguipick::%{_uid}%}
+	if {_mode} is "armory":
+		armoryFill({_p}, {_inv})
+	else:
+		itemGuiFill({_p}, {_inv}, {_mode})
+
+on join:
+	loadoutInit(player)
+
+on respawn:
+	wait 1 tick
+	loadoutGive(player)
+
+on load:
+	loop all players:
+		loadoutInit(loop-player)
+
+# (마피아 서버) 무기고 상자는 pvp.sk 가 로비·PVP 핫바 6번 칸(인덱스 5)에 둔다. MCK 의 1초 고정(9번 칸)은 쓰지 않는다.
+
+# 무기고 우클릭: 배치를 막고 GUI 를 연다(상자 여는 소리). op 의 관리자 메뉴 아이템 우클릭도 여기서 처리한다.
+on right click:
+	if {-ingame} is true:
+		stop
+	set {_ev} to event
+	set {_h} to {_ev}.getHand()
+	if {_h} is not set:
+		stop
+	# 메인핸드에 무기고를 들고 있을 때는 오프핸드 우클릭 이벤트도 취소한다(오프핸드 낚싯대/창 등 바닐라 동작 방지).
+	if {_h}.name() is "OFF_HAND":
+		if armoryHeld(player) is true:
+			cancel the event
+		stop
+	if {_h}.name() is not "HAND":
+		stop
+	set {_tn} to name of player's tool
+	if {_tn} is not set:
+		stop
+	# 관리자 메뉴 아이템(op 전용): 우클릭하면 /admin 과 같은 메뉴가 열린다.
+	if {_tn} is adminItemName():
+		cancel the event
+		if player is op:
+			play sound "block.chest.open" to player
+			adminOpen(player)
+		stop
+	if {_tn} is not armoryName():
+		stop
+	cancel the event
+	if isStunned(player) is true:
+		stop
+	play sound "block.chest.open" to player
+	itemGuiOpen(player, "armory")
+
+# 무기고는 버릴 수 없다
+on drop:
+	if {-ingame} is true:
+		stop
+	set {_dn} to name of event-item
+	if {_dn} is not set:
+		stop
+	if {_dn} is armoryName():
+		cancel the event
+		stop
+	if {_dn} is adminItemName():
+		cancel the event
+		stop
+	loop itemIds():
+		if {_dn} is itemName(loop-value):
+			cancel the event
+			stop
+
+command /itemorder:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: 아이템 변경 GUI 의 표시 순서를 편집해요 (op 전용)
+	executable by: players
+	trigger:
+		if player is not op:
+			send "&c권한이 없습니다."
+			stop
+		itemGuiOpen(player, "order")
+
+on inventory click:
+	set {_uid} to "%player's uuid%"
+	set {_m} to {-itemgui::%{_uid}%}
+	set {_ev} to event
+	if {_m} is not set:
+		# GUI 가 없을 때: PVP 월드에서 고정 칸(5 로비로, 6 무기고, 7 관전, 8 준비, 9 안내서)을 건드리지 못하게 한다(로비는 마피아 쪽이 막는다)
+		if pvpIn(player) is false:
+			stop
+		set {_ci} to {_ev}.getClickedInventory()
+		if {_ci} is not set:
+			stop
+		set {_ct} to {_ci}.getType().name()
+		if {_ct} is "PLAYER":
+			set {_sl} to {_ev}.getSlot()
+			set {_sl} to "%{_sl}%" parsed as number
+			if {_sl} is 8:
+				cancel the event
+				stop
+			if {_sl} is 7:
+				cancel the event
+				stop
+			if {_sl} is 6:
+				cancel the event
+				stop
+			if {_sl} is 5:
+				cancel the event
+				stop
+			if {_sl} is 4:
+				cancel the event
+				stop
+		set {_ck} to {_ev}.getClick().name()
+		if {_ck} is "NUMBER_KEY":
+			set {_hb} to {_ev}.getHotbarButton()
+			set {_hb} to "%{_hb}%" parsed as number
+			if {_hb} is 8:
+				cancel the event
+			if {_hb} is 7:
+				cancel the event
+			if {_hb} is 6:
+				cancel the event
+			if {_hb} is 5:
+				cancel the event
+			if {_hb} is 4:
+				cancel the event
+		stop
+	# GUI 가 열려 있는 동안은 모든 클릭(쉬프트 클릭, 숫자키 교체 등 포함)을 막는다.
+	cancel the event
+	set {_raw} to {_ev}.getRawSlot()
+	set {_raw} to "%{_raw}%" parsed as number
+	if {_raw} is not set:
+		stop
+	set {_top} to 36
+	if {_m} is "armory":
+		set {_top} to 18
+	if {_raw} < 0:
+		stop
+	if {_raw} >= {_top}:
+		stop
+	set {_p} to player
+	# GUI 칸(회색 유리판 포함)을 클릭하면 공통으로 UI 버튼 소리
+	play sound "ui.button.click" to {_p}
+	# 회색 유리판/머리(맵에 없는 칸)는 소리만 나고 아무 일도 안 일어남
+	set {_id} to {-itemguimap::%{_uid}%::%{_raw}%}
+	if {_id} is not set:
+		stop
+	if {_m} is "armory":
+		set {_idt} to "%{_id}%"
+		if {_idt} starts with "__set":
+			set {_sn} to {_idt}
+			replace "__set" in {_sn} with ""
+			set {_sn} to {_sn} parsed as number
+			if {_sn} is not loadoutSet({_p}):
+				set {loadoutset::%{_uid}%} to {_sn}
+				# 이전 로드아웃 아이템을 치우고 새 로드아웃 아이템을 지급한다
+				loadoutClearAll({_p})
+				loadoutGive({_p})
+				tabUpdate({_p})
+				tutHook({_p}, "loadout")
+				play sound "entity.experience_orb.pickup" with volume 0.5 to {_p}
+			itemGuiOpen({_p}, "armory")
+			stop
+		if {_idt} is "__help":
+			close {_p}'s inventory
+			helpDialog({_p}, 0)
+			stop
+		if {_idt} is "__quick":
+			quickUseToggle({_p})
+			play sound "entity.experience_orb.pickup" with volume 0.5 to {_p}
+			itemGuiOpen({_p}, "armory")
+			stop
+		itemGuiOpen({_p}, "select", {_id})
+	else if {_m} is "select":
+		if {_id} is "__back":
+			itemGuiOpen({_p}, "armory")
+			stop
+		set {_k} to {-itemguislot::%{_uid}%}
+		if loadoutGet({_p}, {_k}) is not {_id}:
+			loop integers from 1 to 4:
+				set {_c} to loop-value
+				if {_c} is not {_k}:
+					if loadoutGet({_p}, {_c}) is {_id}:
+						# 이미 다른 구성 칸에 있는 아이템이면 두 구성 칸의 아이템만 서로 맞바꾼다(인벤토리 속 아이템은 그대로)
+						set {_ra} to loadoutIdx({_p}, {_k})
+						set {_rb} to loadoutIdx({_p}, {_c})
+						set {_oa} to loadoutGet({_p}, {_k})
+						set {loadout::%{_uid}%::%{_ra}%} to {_id}
+						set {loadout::%{_uid}%::%{_rb}%} to {_oa}
+						tabUpdate({_p})
+						tutHook({_p}, "loadout")
+						play sound "entity.experience_orb.pickup" with volume 0.5 to {_p}
+						itemGuiOpen({_p}, "armory")
+						stop
+			set {_old} to loadoutGet({_p}, {_k})
+			set {_os} to loadoutFind({_p}, {_old})
+			set {_ri} to loadoutIdx({_p}, {_k})
+			set {loadout::%{_uid}%::%{_ri}%} to {_id}
+			# 기존 아이템이 있던 칸에 새 아이템을 넣는다(없으면 loadoutGive 가 빈 칸에 지급)
+			if {_os} >= 0:
+				set slot {_os} of {_p}'s inventory to itemBuild({_id})
+			tabUpdate({_p})
+			loadoutGive({_p})
+			tutHook({_p}, "loadout")
+		itemGuiOpen({_p}, "armory")
+	else if {_m} is "order":
+		set {_pick} to {-itemguipick::%{_uid}%}
+		if {_pick} is not set:
+			set {-itemguipick::%{_uid}%} to {_raw}
+		else if {_pick} is {_raw}:
+			delete {-itemguipick::%{_uid}%}
+		else if itemCategory({-itemguimap::%{_uid}%::%{_pick}%}) is not itemCategory({_id}):
+			# 분류가 다르면 자리를 못 바꾼다(분류 순서가 우선)
+			send "&c분류가 다른 아이템끼리는 자리를 바꿀 수 없습니다." to {_p}
+			play sound "entity.villager.no" with volume 0.5 to {_p}
+			delete {-itemguipick::%{_uid}%}
+		else:
+			itemOrderSwap({_pick} + 1, {_raw} + 1)
+			delete {-itemguipick::%{_uid}%}
+		itemGuiFill({_p}, {_p}'s current inventory, "order")
+
+on inventory drag:
+	if {-itemgui::%player's uuid%} is set:
+		cancel the event
+
+on inventory close:
+	delete {-itemgui::%player's uuid%}
+	delete {-itemguislot::%player's uuid%}
+	delete {-itemguipick::%player's uuid%}
+	delete {-itemguimap::%player's uuid%::*}
+
+on quit:
+	delete {-itemgui::%player's uuid%}
+	delete {-itemguislot::%player's uuid%}
+	delete {-itemguipick::%player's uuid%}
+	delete {-itemguimap::%player's uuid%::*}

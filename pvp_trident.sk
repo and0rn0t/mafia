@@ -1,0 +1,296 @@
+# [trident.sk] 삼지창 스킬(우클릭을 길게 눌러 충전 -> 놓으면 바라보는 방향으로 순간이동, 쿨 18초): 근접 데미지 7(main.sk 의 trident 분기), 순간이동 순간이동한 지점 반경 6칸의 적에게 피해 4.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-tdstart::uuid}(충전 시작 시각), {-tdcd::uuid}(쿨타임 종료 시각), {-skilldmg}(피해를 주는 동안만), {-skillitems::trident}
+# 동작: 활(bow.sk)과 같은 방식. 우클릭을 취소하지 않아서 바닐라 삼지창 차징 모션이 나오고, 충전 보스바 "충전"(최대 1.5초, 가득 차면 초록 + 소리)을 매 틱 갱신한다.
+#   손을 놓으면(isHandRaised 가 2틱 연속 false) 그 순간의 충전도(0~1)로 순간이동한다. 거리 = 4 + 12 x 충전도 (4~16칸).
+#   바닐라 삼지창 투척(ProjectileLaunchEvent)은 아래 on shoot 에서 취소한다(삼지창은 던져지지 않고 손에 남는다).
+# [변경] 도착 위치는 크로스헤어 레이캐스트 기준(tridentDest 주석 참고). 아래 "0.5칸씩 나아가는" 설명은 이전 방식이라 tridentDest 주석이 우선한다.
+# 순간이동: 바라보는 방향(시선 방향 그대로, 위아래 포함)으로 0.5칸씩 나아가며, 발/허리/머리 위치 중 하나라도 충돌 판정이 있는 블럭(Block#isPassable 이 false)이면 같은 높이로 수평 이동만 한 번 더 시도하고, 그것도 막히면 거기서 멈춘다(바닥을 보고 쏴도 제자리에 안 서게).
+#   충돌 판정 없는 블럭(풀, 카펫, 물 등)과 충돌 높이 0.5 이하의 낮은 블럭(쌓인 눈, 반블럭)은 통과(그 위에 도착하면 윗면 높이로 올려 세움). 경로에 막히면 막히기 직전 자리까지만 이동한다.
+# 피해: 순간이동한 지점 반경 6칸의 생명체(본인/아군/갑옷 거치대/마네킹/관전 모드 플레이어 제외)에게 한 번씩 실 체력 4. 스킬 피해라 main.sk 무기 보정에서 제외({-skilldmg}).
+# 이펙트: 도착 지점에만 번개 이펙트(World#strikeLightningEffect, 불/피해 없음)와 전기 불꽃 파티클, 소리.
+# 오프핸드: 메인핸드/오프핸드 어느 쪽 삼지창이든 쓸 수 있다(skillHand 규칙). 미검증: 오프핸드 삼지창 우클릭 충전 중 isHandRaised 가 true 인지.
+# 미검증: World#rayTraceBlocks(Location, Vector, double, FluidCollisionMode, boolean)/RayTraceResult#getHitBlockFace 호출, 크로스헤어 도착 위치 보정, on shoot 에서 삼지창 투척 취소 후 아이템이 손에 남고 클라이언트가 이상해지지 않는지, isHandRaised 가 삼지창 사용 중 true 인지, strikeLightningEffect, Particle.ELECTRIC_SPARK, 순간이동 후 시점 유지.
+
+using damage sources
+
+import:
+	org.bukkit.Particle
+	org.bukkit.FluidCollisionMode
+	org.bukkit.Bukkit
+	org.bukkit.ChatColor
+	org.bukkit.entity.EntityType
+	io.papermc.paper.datacomponent.item.ResolvableProfile
+	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+	org.bukkit.boss.BarColor
+	org.bukkit.boss.BarStyle
+
+on load:
+	set {-skillitems::trident} to trident
+	# 다시 불러올 때 남은 도착 미리보기 마네킹을 치운다
+	loop {-tdprev::*}:
+		if loop-value is set:
+			tridentPrevRemove(loop-value)
+	delete {-tdprev::*}
+
+# 충전도(0~1)에 따른 순간이동 거리
+function tridentDist(f: number) :: number:
+	return 4 + 12 * {_f}
+
+# 위치 q 에 서 있는 플레이어가 들어갈 수 있는지(발/허리/머리 높이 블럭에 충돌 판정이 없음)
+# 발 위치 블럭의 충돌 높이(칸). 통과 가능하면 0. 쌓인 눈(1~4단)/반블럭 같은 낮은 블럭은 0.5 이하라 판정에서 제외한다.
+function tridentLow(q: location) :: number:
+	set {_bl} to {_q}.getBlock()
+	if {_bl}.isPassable() is true:
+		return 0
+	# VoxelShape 에는 getBoundingBox 가 없어서(getBoundingBoxes 만 있음) 블럭의 getBoundingBox 를 쓴다(월드 좌표 maxY - 블럭 y)
+	set {_h} to {_bl}.getBoundingBox().getMaxY() - {_bl}.getY()
+	return {_h}
+
+function tridentClear(q: location) :: boolean:
+	# 발 높이 판정은 0.1칸 위에서 한다: 흙 길(0.9375)/영혼 모래/농지 같은 낮은 바닥 위에 서 있으면 발 y 가 바닥 블럭 안(예: 63.94)이라
+	# 발 아래 블럭에 걸려 이동이 안 되던 문제 수정(바닥 블럭을 장애물로 취급하지 않는다)
+	set {_f0} to {_q} ~ vector(0, 0.1, 0)
+	set {_a} to {_f0}.getBlock().isPassable()
+	if {_a} is not true:
+		if tridentLow({_f0}) > 0.5:
+			return false
+	set {_m} to {_q} ~ vector(0, 1, 0)
+	set {_b} to {_m}.getBlock().isPassable()
+	if {_b} is not true:
+		return false
+	set {_h} to {_q} ~ vector(0, 1.8, 0)
+	set {_c} to {_h}.getBlock().isPassable()
+	if {_c} is not true:
+		return false
+	return true
+
+# 충전도 f 로 놓았을 때 도착할 위치(순간이동과 충전 중 미리보기가 같은 함수를 쓴다)
+# 크로스헤어 기준: 눈 위치에서 시선 방향으로 최대 거리(tridentDist)까지 블럭 레이캐스트(통과 가능한 블럭/유체는 무시)를 쏜다.
+#   - 맞은 블럭의 윗면이면 그 점에 서고, 아랫면이면 머리가 그 점에 닿게, 옆면이면 면 바깥쪽 0.4칸에 가슴 높이쯤으로 선다.
+#   - 아무것도 안 맞으면 최대 거리 지점에 눈이 오게(발은 1.62칸 아래) 선다.
+#   그 자리에 몸이 들어가지 않으면(tridentClear) 높이를 0, +0.5, +1, -0.5, -1 로 바꿔 보고, 그래도 안 되면 수평으로 0.5칸씩(최대 4칸) 뒤로 물러나며 처음으로 들어가는 자리를 고른다. 전부 안 되면 제자리.
+function tridentDest(p: player, f: number) :: location:
+	set {_w} to {_p}.getWorld()
+	set {_o} to {_p}.getLocation()
+	set {_eye} to {_p}.getEyeLocation()
+	set {_dir} to {_eye}.getDirection()
+	set {_max} to tridentDist({_f})
+	set {_dx} to {_dir}.getX()
+	set {_dy} to {_dir}.getY()
+	set {_dz} to {_dir}.getZ()
+	set {_r} to {_w}.rayTraceBlocks({_eye}, {_dir}, {_max}, FluidCollisionMode.NEVER, true)
+	if {_r} is set:
+		set {_hp} to {_r}.getHitPosition()
+		set {_nv} to {_r}.getHitBlockFace().getDirection()
+		set {_px} to {_hp}.getX()
+		set {_py} to {_hp}.getY()
+		set {_pz} to {_hp}.getZ()
+		set {_ny} to {_nv}.getY()
+		if {_ny} > 0.5:
+			set {_fx} to {_px}
+			set {_fy} to {_py}
+			set {_fz} to {_pz}
+		else if {_ny} < -0.5:
+			set {_fx} to {_px}
+			set {_fy} to {_py} - 1.8
+			set {_fz} to {_pz}
+		else:
+			set {_fx} to {_px} + ({_nv}.getX()) * 0.4
+			set {_fy} to {_py} - 1
+			set {_fz} to {_pz} + ({_nv}.getZ()) * 0.4
+	else:
+		set {_fx} to x-coordinate of {_eye} + {_dx} * {_max}
+		set {_fy} to y-coordinate of {_eye} + {_dy} * {_max} - 1.62
+		set {_fz} to z-coordinate of {_eye} + {_dz} * {_max}
+	# 수평 방향(뒤로 물러날 때 사용). 바로 위/아래를 보면 0.
+	set {_hl} to sqrt({_dx} * {_dx} + {_dz} * {_dz})
+	set {_ux} to 0
+	set {_uz} to 0
+	if {_hl} > 0.001:
+		set {_ux} to {_dx} / {_hl}
+		set {_uz} to {_dz} / {_hl}
+	set {_dest} to {_o}
+	set {_found} to false
+	loop integers from 0 to 8:
+		if {_found} is false:
+			set {_k} to loop-value * 0.5
+			loop 0, 0.5, 1, -0.5 and -1:
+				if {_found} is false:
+					set {_q} to location({_fx} - {_ux} * {_k}, {_fy} + loop-value-2, {_fz} - {_uz} * {_k}, {_w})
+					if tridentClear({_q}) is true:
+						set {_dest} to {_q}
+						set {_found} to true
+	# 낮은 블럭(눈/반블럭) 위에 도착하면 그 윗면으로 올려서 블럭 속에 끼지 않게 한다
+	if {_found} is true:
+		set {_lh} to tridentLow({_dest})
+		if {_lh} > 0:
+			set y-coordinate of {_dest} to (floor(y-coordinate of {_dest})) + {_lh}
+	return {_dest}
+
+# dest: 충전 중 마지막으로 미리보기에 보여준 도착 위치(보인 자리와 실제 도착이 어긋나지 않게 그대로 쓴다). 시점은 지금 시점을 유지.
+function tridentBlink(p: player, f: number, dest: location):
+	set {_w} to {_p}.getWorld()
+	set {_dest} to {_dest}.clone()
+	set yaw of {_dest} to yaw of {_p}
+	set pitch of {_dest} to pitch of {_p}
+	# 피해: 순간이동한 자리 반경 6칸의 적에게 한 번씩 실 체력 4
+	set {_pid} to "%uuid of {_p}%"
+	set {_src} to a custom damage source:
+		set the damage type to player attack
+		set the causing entity to {_p}
+		set the direct entity to {_p}
+	set {_ctr} to {_dest} ~ vector(0, 1, 0)
+	set {-skilldmg::%{_pid}%} to true
+	loop all living entities in radius 6 around {_ctr}:
+		set {_e} to loop-entity
+		set {_eid} to "%uuid of {_e}%"
+		set {_ok} to true
+		if {_eid} is {_pid}:
+			set {_ok} to false
+		if {_e} is an armor stand:
+			set {_ok} to false
+		if isAlly({_pid}, {_eid}) is true:
+			set {_ok} to false
+		if {_e}.getType().name() is "MANNEQUIN":
+			set {_ok} to false
+		if {_e} is a player:
+			if gamemode of {_e} is spectator:
+				set {_ok} to false
+		if {_ok} is true:
+			damage {_e} by hp(4) hearts using {_src}
+	delete {-skilldmg::%{_pid}%}
+	# 이동(시점 유지) + 이펙트는 도착 지점에만
+	teleport {_p} to {_dest}
+	{_w}.strikeLightningEffect({_dest})
+	{_w}.spawnParticle(Particle.ELECTRIC_SPARK, {_ctr}, 40, 1.5, 0.8, 1.5, 0.1, null, true)
+	soundAround("entity.lightning_bolt.impact", {_dest}, 0.8, 1.6)
+
+# 충전 중 도착 미리보기: 투명 + 발광 마네킹(윤곽선만 보임). 시전자에게만 보이게 한다(기본 가시성을 끄고 시전자에게만 showEntity).
+function tridentPrevSpawn(p: player, loc: location) :: object:
+	set {_m} to {_loc}.getWorld().spawnEntity({_loc}, EntityType.MANNEQUIN)
+	{_m}.setVisibleByDefault(false)
+	set {_pf} to nickProfile({_p})
+	{_m}.setProfile(ResolvableProfile.resolvableProfile({_pf}))
+	{_m}.setImmovable(true)
+	{_m}.setInvulnerable(true)
+	{_m}.setSilent(true)
+	{_m}.setGravity(false)
+	{_m}.setCollidable(false)
+	{_m}.setDescription(GsonComponentSerializer.gson().deserialize("{""text"":""""}"))
+	{_m}.addScoreboardTag("tdprev")
+	{_m}.setInvisible(true)
+	{_m}.setGlowing(true)
+	# 발광 외곽선 색은 팀 색이라 AQUA(하늘색) 팀 tdprev 에 넣는다(마네킹은 엔티티 UUID 문자열이 팀 항목).
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_tm} to {_sb}.getTeam("tdprev")
+	if {_tm} is not set:
+		set {_tm} to {_sb}.registerNewTeam("tdprev")
+	{_tm}.setColor(ChatColor.AQUA)
+	{_tm}.addEntry("%uuid of {_m}%")
+	set {_pg} to Bukkit.getPluginManager().getPlugin("Skript")
+	{_p}.showEntity({_pg}, {_m})
+	add {_m} to {-tdprev::*}
+	return {_m}
+
+# 미리보기 마네킹 제거(팀 항목도 함께 뺀다)
+function tridentPrevRemove(m: object):
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_tm} to {_sb}.getTeam("tdprev")
+	if {_tm} is set:
+		{_tm}.removeEntry("%{_m}.getUniqueId()%")
+	{_m}.remove()
+
+on rightclick:
+	if skillHand(player, trident) is false:
+		stop
+	set {_id} to "%player's uuid%"
+	if {-tdcd::%{_id}%} is set:
+		if {-tdcd::%{_id}%} > now:
+			cancel event
+			stop
+	set {_p} to player
+	set {-tdstart::%{_id}%} to now
+	set {_start} to {-tdstart::%{_id}%}
+	set {_stts} to {_start}.getTimestamp()
+	set {_t} to colored "&e충전"
+	set {_b} to Bukkit.createBossBar({_t}, BarColor.YELLOW, BarStyle.SOLID)
+	{_b}.setProgress(0)
+	{_b}.addPlayer({_p})
+	set {_grace} to 0
+	set {_seen} to false
+	set {_full} to false
+	set {_cf} to 0
+	set {_fire} to false
+	loop 400 times:
+		wait 1 tick
+		if {-tdstart::%{_id}%} is not {_start}:
+			exit loop
+		if {_p} is not online:
+			exit loop
+		if {_p}.isHandRaised() is true:
+			set {_seen} to true
+			set {_grace} to 0
+			set {_nowd} to now
+			set {_ms} to {_nowd}.getTimestamp() - {_stts}
+			set {_cf} to {_ms} / 1500
+			if {_cf} > 1:
+				set {_cf} to 1
+			{_b}.setProgress({_cf})
+			# 도착 미리보기(충전도에 맞춰 매 틱 옮긴다)
+			set {_pd} to tridentDest({_p}, {_cf})
+			set {_lastd} to {_pd}.clone()
+			{_pd}.setPitch(0)
+			if {_pm} is not set:
+				set {_pm} to tridentPrevSpawn({_p}, {_pd})
+			else:
+				{_pm}.teleport({_pd})
+			if {_cf} >= 1:
+				if {_full} is false:
+					set {_full} to true
+					{_b}.setColor(BarColor.GREEN)
+					{_b}.setTitle(colored "&a충전")
+					play sound "block.note_block.pling" with volume 0.6 and pitch 2 to {_p}
+		else:
+			add 1 to {_grace}
+			if {_grace} >= 2:
+				if {_seen} is true:
+					set {_fire} to true
+				exit loop
+	{_b}.removeAll()
+	if {_pm} is set:
+		tridentPrevRemove({_pm})
+		remove {_pm} from {-tdprev::*}
+	if {-tdstart::%{_id}%} is {_start}:
+		delete {-tdstart::%{_id}%}
+	else:
+		stop
+	if {_fire} is not true:
+		stop
+	if {_p} is not online:
+		stop
+	if isStunned({_p}) is true:
+		stop
+	# 삼지창이 메인핸드나 오프핸드 어느 쪽에 있어도 된다(예전에는 메인핸드만 확인해서 오프핸드에서는 충전 후 발동하지 않았다)
+	if {_p}'s tool is not trident:
+		if {_p}'s offhand tool is not trident:
+			stop
+	set {-tdcd::%{_id}%} to now + 18 seconds
+	set item cooldown of trident for {_p} to 18 seconds
+	if {_lastd} is not set:
+		set {_lastd} to tridentDest({_p}, {_cf})
+	tridentBlink({_p}, {_cf}, {_lastd})
+
+# 바닐라 삼지창 투척은 막는다(삼지창이 던져지지 않는다). 우리 삼지창을 든 플레이어의 투척만 취소.
+on shoot:
+	set {_sh} to shooter
+	if {_sh} is not a player:
+		stop
+	set {_pr} to projectile
+	if {_pr}.getType().name() is not "TRIDENT":
+		stop
+	cancel event
+
+on join:
+	delete {-tdcd::%player's uuid%}
+	delete {-tdstart::%player's uuid%}

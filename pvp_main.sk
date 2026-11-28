@@ -1,0 +1,399 @@
+# [main.sk] 스태미너 회복/표시(배고픔 바 ⚡, 경험치 바 자리는 locate bar), 상태이상 보스바 표시, 전투 중 처리, 경험치 차단
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 전체 데미지 배율은 skill_core.sk 의 dmgMul() 한 곳에서 조절(현재 0.8).
+# 철퇴 데미지 x0.3 은 의도된 기능(삭제 금지). 철퇴로 준 근접 데미지에만 적용(스킬/투사체 데미지는 제외).
+# 창 데미지는 최대 6(체력 기준, 스크립트 값 3). 손(메인/오프핸드)과 상관없이 창으로 준 근접 데미지에 적용. 판정은 skill_core.sk 의 weaponKind.
+# 도끼/곡괭이/괭이/삽: 기획서 수치(실 체력)를 hp() 로 바꿔 근접 데미지를 덮어쓰고 추가 효과를 준다. 기획서는 skill_core.sk 9번.
+# 위 세 무기는 바닐라 공격 쿨다운 규칙(덜 충전하고 때리면 약해짐)과 크리티컬(x1.5, 바닐라 판정)을 따른다: 매 틱 기록한 {-atkcd} 로 cooldownScale() 을 곱한다.
+# 이 파일이 쓰는 변수: {-st}, {-stcap}, {-oc} (접속 시 초기화), {-jump}, {-jumplock}, {-bowcool}, {-status}, {-statusname}, {-statusdur}, {-statustype}, {-statuslabel}, {-sbar}, {-skilldmg}, {-pickstack}, {-pickexp}, {-stunend}, {-ccshown}, {-atkcd} (접속 시 삭제)
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.boss.BarColor
+	org.bukkit.boss.BarStyle
+
+# 경험치 바 자리는 locate bar(위치 표시 바) 가 쓴다(클라이언트가 다른 플레이어가 있으면 경험치를 얻을 때만 경험치 바를 보이고 평소엔 locate bar 를 보임). 그래서 스태미너는 경험치 바에 쓰지 않고(배고픔 바 ⚡, stFoodSync) 경험치 바는 항상 0 으로 둔다.
+# 적이 바에 보이지 않게(추가 기획 4단계에서 팀원만 보이게 한다) 모든 플레이어의 위치 전송 범위(waypoint_transmit_range)를 0 으로 둔다. 바닐라 기본값은 6천만이라 모든 플레이어가 서로 보인다.
+function locatorHide(p: player):
+	execute console command "attribute %{_p}'s name% minecraft:waypoint_transmit_range base set 0"
+
+on join:
+	set {-st::%player's uuid%} to 100
+	set level progress of player to 0
+	locatorHide(player)
+
+on respawn:
+	locatorHide(player)
+
+on load:
+	loop all players:
+		locatorHide(loop-player)
+	set {-oc::%player's uuid%} to 0
+	set {-stcap::%player's uuid%} to 0
+	delete {-jump::%player's uuid%}
+	delete {-jumplock::%player's uuid%::*}
+	delete {-bowcool::%player's uuid%}
+	delete {-status::%player's uuid%::*}
+	delete {-statusname::%player's uuid%::*}
+	delete {-statusdur::%player's uuid%::*}
+	delete {-statustype::%player's uuid%::*}
+	delete {-statuslabel::%player's uuid%::*}
+	delete {-sbar::%player's uuid%::*}
+	delete {-skilldmg::%player's uuid%}
+	delete {-pickstack::%player's uuid%}
+	delete {-pickexp::%player's uuid%}
+	delete {-stunend::%player's uuid%}
+	delete {-ccshown::%player's uuid%}
+	delete {-atkcd::%player's uuid%}
+
+# 배고픔 바 = 스태미너 표시: 리소스팩(resourcepack/mck)이 배고픔 아이콘을 ⚡ 로 바꿔 놓았다. 음식 수치(0~20) = 스태미너(0~100) / 5.
+# 꿀벌 조종 중에는 꿀벌 스태미너({-beest})를 보인다. 진짜 배고픔 효과(굶주림 피해)는 아래 이벤트로 막는다.
+function stFoodSync(p: player):
+	set {_id} to "%uuid of {_p}%"
+	set {_v} to {-st::%{_id}%}
+	if {-beemode::%{_id}%} is "drive":
+		set {_v} to {-beest::%{_id}%}
+	if {_v} is not a number:
+		set {_v} to 100
+	set {_f} to round({_v} / 5)
+	if {_f} < 0:
+		set {_f} to 0
+	if {_f} > 20:
+		set {_f} to 20
+	if {_p}.getFoodLevel() is not {_f}:
+		{_p}.setFoodLevel({_f})
+	# 포화도는 항상 0(포화도 때문에 배고픔 바가 안 줄거나 회복이 빨라지는 것을 막는다)
+	if {_p}.getSaturation() > 0:
+		{_p}.setSaturation(0)
+
+on every 1 ticks:
+	loop all players:
+		# PVP 월드 사람만(pvp.sk)
+		if pvpIn(loop-player) is false:
+			continue
+		stFoodSync(loop-player)
+		# 공격 쿨다운 충전도(0~1)를 매 틱 기록. 때리는 순간엔 이미 0으로 초기화돼 있을 수 있어서 직전 틱 값을 쓴다.
+		set {_pl} to loop-player
+		set {_c} to {_pl}.getAttackCooldown()
+		set {-atkcd::%loop-player's uuid%} to {_c}
+		# 꿀벌 조종 중(bee.sk)에는 배고픔 바에 꿀벌 스태미너가 보이므로(stFoodSync) 본체 스태미너는 값만 회복한다.
+		set {_dr} to false
+		if {-beemode::%loop-player's uuid%} is "drive":
+			set {_dr} to true
+		if {-stcap::%loop-player's uuid%} <= 0:
+			if {-st::%loop-player's uuid%} < 100:
+				add 1 to {-st::%loop-player's uuid%}
+			if {-st::%loop-player's uuid%} > 100:
+				set {-st::%loop-player's uuid%} to 100
+# 상태이상(이로운/해로운 모두) 보스바 표시. 상태이상은 skill_core.sk 의 setStatus/clearStatus 로 등록한다.
+# 효과 하나당 보스바 하나(여러 효과가 걸리면 보스바가 여러 개 쌓임). 같은 이름이 여러 출처에서 걸려 있으면 남은 시간이 가장 긴 것 하나만 보여준다.
+# 모든 행동을 막는 cc(기절 등, type "cc")는 보스바 대신 화면 가운데 타이틀(효과 이름) + 서브타이틀(남은 시간 막대)로 표시한다.
+# 일부 행동만 막는 cc(구속 등)와 이로운 효과는 보스바. 해로운 효과는 빨강(막대 빨강), 이로운 효과는 초록(막대 초록). 남은 초는 표시하지 않고, 막대 길이(남은 시간 비율)로만 알린다.
+# 막대는 매 틱(1/20초) 갱신해 클라이언트가 부드럽게 줄어드는 것처럼 보이게 한다.
+# 보스바는 skript-reflect 로 Bukkit API(Bukkit.createBossBar) 를 호출한다(Skript 2.13 에는 보스바 문법이 없음, 미검증).
+on every 1 ticks:
+	set {_nowd} to now
+	set {_nowts} to {_nowd}.getTimestamp()
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		set {_uid} to "%loop-player's uuid%"
+		delete {_seen::*}
+		delete {_stype::*}
+		delete {_sdur::*}
+		delete {_slabel::*}
+		loop {-status::%{_uid}%::*}:
+			set {_src} to loop-index
+			set {_end} to {-status::%{_uid}%::%{_src}%}
+			if {_end} <= now:
+				clearStatus(loop-player, {_src})
+			else:
+				set {_n} to {-statusname::%{_uid}%::%{_src}%}
+				# 남은 시간(밀리초). 막대를 매 틱 부드럽게 줄이기 위해 초 단위가 아니라 밀리초로 계산한다.
+				set {_endts} to {_end}.getTimestamp()
+				set {_left} to {_endts} - {_nowts}
+				set {_replace} to false
+				if {_seen::%{_n}%} is not set:
+					set {_replace} to true
+				else if {_left} > {_seen::%{_n}%}:
+					set {_replace} to true
+				if {_replace} is true:
+					set {_seen::%{_n}%} to {_left}
+					set {_stype::%{_n}%} to {-statustype::%{_uid}%::%{_src}%}
+					set {_sdur::%{_n}%} to {-statusdur::%{_uid}%::%{_src}%}
+					set {_slabel::%{_n}%} to {-statuslabel::%{_uid}%::%{_src}%}
+		# 효과마다 보스바를 하나씩 만든다(같은 이름은 한 줄로 합침). 효과가 끝나면 그 보스바만 제거.
+		# 단 모든 행동을 막는 cc(type "cc", 예: 기절)는 보스바 대신 타이틀(이름) + 서브타이틀(진행도 막대)로 보여준다.
+		set {_hascc} to false
+		set {_ccbest} to 0
+		loop {_seen::*}:
+			set {_k} to loop-index
+			if {_stype::%{_k}%} is "cc":
+				if {_seen::%{_k}%} > {_ccbest}:
+					set {_ccbest} to {_seen::%{_k}%}
+					set {_ccn} to {_k}
+					set {_hascc} to true
+			else:
+				set {_b} to {-sbar::%{_uid}%::%{_k}%}
+				if {_b} is not set:
+					set {_b} to Bukkit.createBossBar("", BarColor.RED, BarStyle.SOLID)
+					{_b}.addPlayer(loop-player)
+					set {-sbar::%{_uid}%::%{_k}%} to {_b}
+				set {_c} to "&c"
+				set {_col} to BarColor.RED
+				if {_stype::%{_k}%} is "good":
+					set {_c} to "&a"
+					set {_col} to BarColor.GREEN
+				set {_prog} to 1
+				if {_sdur::%{_k}%} > 0:
+					set {_prog} to {_seen::%{_k}%} / {_sdur::%{_k}%}
+				if {_prog} > 1:
+					set {_prog} to 1
+				if {_prog} < 0:
+					set {_prog} to 0
+				set {_t} to colored "%{_c}%%{_k}%%{_slabel::%{_k}%}%"
+				{_b}.setTitle({_t})
+				{_b}.setColor({_col})
+				{_b}.setProgress({_prog})
+				{_b}.setVisible(true)
+		# 빈 문자열 비교는 변수가 비었을 때도 참이 되어 <none> 이 표시되던 버그가 있어, 찾았는지를 따로 기록한 플래그로 판단한다.
+		if {_hascc} is true:
+			set {_ccprog} to 1
+			if {_sdur::%{_ccn}%} > 0:
+				set {_ccprog} to {_ccbest} / {_sdur::%{_ccn}%}
+			if {_ccprog} > 1:
+				set {_ccprog} to 1
+			if {_ccprog} < 0:
+				set {_ccprog} to 0
+			set {_nf} to floor({_ccprog} * 10)
+			set {_ne} to 10 - {_nf}
+			# "x" repeated 0 times 는 값이 없어서 글자에 넣으면 <none> 으로 찍힌다. 0칸일 땐 빈 문자열을 그대로 쓴다.
+			set {_fill} to ""
+			set {_empty} to ""
+			if {_nf} > 0:
+				set {_fill} to "█" repeated {_nf} times
+			if {_ne} > 0:
+				set {_empty} to "█" repeated {_ne} times
+			set {_ttl} to colored "&c%{_ccn}%"
+			set {_sub} to colored "&c%{_fill}%&8%{_empty}%"
+			set {_pl} to loop-player
+			send title {_ttl} with subtitle {_sub} to {_pl} for 10 ticks with fadein 0 ticks and fade out 0 ticks
+			set {-ccshown::%{_uid}%} to true
+		# cc 가 끝나면 남아 있는 타이틀을 바로 지운다(Paper clearTitle).
+		else if {-ccshown::%{_uid}%} is set:
+			set {_pl2} to loop-player
+			{_pl2}.clearTitle()
+			delete {-ccshown::%{_uid}%}
+		# 끝난 효과의 보스바 제거
+		loop {-sbar::%{_uid}%::*}:
+			set {_k2} to loop-index
+			if {_seen::%{_k2}%} is not set:
+				set {_b2} to {-sbar::%{_uid}%::%{_k2}%}
+				{_b2}.removeAll()
+				delete {-sbar::%{_uid}%::%{_k2}%}
+
+on quit:
+	loop {-sbar::%player's uuid%::*}:
+		set {_k3} to loop-index
+		set {_b3} to {-sbar::%player's uuid%::%{_k3}%}
+		{_b3}.removeAll()
+	delete {-sbar::%player's uuid%::*}
+
+# 아군 오사 방지: 같은 팀({-team} 이 같은 isAlly) 플레이어끼리는 모든 피해(근접/화살/스킬 직접 피해)를 취소한다. 본인 피해(낙사, 자해 등)는 아군이 아니라 그대로.
+#   스킬별 아군 제외(tnt/blazerod/flintsteel/trident/bee)는 이미 있지만, 근접/활/석궁/직접 맞는 피해는 여기서 막는다. 팀이 없으면(로비 등) isAlly 가 false 라 영향 없다.
+#   priority lowest(가장 먼저 실행): killcine.sk(highest)가 아군 치명타를 킬 연출로 가로채기 전에 취소하려는 것.
+on damage with priority lowest:
+	if victim is not a player:
+		stop
+	if attacker is not set:
+		stop
+	if attacker is not a player:
+		stop
+	if attacker is victim:
+		stop
+	if isAlly("%uuid of attacker%", "%uuid of victim%") is true:
+		cancel event
+		stop
+
+on damage:
+	if pvpEnt(victim) is false:
+		stop
+	# 불사의 토템(totem.sk) 무적 중에는 모든 피해를 취소한다(전투 중 카운터도 올리지 않음)
+	if victim is player:
+		if {-totemend::%victim's uuid%} is set:
+			if {-totemend::%victim's uuid%} > now:
+				cancel event
+				stop
+	# 삽(shovel.sk) 잠복 중에도 모든 피해를 취소한다
+	if victim is player:
+		if {-burrow::%victim's uuid%} is set:
+			if {-burrow::%victim's uuid%} > now:
+				cancel event
+				stop
+	# 검(sword.sk): 검을 들고 있고 쿨타임이 끝났으면 피해를 한 번 막고 쿨타임(30초)에 들어간다
+	if victim is player:
+		if damage > 0:
+			if swordReady(victim) is true:
+				cancel event
+				swordBlock(victim)
+				stop
+	# 부싯돌과 부시(flintsteel.sk)로 불태워진 동안은 불 피해(FIRE/FIRE_TICK)를 취소한다(불태움은 데미지 없음)
+	if victim is player:
+		if {-noburn::%victim's uuid%} is set:
+			if {-noburn::%victim's uuid%} > now:
+				set {_evb} to event
+				set {_cz} to {_evb}.getCause().name()
+				if {_cz} is "FIRE_TICK" or "FIRE":
+					cancel event
+					stop
+	# 블레이즈 지팡이(blazerod.sk) 화염구가 직접 맞은 바닐라 피해는 취소한다(피해는 폭발 처리에서 한 번만 줌)
+	if projectile is set:
+		if {-fb::%uuid of projectile%} is set:
+			cancel event
+			stop
+	# 기절 중인 공격자는 데미지를 줄 수 없음
+	if attacker is set:
+		if isStunned(attacker) is true:
+			cancel event
+			stop
+	# 스킬 데미지({-skilldmg} 표시)와 투사체 데미지는 제외하고, 무기로 직접 때린 근접 데미지만 보정
+	if attacker is set:
+		if {-skilldmg::%attacker's uuid%} is not set:
+			if projectile is not set:
+				set {_w} to weaponKind(attacker)
+				# 힘 효과(네더의 별 등): 도끼/곡괭이/괭이는 데미지를 고정값으로 덮어써서 바닐라 힘 보너스가 사라지므로 직접 더한다(실 체력 +3, 바닐라 힘 I 과 같은 값).
+				set {_sb} to 0
+				set {_la} to attacker
+				if {_la} has potion effect strength:
+					set {_sb} to hp(3)
+				# 공격 쿨다운 배율 + 크리티컬(바닐라 판정, 1.5배). 덮어쓰는 무기(도끼/곡괭이/괭이)에만 쓴다.
+				set {_cm} to cooldownScale(attacker)
+				set {_ev} to event
+				set {_crit} to {_ev}.isCritical()
+				if {_crit} is true:
+					set {_cm} to {_cm} * 1.5
+				if {_w} is "mace":
+					# 힘 보너스는 배율이 끝난 뒤에 더한다: 바닐라 데미지에서 힘 보너스를 빼고 x0.3(전체 배율 dmgMul 은 곱하지 않음, 실제 배율 0.3)을 곱한 다음 +힘(쿨타임 약화 시 바닐라 힘 보너스도 줄어 있어 근사값)
+					set {_mb} to damage - {_sb}
+					if {_mb} < 0:
+						set {_mb} to 0
+					set damage to {_mb} * 0.3 + {_sb} + hp(1)
+				else if {_w} is "spear":
+					# 바닐라 데미지에 전체 배율 적용 후, 상한은 실 체력 5(스크립트 값 2.5)
+					set damage to damage * dmgMul() + hp(1)
+					# 힘 효과 중에는 상한도 힘 보너스만큼 늘어난다(밸런스: 모든 무기 +1, 상한 5 -> 6)
+					set {_cap} to hp(6) + {_sb}
+					if damage > {_cap}:
+						set damage to {_cap}
+				else if {_w} is "axe":
+					# 도끼: 기본 체력 6, 체력 80% 이상인 적에게 1.5배
+					set {_d} to hp(6)
+					if healthRatio(victim) >= 0.8:
+						set {_d} to {_d} * 1.5
+						# 도끼 능력 발동: 타격 지점(피격자 위치)에 모루 소리
+						set {_loc} to location of victim
+						soundAround("block.anvil.place", {_loc}, 1, 1)
+						# 강타 이펙트: 피격자 몸통 높이에 크리티컬 파티클 + 폭발 파티클
+						set {_fx} to location of victim
+						add 1 to y-coordinate of {_fx}
+						play 20 crit with offset of 0.3, 0.3, 0.3 and speed 0.3 at {_fx} in radius of 100
+						play 1 large explosion with offset of 0, 0, 0 and speed 0 at {_fx} in radius of 100
+					set {_d} to {_d} + {_sb}
+					set damage to {_d} * {_cm}
+				else if {_w} is "hoe":
+					# 괭이: 기본 체력 3, 체력 50% 이하인 적에게 100% 증가(2배)
+					set {_d} to hp(3)
+					if healthRatio(victim) <= 0.5:
+						set {_d} to {_d} * 2
+					set {_d} to {_d} + {_sb}
+					set damage to {_d} * {_cm}
+				else if {_w} is "shovel":
+					# 삽(shovel.sk): 근접 기본 체력 3(고정). 쿨다운/크리티컬 규칙은 괭이와 같다.
+					set {_d} to hp(3) + {_sb}
+					set damage to {_d} * {_cm}
+				else if {_w} is "trident":
+					# 삼지창(trident.sk): 근접 기본 체력 7(고정)
+					set {_d} to hp(7) + {_sb}
+					set damage to {_d} * {_cm}
+				else if {_w} is "sword":
+					# 검: 효과 없음, 기본 체력 6(고정). 휩쓸기(범위) 피해는 덮어쓰지 않고 바닐라 값에 전체 배율만 적용한다.
+					set {_cause} to {_ev}.getCause().name()
+					if {_cause} is "ENTITY_SWEEP_ATTACK":
+						set damage to damage * dmgMul()
+					else:
+						set {_d} to hp(6) + {_sb}
+						set damage to {_d} * {_cm}
+				else if {_w} is "pickaxe":
+					# 곡괭이: 기본 체력 3 + 중첩 수 x 2. 타격마다 중첩 +1, 마지막 타격 후 3초 안에 못 때리면 전부 소멸.
+					# 이번 타격은 기존 중첩만 적용하고, 타격 후 중첩을 늘린다.
+					set {_stack} to 0
+					if {-pickexp::%attacker's uuid%} is set:
+						if {-pickexp::%attacker's uuid%} > now:
+							set {_stack} to {-pickstack::%attacker's uuid%}
+					set {_pd} to hp(3 + 2 * {_stack}) + {_sb}
+					set damage to {_pd} * {_cm}
+					set {-pickstack::%attacker's uuid%} to {_stack} + 1
+					set {-pickexp::%attacker's uuid%} to now + 3 seconds
+					# 보스바에 곡괭이 중첩(이로운 효과) 표시. 중첩 수가 바뀌어도 같은 출처 키라 한 줄로 갱신된다.
+					set {_ap} to attacker
+					if {_ap} is a player:
+						set {_ns} to {_stack} + 1
+						setStatus({_ap}, "pickaxe", "채굴", 3 seconds, "good", " x%{_ns}%")
+				else:
+					# 그 외 근접(검, 맨손, 삼지창, 몹 등): 전체 데미지 배율만 적용
+					set damage to damage * dmgMul()
+	# 모루(anvil.sk) 버프: 내가 가하는 모든 피해 +10% x 중첩(합연산)(근접/투사체/스킬 공통, 위 무기 보정이 끝난 뒤 마지막에 곱함)
+	if attacker is set:
+		if {-anvil::%attacker's uuid%} is a number:
+			set damage to damage * (1 + 0.1 * {-anvil::%attacker's uuid%})
+	# 취약(flintsteel.sk): 받는 피해 1.2배(적군에게만 걸림)
+	if victim is player:
+		if {-vuln::%victim's uuid%} is set:
+			if {-vuln::%victim's uuid%} > now:
+				set damage to damage * 1.2
+	if attacker is player:
+		add 8 to {-oc::%attacker's uuid%}
+		loop 8 times:
+			wait 1 seconds
+			remove 1 from {-oc::%attacker's uuid%}
+
+
+on damage:
+	if pvpEnt(victim) is false:
+		stop
+	if victim is player:
+		add 8 to {-oc::%victim's uuid%}
+		loop 8 times:
+			wait 1 seconds
+			remove 1 from {-oc::%victim's uuid%}
+		loop 10 times:
+			if {-oc::%victim's uuid%} = 0:
+				heal victim by 1.5
+				wait 0.75 seconds
+
+on heal:
+	if pvpIn(player) is false:
+		stop
+	# 불길한 병의 회복({-healok})과 네더의 별 효과 중의 재생은 전투 중 회복 차단을 통과한다.
+	if {-healok::%player's uuid%} is set:
+		stop
+	if {-status::%player's uuid%::netherstar} is set:
+		if {-status::%player's uuid%::netherstar} > now:
+			stop
+	if {-oc::%player's uuid%} > 0:
+		cancel event
+			
+# 배고픔은 스태미너 표시용이라 바닐라 증감(운동, 먹기)은 모두 막고 stFoodSync 가 매 틱 맞춘다. 음식 수치 0 에서의 굶주림 피해도 막는다.
+on hunger meter change:
+	if pvpIn(player) is false:
+		stop
+	cancel event
+
+on damage of player:
+	if pvpEnt(victim) is false:
+		stop
+	if damage cause is starvation:
+		cancel event
+
+on experience spawn:
+	cancel event

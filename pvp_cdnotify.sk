@@ -1,0 +1,110 @@
+# [cdnotify.sk] 쿨타임 8초 이상 스킬: 쿨타임이 끝나면 액션바에 "<스킬> 사용 가능"을 띄운다(소리 없음).
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수(RAM): {-cdn::uuid::이름}(그 스킬이 쿨타임 중인 걸 마지막으로 확인했음)
+# 방식: 4틱마다 게임 중인 플레이어(관전 제외)의 쿨타임 상태를 보고, "쿨타임 중 -> 아님"으로 바뀌면 알린다.
+#   - 아이템 쿨타임(set item cooldown)을 쓰는 스킬: 모루 90, 낚싯대 9, 부싯돌 20, 네더의 별 45, 불길한 병 30, 검 30, TNT 12, 불사의 토템 60, 삼지창 18, 연막탄 30 (모두 8초 이상)
+#   - 변수로 쿨타임을 재는 스킬: 포션 3종(체력 12, 스태미너 12, 투명 18: {-potcd}), 꿀벌 75({-beecd})
+#   - 쿨타임이 있어도 그 아이템을 인벤토리에 가지고 있지 않으면 알리지 않는다(소모/버림). 쿨타임 8초 미만 스킬(활/석궁/블레이즈 지팡이 등)은 알리지 않는다.
+#   - 스킬 쿨타임 초기화(skill_core.sk skillCdReset)로 풀린 것은 알리지 않는다({-cdn} 를 같이 지움).
+#   새 스킬이 8초 이상 쿨타임이면 cdScan 에 한 줄 추가할 것.
+# 미검증: "player has <item> on cooldown" 조건이 이 서버에서 모든 아이템에 맞게 도는지, 인벤토리 아이템 조건, 액션바가 다른 액션바(스태미너 표시 등)와 겹칠 때.
+
+# 한 아이템 스킬: t 아이템이 쿨타임이면 기록하고, 쿨타임이 끝났으면 인벤토리에 있을 때 알린다
+function cdItem(p: player, t: itemtype, label: text):
+	set {_k} to "%{_p}'s uuid%::%{_label}%"
+	if {_p} has {_t} on cooldown:
+		set {-cdn::%{_k}%} to true
+		stop
+	if {-cdn::%{_k}%} is not set:
+		stop
+	delete {-cdn::%{_k}%}
+	if {_p} has {_t}:
+		cdDone({_p}, {_label})
+
+# 변수로 재는 스킬(포션 등): on 이 true 면 쿨타임 중. 끝났으면 owned(가지고 있음)일 때 알린다
+function cdVar(p: player, label: text, on: boolean, owned: boolean):
+	set {_k} to "%{_p}'s uuid%::%{_label}%"
+	if {_on} is true:
+		set {-cdn::%{_k}%} to true
+		stop
+	if {-cdn::%{_k}%} is not set:
+		stop
+	delete {-cdn::%{_k}%}
+	if {_owned} is true:
+		cdDone({_p}, {_label})
+
+function cdDone(p: player, label: text):
+	send action bar colored "&a%{_label}% &f사용 가능" to {_p}
+
+# 인벤토리(핫바/가방/오프핸드)에 그 종류 포션이 있는지(kind: heal/stamina/invis, 기본 포션 종류 이름으로 판단, skill_core.sk potionKind 와 같은 기준)
+function cdHasPotion(p: player, kind: text) :: boolean:
+	set {_want} to "HEALING"
+	if {_kind} is "stamina":
+		set {_want} to "LEAPING"
+	if {_kind} is "invis":
+		set {_want} to "INVISIBILITY"
+	set {_i} to 0
+	while {_i} <= 40:
+		set {_it} to {_p}.getInventory().getItem({_i})
+		if {_it} is set:
+			if {_it}.getType().name() is "POTION":
+				set {_bt} to {_it}.getItemMeta().getBasePotionType()
+				if {_bt} is set:
+					if {_bt}.name() contains {_want}:
+						return true
+		add 1 to {_i}
+	return false
+
+function cdPotion(p: player, kind: text, label: text):
+	set {_on} to false
+	if {-potcd::%{_p}'s uuid%::%{_kind}%} is set:
+		if {-potcd::%{_p}'s uuid%::%{_kind}%} > now:
+			set {_on} to true
+	set {_own} to false
+	if {_on} is false:
+		if {-cdn::%{_p}'s uuid%::%{_label}%} is set:
+			set {_own} to cdHasPotion({_p}, {_kind})
+	cdVar({_p}, {_label}, {_on}, {_own})
+
+function cdScan(p: player):
+	cdItem({_p}, anvil, "모루")
+	cdItem({_p}, fishing rod, "낚싯대")
+	# 'flint and steel' 은 함수 인자에 쓰면 and 로 갈려서 '둘'로 읽힌다(flintsteel.sk 주석) -> 변수로 넘긴다
+	set {_fs} to flint and steel
+	cdItem({_p}, {_fs}, "부싯돌과 부시")
+	cdItem({_p}, nether star, "네더의 별")
+	cdItem({_p}, ominous bottle, "불길한 병")
+	cdItem({_p}, water bucket, "첨벙첨벙")
+	cdItem({_p}, milk bucket, "우유")
+	cdItem({_p}, recovery compass, "레이더")
+	cdItem({_p}, netherite shovel, "삽")
+	cdItem({_p}, netherite sword, "검")
+	cdItem({_p}, tnt, "TNT")
+	cdItem({_p}, totem of undying, "불사의 토템")
+	cdItem({_p}, trident, "삼지창")
+	cdItem({_p}, wind charge, "연막탄")
+	cdPotion({_p}, "heal", "체력 포션")
+	cdPotion({_p}, "stamina", "스태미너 포션")
+	cdPotion({_p}, "invis", "투명 포션")
+	set {_bon} to false
+	if {-beecd::%{_p}'s uuid%} is set:
+		if {-beecd::%{_p}'s uuid%} > now:
+			set {_bon} to true
+	set {_bown} to false
+	if {_bon} is false:
+		if {-cdn::%{_p}'s uuid%::꿀벌} is set:
+			if {_p} has bee spawn egg:
+				set {_bown} to true
+	cdVar({_p}, "꿀벌", {_bon}, {_bown})
+
+every 4 ticks:
+	loop all players:
+		# PVP 월드 사람만(마피아 서버에는 MCK 게임 진행이 없어 {-ingame} 대신)
+		if pvpIn(loop-player) is false:
+			delete {-cdn::%loop-player's uuid%::*}
+			continue
+		if gamemode of loop-player is not spectator:
+			cdScan(loop-player)
+
+on quit:
+	delete {-cdn::%player's uuid%::*}

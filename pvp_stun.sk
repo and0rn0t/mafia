@@ -1,0 +1,27 @@
+# [stun.sk] 기절 상태 동안 플레이어의 행동 차단. 기절 걸기/확인은 skill_core.sk 의 stun(), isStunned().
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 읽는 변수: {-stunend}
+# 이동/점프는 stun() 이 느림/점프 불가 포션으로 막고, 도약(jump.sk), 스킬(skillHand), 낚싯대(fishing.sk), 근접 공격(main.sk)은 각 파일에서 isStunned 로 막는다.
+# 여기서는 나머지 입력(클릭, 블럭 부수기/설치, 아이템 버리기)을 막는다.
+
+on click:
+	if isStunned(player) is true:
+		# 우유(milk.sk)는 기절 중에도 쓸 수 있다: 이 클릭의 아이템이 우유면 취소하지 않는다(우유 스킬이 직접 이벤트를 취소한다)
+		set {_it} to event.getItem()
+		if {_it} is set:
+			if {_it} is milk bucket:
+				if isBurrowed(player) is false:
+					stop
+		cancel event
+
+on break:
+	if isStunned(player) is true:
+		cancel event
+
+on place:
+	if isStunned(player) is true:
+		cancel event
+
+on drop:
+	if isStunned(player) is true:
+		cancel event

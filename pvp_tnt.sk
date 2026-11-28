@@ -1,0 +1,152 @@
+# [tnt.sk] TNT 스킬(우클릭 투척, 33틱(약 1.65초) 뒤 폭발, 블럭 피해 없음, 폭발 범위 안의 적(던진 사람과 아군 제외)에게 피해 2(하트 1칸)와 플레이어는 2초 기절). 쿨타임 12초
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-tntcd}, {-tntowner}, {-tntownerp}(던진 플레이어), {-skilldmg}(피해를 주는 동안만), {-skillitems::tnt} (기절은 skill_core.sk 의 stun() 함수와 {-stunend} 가 처리)
+# 바닐라 폭발 피해는 on damage 에서 "skilltnt" 태그로 막는다(아래).
+# 던진 TNT 는 진짜 점화된 TNT 엔티티(퓨즈 33틱 = 약 1.65초)라서 폭발의 근원이 TNT 이고, 폭발하면 바닐라가 TNT 를 제거한다.
+# 폭발 이벤트(on explosion)를 취소해서 바닐라 데미지/블럭 피해/넉백을 없애고, 같은 자리에서 소리/파티클, 고정 피해 2(hp(2)), 기절을 직접 처리한다.
+# 폭발 범위(반경)는 아래 tntRadius() 의 값 하나만 바꾸면 기절 범위와 폭발 이펙트가 같이 바뀐다. 날아가는 거리는 rightclick 의 speed 값(현재 1.5).
+# 경고음: 던지고 13틱 뒤부터 4틱 간격으로 TNT 위치에서 pling 소리가 5번(13, 17, 21, 25, 29틱) 나고 33틱에 터진다. 그 전에 TNT 가 사라지면 소리를 멈춘다.
+# 던지는 순간에는 entity.tnt.primed 소리가 난다. 퓨즈를 바꾸면(setFuseTicks 값) 경고음 타이밍(wait 값)도 같이 맞출 것.
+# 폭발 이펙트: 폭발 범위 안쪽을 large explosion 으로 2칸 간격으로 채운다(범위 끝에서 파티클 크기만큼 닿도록 반경-1 까지만 배치).
+
+using damage sources
+
+on load:
+	set {-skillitems::tnt} to tnt
+
+# 폭발 범위(반경, 칸). 기절/폭발 이펙트가 이 값을 쓴다.
+function tntRadius() :: number:
+	return 4
+
+# owner: 던진 사람 uuid(텍스트), ownerp: 던진 사람(플레이어, 피해 출처용. 접속 종료면 출처 없이 피해만 준다).
+# 던진 본인과 아군(skill_core.sk 의 isAlly: {-team} 변수가 같은 다른 대상)은 피해/기절을 받지 않는다. 팀이 없으면 아군은 없다(본인은 항상 제외).
+function tntBlast(owner: text, ownerp: player, loc: location):
+	set {_r} to tntRadius()
+	soundAround("entity.generic.explode", {_loc}, 1, 1.2)
+	play 1 explosion emitter at {_loc} in radius of 100
+	# 폭발 범위 안쪽을 2칸 간격 격자로 large explosion 을 깔아서 이펙트 크기를 범위에 맞춘다.
+	set {_n} to ceil({_r} / 2)
+	set {_m} to {_n} * 2 + 1
+	loop {_m} * {_m} * {_m} times:
+		set {_k} to loop-number - 1
+		set {_x} to (mod({_k}, {_m}) - {_n}) * 2
+		set {_y} to (mod(floor({_k} / {_m}), {_m}) - {_n}) * 2
+		set {_z} to (floor({_k} / ({_m} * {_m})) - {_n}) * 2
+		if ({_x} * {_x} + {_y} * {_y} + {_z} * {_z}) <= (({_r} - 1) * ({_r} - 1)):
+			set {_p} to {_loc} ~ vector({_x}, {_y}, {_z})
+			play 1 large explosion at {_p} in radius of 100
+	# 범위 안의 생명체(던진 사람/아군/갑옷 거치대 제외)에게 고정 피해 실 체력 2. 플레이어는 이어서 기절.
+	# 피해 출처를 던진 사람으로 지정해서(낚싯대 hookDamage 와 같은 방식) 킬로그/킬 판정이 던진 사람의 킬로 잡히게 한다.
+	# 기절은 피해를 다 준 뒤에 건다(던진 사람이 먼저 기절하면 main.sk 의 "기절한 공격자는 데미지 불가"에 나머지 피해가 막히기 때문. 지금은 본인이 기절하지 않지만 순서는 그대로 둔다).
+	delete {_stunl::*}
+	set {_hasp} to false
+	if {_ownerp} is online:
+		set {_hasp} to true
+	if {_hasp} is true:
+		set {_src} to a custom damage source:
+			set the damage type to player explosion
+			set the causing entity to {_ownerp}
+			set the direct entity to {_ownerp}
+		# main.sk 의 무기 보정(철퇴, 창, 도끼 등)에서 제외하려고 스킬 데미지 표시를 켠다.
+		set {-skilldmg::%{_owner}%} to true
+	loop all living entities in radius {_r} around {_loc}:
+		set {_e} to loop-entity
+		if {_e} is not an armor stand:
+			# 아군(같은 팀 변수 {-team}, 본인 제외)은 피해/기절을 받지 않는다.
+			set {_vid} to "%uuid of {_e}%"
+			set {_hit} to true
+			if {_vid} is {_owner}:
+				set {_hit} to false
+			if isAlly({_owner}, {_vid}) is true:
+				set {_hit} to false
+			# 첨벙첨벙(splash.sk) 중인 플레이어는 폭발 피해/기절을 흡수한다
+			if {_e} is a player:
+				if splashActive({_e}) is true:
+					if {_hit} is true:
+						splashBlock({_e}, {_e}.getLocation())
+					set {_hit} to false
+			if {_hit} is true:
+				if {_hasp} is true:
+					damage {_e} by hp(2) hearts using {_src}
+				else:
+					damage {_e} by hp(2) hearts
+				if {_e} is a player:
+					add {_e} to {_stunl::*}
+	delete {-skilldmg::%{_owner}%}
+	loop {_stunl::*}:
+		stun(loop-value, "tnt_%{_owner}%", 3 seconds)
+
+on rightclick:
+	if skillHand(player, tnt) is false:
+		stop
+	cancel event
+	if {-tntcd::%player's uuid%} is set:
+		if {-tntcd::%player's uuid%} > now:
+			stop
+	set {-tntcd::%player's uuid%} to now + 12 seconds
+	set item cooldown of tnt for player to 12 seconds
+	set {_p} to player
+	# shoot 뒤의 last spawned entity 가 TNT 가 아니라 다른 엔티티(텍스트 디스플레이)를 가리켜서 spawn 섹션의 event-entity 로 직접 잡는다.
+	set {_eye} to {_p}.getEyeLocation()
+	set {_dir} to {_eye}.getDirection()
+	set {_vel} to {_dir} * 1.5
+	spawn primed tnt at {_eye}:
+		set {_t} to event-entity
+		set velocity of event-entity to {_vel}
+		# 던진 사람을 기록해 두고 on explosion 에서 읽는다. 퓨즈 33틱 뒤 바닐라가 직접 폭발시킴(setFuseTicks 값).
+		set {-tntowner::%uuid of event-entity%} to "%uuid of {_p}%"
+		set {-tntownerp::%uuid of event-entity%} to {_p}
+		{_t}.setFuseTicks(33)
+		# 바닐라 폭발 피해를 걸러내는 표시(아래 on damage). 변수는 폭발 때 지워지지만 태그는 엔티티에 남아 순서와 상관없이 읽힌다.
+		add "skilltnt" to scoreboard tags of {_t}
+	soundAround("entity.tnt.primed", location of {_p}, 1, 1)
+	wait 13 ticks
+	if {_t} is not alive:
+		stop
+	set {_l} to location of {_t}
+	soundAround("block.note_block.pling", {_l}, 2, 1.5)
+	wait 4 ticks
+	if {_t} is not alive:
+		stop
+	set {_l} to location of {_t}
+	soundAround("block.note_block.pling", {_l}, 2, 1.5)
+	wait 4 ticks
+	if {_t} is not alive:
+		stop
+	set {_l} to location of {_t}
+	soundAround("block.note_block.pling", {_l}, 2, 1.5)
+	wait 4 ticks
+	if {_t} is not alive:
+		stop
+	set {_l} to location of {_t}
+	soundAround("block.note_block.pling", {_l}, 2, 1.5)
+	wait 4 ticks
+	if {_t} is not alive:
+		stop
+	set {_l} to location of {_t}
+	soundAround("block.note_block.pling", {_l}, 2, 1.5)
+
+# 던진 TNT 가 바닐라 폭발로 주는 피해는 전부 막는다(피아 구분 없이 바닐라 피해로 들어오던 문제).
+# 폭발 이벤트(on explosion)를 취소해도 엔티티 피해는 따로 들어올 수 있어서, 피해 이벤트에서 직접 출처가 우리 TNT 인 것을 취소한다.
+# 실제 피해는 tntBlast 가 적(던진 본인/아군 제외)에게만 고정 hp(2)로 준다. 그 피해의 직접 출처는 던진 플레이어라서 여기에 걸리지 않는다.
+# 미검증: getDamageSource().getDirectEntity() (Paper DamageSource, skript-reflect)
+on damage with priority lowest:
+	set {_de} to event.getDamageSource().getDirectEntity()
+	if {_de} is set:
+		if {_de} is a primed tnt:
+			if {_de} has scoreboard tag "skilltnt":
+				cancel event
+
+# 우리가 던진 TNT 만 처리(다른 TNT 는 건드리지 않음). 이벤트를 취소하면 데미지/블럭 피해/넉백이 없다.
+on explosion:
+	set {_e} to event-entity
+	if {_e} is a primed tnt:
+		set {_eid} to uuid of {_e}
+		if {-tntowner::%{_eid}%} is set:
+			cancel event
+			set {_owner} to {-tntowner::%{_eid}%}
+			set {_ownerp} to {-tntownerp::%{_eid}%}
+			delete {-tntowner::%{_eid}%}
+			delete {-tntownerp::%{_eid}%}
+			set {_loc} to location of {_e}
+			tntBlast({_owner}, {_ownerp}, {_loc})

@@ -1,0 +1,186 @@
+# [windburst.sk] 연막탄(돌풍구 아이템) 스킬(우클릭 투척, 쿨 30초): 맞은 자리에 10초간 지속되는 연막(반경 11칸)이 생기고, 지속이 끝나면 2초에 걸쳐 서서히 사라진다.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-wbcd}(쿨타임 종료 시각), {-wbball::눈덩이uuid}(우리가 던진 연막탄 표시), {-skillitems::wind_charge}
+# 던지기: 돌풍구 모양 아이템을 단 눈덩이를 던진다(진짜 돌풍구를 쓰면 넉백/폭발이 생겨서 안 씀). 어디든 맞으면(땅/벽/엔티티) 그 자리에 연막을 만든다.
+# 연막은 시야를 가리는 파티클 연출뿐이다(실명 효과는 없음, 사용자 요청으로 삭제).
+# 파티클: 흰색 구름(CLOUD)만 쓴다. 모양은 반구(위쪽 절반만): 반지름 11.5칸 안, 중심 높이 이상인 3칸 간격 격자점을 만들어 점마다 가우시안으로 뿌린다(smokeLattice).
+#   블럭에 막히면 번지지 않는다: 연막이 생길 때 한 번, 중심에서 각 격자점으로 광선(rayTraceBlocks)을 쏴서 블럭에 막힌 점(벽 뒤/다른 층)과 바로 위에 천장이 있는 점을 뺀다(smokePoints). 파티클은 퍼짐을 작게(가로 1.2, 세로 0.5) 줄여 새는 양을 최소화.
+#   플레이어 눈 주변 구름(smokeAround)도 눈이 중심보다 1칸 넘게 아래거나 중심과 눈 사이에 블럭이 있으면 뿌리지 않는다.
+#   2틱마다 뿌리고, 지속이 끝나면 마지막 2초 동안 양을 줄여 서서히 사라진다. 양은 smokeDensity() 로 조절한다.
+#   force=true 로 뿌려서 먼 거리에서도 보인다(World#spawnParticle 의 force 인자). 플레이어 눈 주변에는 따로 더 뿌려서 화면이 확실히 가려지게 한다.
+# 미검증: World#rayTraceBlocks(from, dir, dist) 호출과 null 결과 is set 판정, event.getHitBlockFace(), 눈덩이 setItem(Material.WIND_CHARGE), "wind charge" 별칭, 파티클 CLOUD 호출(null 데이터 + force 인자 9개짜리 spawnParticle).
+
+import:
+	org.bukkit.Particle
+	org.bukkit.Material
+	org.bukkit.inventory.ItemStack
+
+on load:
+	set {-skillitems::wind_charge} to wind charge
+	# 반경을 바꾼 뒤 리로드하면 격자를 다시 만든다
+	delete {-smokelat::*}
+
+# 수직 범위 배율(가로 반지름 대비). 0.7 이면 위아래 높이가 가로의 70%라 납작한 구(타원체)가 된다.
+function smokeYScale() :: number:
+	return 0.7
+
+function smokeRadius() :: number:
+	return 11
+
+# 지속 시간(틱). 10초 = 200틱. 끝난 뒤 smokeFadeTicks 동안 서서히 사라진다.
+function smokeTicks() :: number:
+	return 200
+
+function smokeFadeTicks() :: number:
+	return 40
+
+# 격자 한 점당 한 번(2틱)에 뿌리는 구름 개수의 기준. 느리면 줄이고, 덜 덮이면 늘린다.
+function smokeDensity() :: number:
+	return 8
+
+# 반구 배치용 격자 점(중심 기준 벡터)을 한 번만 만들어 {-smokelat::*} 에 둔다. 간격 3칸, 반지름 11.5칸 안의 점 중 y >= 0(위쪽 절반)만 쓴다.
+# 위아래(y)는 smokeYScale() 배율(0.7)로 눌러서 점 위치를 줄인다. 점마다 작은 가우시안(가로 1.2, 세로 0.5)으로 구름을 뿌린다.
+function smokeLattice():
+	if {-smokelat::*} is set:
+		stop
+	set {_ix} to 0
+	while {_ix} < 9:
+		set {_iy} to 0
+		while {_iy} < 5:
+			set {_iz} to 0
+			while {_iz} < 9:
+				set {_x} to {_ix} - 4
+				set {_x} to {_x} * 3
+				set {_y} to {_iy} * 3
+				set {_z} to {_iz} - 4
+				set {_z} to {_z} * 3
+				if ({_x} * {_x} + {_y} * {_y} + {_z} * {_z}) <= 132:
+					set {_yy} to {_y} * smokeYScale()
+					add vector({_x}, {_yy}, {_z}) to {-smokelat::*}
+				add 1 to {_iz}
+			add 1 to {_iy}
+		add 1 to {_ix}
+
+# 막힘 검사: from 에서 to 방향으로 maxd 칸 안에 블럭이 있으면 true (World#rayTraceBlocks, 미검증)
+function smokeBlocked(from: location, to: location, extra: number) :: boolean:
+	set {_w} to {_from}.getWorld()
+	set {_dx} to {_to}.getX() - {_from}.getX()
+	set {_dy} to {_to}.getY() - {_from}.getY()
+	set {_dz} to {_to}.getZ() - {_from}.getZ()
+	set {_len} to sqrt({_dx} * {_dx} + {_dy} * {_dy} + {_dz} * {_dz})
+	if {_len} < 0.01:
+		return false
+	set {_dir} to vector({_dx} / {_len}, {_dy} / {_len}, {_dz} / {_len})
+	set {_d} to {_len} + {_extra}
+	set {_hit} to {_w}.rayTraceBlocks({_from}, {_dir}, {_d})
+	if {_hit} is set:
+		return true
+	return false
+
+# 연막이 생길 때 한 번 계산: 중심에서 각 격자점으로 직선을 쏴서 블럭에 막힌 점(벽 뒤, 천장/바닥 너머)과 점 바로 위 1.2칸 안에 천장이 있는 점을 뺀다.
+# 막히지 않은 점의 위치만 {_out::*} 로 돌려준다. 벽 근처(1.2칸 이내)도 번지지 않게 뺀다.
+function smokePoints(center: location) :: locations:
+	smokeLattice()
+	set {_up} to {_center} ~ vector(0, 1.2, 0)
+	loop {-smokelat::*}:
+		set {_l} to {_center} ~ loop-value
+		set {_bad} to smokeBlocked({_center}, {_l}, 1.2)
+		if {_bad} is false:
+			set {_top} to {_l} ~ vector(0, 1.2, 0)
+			set {_bad} to smokeBlocked({_l}, {_top}, 0)
+		if {_bad} is false:
+			add {_l} to {_out::*}
+	return {_out::*}
+
+# 연막 파티클 한 번 뿌리기. pts = smokePoints 결과. f = 0~1 (페이드 아웃 배율)
+# 마지막 인자 true(force)로 먼 거리(최대 512칸)에서도 보이게 한다. 기본값(false)은 근처 32칸 안에서만 보인다.
+function smokeStep(pts: locations, f: number):
+	set {_n} to floor(smokeDensity() * {_f})
+	if {_n} < 1:
+		stop
+	loop {_pts::*}:
+		set {_l} to loop-value
+		set {_w} to {_l}.getWorld()
+		{_w}.spawnParticle(Particle.CLOUD, {_l}, {_n}, 1.2, 0.5, 1.2, 0, null, true)
+
+# 연막 안 플레이어 눈 주변(1.3칸)에 구름을 촘촘히 뿌려 화면을 가린다.
+# 눈이 중심보다 1칸 넘게 아래거나, 중심과 눈 사이에 블럭이 있으면(다른 층) 뿌리지 않는다.
+function smokeAround(p: player, f: number, center: location):
+	set {_eye} to {_p}.getEyeLocation()
+	if {_eye}.getY() < {_center}.getY() - 1:
+		stop
+	set {_blocked} to smokeBlocked({_center}, {_eye}, 0)
+	if {_blocked} is true:
+		stop
+	set {_c} to floor(40 * {_f})
+	if {_c} < 1:
+		stop
+	{_eye}.getWorld().spawnParticle(Particle.CLOUD, {_eye}, {_c}, 1.3, 1.3, 1.3, 0, null, true)
+
+function smokeCloud(center: location):
+	set {_r} to smokeRadius()
+	set {_pts::*} to smokePoints({_center})
+	# 점이 하나도 안 남으면(중심이 블럭 틈이나 구석에 끼어 광선이 전부 막힘) 연막이 통째로 사라져 보인다. 1칸 위에서 다시 계산하고, 그래도 없으면 막힘 검사 없이 격자 전체를 쓴다.
+	if size of {_pts::*} < 1:
+		set {_center} to {_center} ~ vector(0, 1, 0)
+		set {_pts::*} to smokePoints({_center})
+	if size of {_pts::*} < 1:
+		loop {-smokelat::*}:
+			add {_center} ~ loop-value to {_pts::*}
+	set {_hold} to smokeTicks() / 2
+	set {_fade} to smokeFadeTicks() / 2
+	set {_total} to {_hold} + {_fade}
+	set {_i} to 0
+	while {_i} < {_total}:
+		# 유지 구간은 100%, 마지막 fade 구간은 1에서 0 으로 줄어든다
+		set {_f} to 1
+		if {_i} >= {_hold}:
+			set {_f} to ({_total} - {_i}) / {_fade}
+		smokeStep({_pts::*}, {_f})
+		loop all players in radius {_r} around {_center}:
+			smokeAround(loop-player, {_f}, {_center})
+		wait 2 ticks
+		add 1 to {_i}
+
+on rightclick:
+	if skillHand(player, wind charge) is false:
+		stop
+	cancel event
+	set {_id} to "%player's uuid%"
+	if {-wbcd::%{_id}%} is set:
+		if {-wbcd::%{_id}%} > now:
+			stop
+	set {-wbcd::%{_id}%} to now + 30 seconds
+	set item cooldown of wind charge for player to 30 seconds
+	set {_p} to player
+	set {_eye} to {_p}.getEyeLocation()
+	set {_dir} to {_eye}.getDirection()
+	set {_vel} to {_dir} * 1.4
+	spawn a snowball at {_eye}:
+		set {_b} to event-entity
+		{_b}.setShooter({_p})
+		{_b}.setItem(new ItemStack(Material.WIND_CHARGE))
+		set velocity of event-entity to {_vel}
+		set {-wbball::%uuid of event-entity%} to true
+	soundAround("entity.wind_charge.throw", location of {_p}, 1, 1)
+
+# 우리가 던진 돌풍구가 어딘가에 맞으면 그 자리에 연막을 만든다
+on projectile hit:
+	if {-wbball::%uuid of projectile%} is set:
+		delete {-wbball::%uuid of projectile%}
+		set {_l} to location of projectile
+		# 맞은 면 바깥쪽으로 0.6칸 띄워 중심을 공기 중에 둔다(블럭 속에서 시작하면 광선이 막힘). 엔티티를 맞춘 경우는 위로 0.6칸.
+		set {_ev} to event
+		set {_face} to {_ev}.getHitBlockFace()
+		if {_face} is set:
+			set {_fd} to {_face}.getDirection()
+			set {_fv} to vector({_fd}.getX() * 0.6, {_fd}.getY() * 0.6, {_fd}.getZ() * 0.6)
+			set {_l} to {_l} ~ {_fv}
+		else:
+			set {_l} to {_l} ~ vector(0, 0.6, 0)
+		delete projectile
+		soundAround("entity.generic.explode", {_l}, 0.6, 1.6)
+		smokeCloud({_l})
+
+on join:
+	delete {-wbcd::%player's uuid%}

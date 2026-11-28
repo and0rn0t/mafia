@@ -1,0 +1,43 @@
+# [blockguard.sk] 블럭 상호작용 차단: 일반 플레이어는 블럭을 부수거나 설치하거나(양동이 포함) 블럭을 쓸(상자/문/버튼/레버/작업대 등 우클릭, 발판/경작지 밟기) 수 없다.
+# 예외: 크리에이티브 모드인 관리자(op). 서버 건설/설정은 크리에이티브로 바꿔서 한다.
+# 블럭 사용만 막고 손에 든 아이템 사용(스킬 우클릭)은 그대로 되도록 PlayerInteractEvent 의 setUseInteractedBlock(DENY) 를 쓴다(이벤트 전체 취소는 스킬까지 막는다).
+# 지난 매치 독서대 우클릭은 matchhistory.sk 가 따로 처리한다(이쪽에서 막아도 그쪽 이벤트는 그대로 온다).
+# 미검증: org.bukkit.event.Event$Result 중첩 클래스 import, PlayerInteractEvent 의 getClickedBlock/setUseInteractedBlock, on bucket empty/fill 문법.
+
+import:
+	org.bukkit.event.player.PlayerInteractEvent
+	org.bukkit.event.Event$Result as EventResult
+
+function bgAllowed(p: player) :: boolean:
+	# PVP 월드 밖은 막지 않는다(마피아 쪽 규칙은 그대로)
+	if pvpIn({_p}) is false:
+		return true
+	if {_p} is op:
+		if gamemode of {_p} is creative:
+			return true
+	return false
+
+on break:
+	if bgAllowed(player) is false:
+		cancel event
+
+on place:
+	if bgAllowed(player) is false:
+		cancel event
+
+on bucket empty:
+	if bgAllowed(player) is false:
+		cancel event
+
+on bucket fill:
+	if bgAllowed(player) is false:
+		cancel event
+
+on PlayerInteractEvent:
+	set {_b} to event.getClickedBlock()
+	if {_b} is not set:
+		stop
+	set {_p} to event.getPlayer()
+	if bgAllowed({_p}) is true:
+		stop
+	event.setUseInteractedBlock(EventResult.DENY)

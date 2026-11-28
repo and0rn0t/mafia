@@ -1,0 +1,89 @@
+# [quickuse.sk] 즉시 사용 옵션: 무기류가 아닌 버프/디버프/포션류 아이템으로 손에 든 칸을 바꾸면(숫자키, 휠) 우클릭한 것처럼 바로 사용한다.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {quickuse::uuid}(저장 변수. true = 즉시 사용, 미설정 = 우클릭으로 사용(기본)). 무기고 메인 화면 칸 17(items.sk quickUseItem)에서 토글한다.
+# 대상 아이템: itemCategory 3(cc기), 4(포션류/버프) 또는 5(양동이류). 1, 2(무기류)는 제외.
+# 동작: PlayerItemHeldEvent(칸 변경) -> 1틱 뒤 그 칸이 아직 손에 들려 있으면, 가짜 PlayerInteractEvent(RIGHT_CLICK_AIR, 메인핸드)를 Bukkit 으로 호출한다.
+#   각 스킬의 on rightclick 이 그 이벤트를 받아 평소와 똑같이 처리한다(쿨타임/스턴/잠금 판정 포함). 오프핸드는 건드리지 않는다.
+# 사용 뒤(1틱) 원래 들고 있던 칸(getPreviousSlot)으로 되돌린다.
+# 로비(게임 중이 아닐 때)에서도 동작한다.
+# 미검증: skript-reflect 로 PlayerItemHeldEvent 받기, PlayerInteractEvent 생성자(player, Action, ItemStack, Block, BlockFace, EquipmentSlot) 호출,
+#   Skript 의 on rightclick 이 플러그인이 직접 호출한 이벤트도 받는지.
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.event.player.PlayerItemHeldEvent
+	org.bukkit.event.player.PlayerInteractEvent
+	org.bukkit.event.Event$Result as QuResult
+	org.bukkit.event.block.Action
+	org.bukkit.block.BlockFace
+	org.bukkit.inventory.EquipmentSlot
+
+function quickUseOn(p: player) :: boolean:
+	if {quickuse::%{_p}'s uuid%} is true:
+		return true
+	return false
+
+function quickUseToggle(p: player):
+	if quickUseOn({_p}) is true:
+		delete {quickuse::%{_p}'s uuid%}
+	else:
+		set {quickuse::%{_p}'s uuid%} to true
+
+# 즉시 사용 대상 아이템 id 인지(무기류 제외)
+function quickUseId(id: text) :: boolean:
+	if {_id} is "":
+		return false
+	set {_c} to itemCategory({_id})
+	if {_c} is 3:
+		return true
+	if {_c} is 4:
+		return true
+	if {_c} is 5:
+		return true
+	# 꿀벌 조종 중(bee.sk)의 조종 중지 아이템(조종 중에만 인벤토리에 있다). 자폭(bee_bomb)은 실수로 터지지 않게 즉시 사용에서 뺐다.
+	if {_id} is "bee_stop":
+		return true
+	return false
+
+on PlayerItemHeldEvent:
+	set {_p} to event.getPlayer()
+	if pvpIn({_p}) is false:
+		stop
+	if quickUseOn({_p}) is not true:
+		stop
+	set {_ns} to event.getNewSlot()
+	set {_ns} to "%{_ns}%" parsed as number
+	set {_ps} to event.getPreviousSlot()
+	set {_ps} to "%{_ps}%" parsed as number
+	if {_ns} is not set:
+		stop
+	wait 1 tick
+	if {_p} is not online:
+		stop
+	set {_hs} to {_p}.getInventory().getHeldItemSlot()
+	set {_id} to itemIdAt({_p}, {_ns})
+	# 꿀벌 조종 중이면 조종 중지 칸도 즉시 사용 대상이다(자폭은 제외)(카탈로그에 없는 아이템이라 이름으로 판정)
+	set {_drv} to false
+	if {-beemode::%{_p}'s uuid%} is "drive":
+		set {_drv} to true
+		set {_nm} to name of slot {_ns} of {_p}'s inventory
+		if {_nm} is set:
+			if {_nm} is itemName("bee_stop"):
+				set {_id} to "bee_stop"
+	if "%{_hs}%" is not "%{_ns}%":
+		stop
+	if quickUseId({_id}) is not true:
+		stop
+	set {_ev} to new PlayerInteractEvent({_p}, Action.RIGHT_CLICK_AIR, {_p}.getInventory().getItemInMainHand(), null, BlockFace.SELF, EquipmentSlot.HAND)
+	# 생성자가 허공 클릭이면 블럭 사용을 DENY 로 둬서 isCancelled() 가 true 가 된다(Skript 는 취소된 이벤트를 무시). 둘 다 ALLOW 로 돌려 취소 상태를 푼다.
+	{_ev}.setUseInteractedBlock(QuResult.ALLOW)
+	{_ev}.setUseItemInHand(QuResult.ALLOW)
+	Bukkit.getPluginManager().callEvent({_ev})
+	# 사용이 끝나면 원래 들고 있던 칸으로 돌아간다(다른 칸으로 또 바꿨으면 건드리지 않는다)
+	# 꿀벌 조종 중에 쓴 것이면 돌아가지 않는다(조종이 끝나며 bee.sk 가 손에 든 칸을 꿀벌 아이템 칸으로 돌려놨다)
+	wait 1 tick
+	if {_drv} is true:
+		stop
+	if {_p} is online:
+		if "%{_p}.getInventory().getHeldItemSlot()%" is "%{_ns}%":
+			{_p}.getInventory().setHeldItemSlot({_ps})

@@ -1,0 +1,31 @@
+# [soundfx.sk] 거리 조절 사운드: soundAround(소리, 위치, 볼륨, 피치)
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 배경: 바닐라 play sound ... at 위치 는 볼륨 1 기준 약 16칸 밖에서는 아예 안 들린다. 이 함수는 같은 월드 플레이어 각자에게 따로 소리를 틀어
+#   멀리 있는 적도 소리 방향을 알 수 있게 한다.
+# 사양(확정): 최대 청음 거리 48칸, 30칸까지는 볼륨 그대로(감쇠 없음), 30 초과 ~ 48 구간에서만 f = 1 - (거리-40)/20 로 줄여 볼륨 x f x f, 48 초과는 안 들린다.
+#   볼륨이 0.05 미만이면 건너뛴다. 본인/아군/관전자도 구분 없이 모두에게 들린다.
+# 방식: 3칸 이하면 원래 위치에서 그대로 재생. 더 멀면 듣는 사람 눈 위치에서 소리 방향으로 3칸 떨어진 가짜 위치에 위 볼륨으로 재생한다
+#   (방향=좌우는 유지되고 거리감은 볼륨으로만 표현). 매 틱 나는 소리에는 쓰지 말 것(1초 간격 이상).
+# 쓰는 곳: 월드 위치에서 나는 효과음(play sound ... at 위치)은 전부 이 함수를 쓴다(스킬/폭발/발사음 등). 플레이어 한 명에게만 들리는 소리(UI, 개인 피드백, play sound ... to 플레이어)는 거리가 없어서 그대로 둔다.
+#   새 효과음을 넣을 때도 위치에서 나는 소리는 play sound ... at 대신 soundAround 를 쓸 것.
+# 미검증: play sound ... to 플레이어 at 위치 형태가 Skript 2.13 에서 그대로 컴파일/동작하는지, 가짜 위치 방식의 체감, 소리가 많은 장면(tnt 폭발 연쇄 등)의 부하.
+
+function soundAround(snd: text, loc: location, vol: number, pit: number):
+	set {_w} to {_loc}.getWorld()
+	loop all players:
+		set {_v} to loop-player
+		set {_vl} to {_v}.getEyeLocation()
+		if {_vl}.getWorld() is {_w}:
+			set {_d} to distance between {_vl} and {_loc}
+			if {_d} <= 48:
+				if {_d} <= 3:
+					play sound {_snd} with volume {_vol} and pitch {_pit} to {_v} at {_loc}
+				else:
+					set {_vv} to {_vol}
+					if {_d} > 30:
+						set {_f} to 1 - (({_d} - 40) / 20)
+						set {_vv} to {_vol} * {_f} * {_f}
+					if {_vv} >= 0.05:
+						set {_dir} to normalized (vector between {_vl} and {_loc})
+						set {_pt} to {_vl} ~ ({_dir} * 3)
+						play sound {_snd} with volume {_vv} and pitch {_pit} to {_v} at {_pt}

@@ -1,0 +1,138 @@
+# [projectile.sk] 모든 발사체의 최대 사거리를 150칸으로 제한한다: 발사(생성)된 자리에서 150칸 넘게 날아가면 제거한다.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 동작: 발사체가 생성될 때(on spawn of projectile) 위치를 기억하고, 그 발사체마다 처음 1틱 뒤, 이후 2틱 간격으로 거리를 확인한다(엔티티가 사라지거나 최대 600번(60초)까지).
+#   화살 속도가 빨라(활 최대 충전 999) 한 틱에 수십 칸 가므로 간격을 짧게(2틱) 잡았다. 그래도 한 번에 150칸을 조금 넘겨 날아갈 수 있다.
+#   월드가 바뀌면(다른 월드에 있으면) 제거한다. 최대 사거리는 아래 projMaxRange() 하나만 고치면 된다.
+# 미검증: on spawn of projectile 이 화살/눈덩이/화염구/삼지창/TNT 외 모든 Projectile 에 걸리는지, Entity#isValid().
+
+using damage sources
+
+function projMaxRange() :: number:
+	return 150
+
+on spawn of projectile:
+	set {_e} to event-entity
+	set {_o} to location of {_e}
+	set {_w} to {_o}.getWorld()
+	set {_prev} to {_o}
+	# 첫 확인은 1틱 뒤: 활 풀차징 화살은 한 틱에 150칸을 날아가 2틱 뒤에는 이미 박혔거나 사거리를 넘어 사라지기 때문
+	wait 1 tick
+	loop 600 times:
+		set {_v} to {_e}.isValid()
+		if {_v} is not true:
+			stop
+		set {_c} to {_e}.getLocation()
+		if {_c}.getWorld() is not {_w}:
+			{_e}.remove()
+			stop
+		# 화살 적중 보정: 지난 구간(이전 위치 -> 현재 위치)을 플레이어 몸 판정을 arrowAssist() 칸 부풀려서 다시 훑어, 걸리는 적이 있으면 그 사람이 맞은 것으로 처리한다.
+		#   블럭에 박힌 화살도 박히기 전 구간은 훑는다(예전에는 박힌 화살은 건너뛰어서 풀차징 화살에 보정이 안 먹었다). 구간은 발사 지점에서 사거리 안쪽까지만 본다.
+		if {_e} is an arrow:
+			set {_rem} to projMaxRange() - (distance between {_o} and {_prev})
+			if {_rem} > 0:
+				set {_seg} to {_c}
+				if distance between {_prev} and {_c} > {_rem}:
+					set {_sdir} to normalized (vector between {_prev} and {_c})
+					set {_seg} to {_prev} ~ ({_sdir} * {_rem})
+				arrowAssistCheck({_e}, {_prev}, {_seg})
+		set {_v} to {_e}.isValid()
+		if {_v} is not true:
+			stop
+		if distance between {_o} and {_c} > projMaxRange():
+			{_e}.remove()
+			stop
+		set {_prev} to {_c}
+		wait 2 ticks
+
+# 화살이 플레이어를 "맞춘 것으로 보는" 여유(칸). 몸 판정을 이만큼 사방으로 부풀린다(1 = 대략 1블럭 널널하게, 0.5 = 반 블럭. 1 -> 0.5 -> 1 -> 0.5 -> 0.75 로 조정해 왔다. 현재 0.75). 직접 수정용: 이 한 곳만 고치면 된다.
+function arrowAssist() :: number:
+	return 0.75
+
+# 구간 a -> b 를 지나는 화살이 부풀린 몸 판정(대상 크기 + arrowAssist() 칸)에 걸리는 대상(플레이어)을 찾아 피해를 준다.
+#   쏜 사람/아군/관전자는 제외, 블럭에 먼저 막히면 무시. 활/석궁 공통이다.
+#   예전에는 World#rayTraceEntities 를 썼는데, 시작점이 쏜 사람 몸 안이라 첫 구간에서 쏜 사람에게 먼저 걸려 중단됐다. 화살이 한 틱에 150칸 가는 활은 첫 구간에서 거의 끝나서
+#   활에는 보정이 사실상 안 먹었다. 지금은 대상마다 "구간과 몸 중심의 최단 거리"를 직접 계산해서 그 문제가 없다.
+#   피해는 화살 피해 처리(crossbow.sk 의 on damage)와 같은 값(기본 3 + 활 충전 추가분)을 직접 계산해서 준다(이벤트 처리가 안 먹어 1 로 들어가던 문제 방지).
+# 미검증: World#rayTraceBlocks, Entity#getWidth/getHeight, damage source 'arrow' 타입.
+function arrowAssistCheck(ar: entity, a: location, b: location):
+	set {_off} to vector between {_a} and {_b}
+	set {_len} to {_off}.length()
+	if {_len} < 0.05:
+		stop
+	set {_sh} to {_ar}.getShooter()
+	if {_sh} is not a player:
+		stop
+	set {_dir} to normalized {_off}
+	set {_dx} to {_dir}.getX()
+	set {_dy} to {_dir}.getY()
+	set {_dz} to {_dir}.getZ()
+	set {_w} to {_a}.getWorld()
+	set {_r} to arrowAssist()
+	delete {_cand::*}
+	loop all players:
+		add loop-player to {_cand::*}
+	set {_best} to 999999
+	delete {_hit}
+	loop {_cand::*}:
+		set {_t} to loop-value
+		if {_t} is {_sh}:
+			continue
+		set {_v} to {_t}.isValid()
+		if {_v} is not true:
+			continue
+		set {_c} to {_t}.getLocation()
+		if {_c}.getWorld() is not {_w}:
+			continue
+		if {_t} is a player:
+			if gamemode of {_t} is spectator:
+				continue
+			if isAlly("%uuid of {_sh}%", "%uuid of {_t}%") is true:
+				continue
+		set {_hw} to {_t}.getWidth() / 2
+		set {_hh} to {_t}.getHeight() / 2
+		set {_rx} to {_c}.getX() - {_a}.getX()
+		set {_ry} to {_c}.getY() + {_hh} - {_a}.getY()
+		set {_rz} to {_c}.getZ() - {_a}.getZ()
+		set {_tt} to {_rx} * {_dx} + {_ry} * {_dy} + {_rz} * {_dz}
+		if {_tt} < 0:
+			set {_tt} to 0
+		if {_tt} > {_len}:
+			set {_tt} to {_len}
+		set {_ex} to {_a}.getX() + {_dx} * {_tt} - {_c}.getX()
+		set {_ez} to {_a}.getZ() + {_dz} * {_tt} - {_c}.getZ()
+		set {_ey} to {_a}.getY() + {_dy} * {_tt} - ({_c}.getY() + {_hh})
+		set {_hd} to sqrt({_ex} * {_ex} + {_ez} * {_ez})
+		if {_hd} <= {_hw} + {_r}:
+			if abs({_ey}) <= {_hh} + {_r}:
+				if {_tt} < {_best}:
+					set {_best} to {_tt}
+					set {_hit} to {_t}
+	if {_hit} is not set:
+		stop
+	set {_br} to {_w}.rayTraceBlocks({_a}, {_dir}, {_len})
+	if {_br} is set:
+		set {_bp} to {_br}.getHitPosition().toLocation({_w})
+		set {_bd} to distance between {_a} and {_bp}
+		if {_bd} < {_best}:
+			stop
+	# 첨벙첨벙(splash.sk) 중인 플레이어가 맞은 것이면 화살을 흡수한다(피해 없음)
+	if {_hit} is a player:
+		if splashActive({_hit}) is true:
+			splashBlock({_hit}, {_hit}.getLocation())
+			delete {-bowextra::%uuid of {_ar}%}
+			{_ar}.remove()
+			stop
+	# 피해 = 화살 기본 3 + 활 충전 추가분(crossbow.sk 의 on damage 와 같은 식: hp(3) + 추가분은 스크립트 단위, x2 가 실 체력)
+	set {_xe} to {-bowextra::%uuid of {_ar}%}
+	set {_dm} to hp(3)
+	if {_xe} is a number:
+		set {_dm} to hp(3) + {_xe}
+	# {-bowextra} 는 지우지 않고 둔다: 아래 damage 가 일으키는 피해 이벤트(crossbow.sk 의 on damage)가 이 값을 읽어 피해를 3 + 추가분으로 정한다.
+	#   예전에는 여기서 먼저 지워서 그 처리가 추가분 없이 기본 3 으로만 덮어써 보정으로 맞은 활 화살이 약했다.
+	set {_src} to a custom damage source:
+		set the damage type to arrow
+		set the causing entity to {_sh}
+		set the direct entity to {_ar}
+	{_hit}.damage({_dm} * 2, {_src})
+	delete {-bowextra::%uuid of {_ar}%}
+	{_ar}.remove()

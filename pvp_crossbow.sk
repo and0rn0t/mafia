@@ -1,0 +1,76 @@
+# [crossbow.sk] 석궁 스킬(우클릭 발사, 석궁 화살 데미지 2, 맞은 화살 제거). 메인핸드 우선, 오프핸드도 작동
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-bowcool}, {-skillitems::crossbow}, {-arrows::uuid}, {-arrowo::uuid}
+
+on load:
+	set {-skillitems::crossbow} to crossbow
+
+# 화살 최대 사거리 150칸. 발사 위치를 기록해 두고 매 틱 거리를 확인해서 넘으면 화살을 지운다(월드 밖/미로딩 청크로 날아가 서버가 멈추는 것 방지).
+#   bow.sk 도 발사 때 arrowTrack 을 부른다. wait 가 없는 함수라 호출한 쪽을 막지 않는다.
+function arrowTrack(a: entity, o: location):
+	set {-arrows::%uuid of {_a}%} to {_a}
+	set {-arrowo::%uuid of {_a}%} to {_o}
+
+function arrowMaxRange() :: number:
+	return 150
+
+every tick:
+	if size of {-arrows::*} is 0:
+		stop
+	loop {-arrows::*}:
+		set {_k} to loop-index
+		set {_a} to {-arrows::%{_k}%}
+		set {_o} to {-arrowo::%{_k}%}
+		if {_a}.isValid() is not true:
+			delete {-arrows::%{_k}%}
+			delete {-arrowo::%{_k}%}
+		else:
+			set {_l} to location of {_a}
+			if world of {_l} is not world of {_o}:
+				delete {_a}
+				delete {-arrows::%{_k}%}
+				delete {-arrowo::%{_k}%}
+			else if distance between {_l} and {_o} > arrowMaxRange():
+				delete {_a}
+				delete {-arrows::%{_k}%}
+				delete {-arrowo::%{_k}%}
+
+on rightclick:
+	if skillHand(player, crossbow) is false:
+		stop
+	cancel event
+	if {-bowcool::%player's uuid%} is set:
+		stop
+	shoot arrow from player at speed 4
+	set {_ar} to last spawned entity
+	arrowTrack({_ar}, location of player)
+	soundAround("item.crossbow.shoot", location of player, 1, 1)
+	set item cooldown of crossbow for player to 16 ticks
+	set {-bowcool::%player's uuid%} to true
+	wait 16 ticks
+	delete {-bowcool::%player's uuid%}
+
+on damage:
+	if projectile is set:
+		set {_p} to projectile
+	else:
+		set {_p} to attacker
+	if {_p} is an arrow:
+		# 화살은 활/석궁 공통으로 기본 피해 실 체력 3. 활(bow.sk)은 충전도에 따른 추가 피해({-bowextra::화살uuid}, 0~9)를 여기에 더한다(최종 3~12).
+		set damage to hp(3)
+		set {_ex} to {-bowextra::%uuid of {_p}%}
+		if {_ex} is a number:
+			set damage to hp(3) + {_ex}
+			delete {-bowextra::%uuid of {_p}%}
+
+# 석궁 화살이 어딘가에 맞으면(땅/벽/엔티티) 화살 엔티티를 제거한다. 다른 화살(스켈레톤 등)은 건드리지 않는다.
+# 추가 - 화살이 벽에 5초간 유지되도록 한 후 지운다. 화살이 유지되는 동안은 플레이어가 주울 수 없게 한다.
+on projectile hit:
+	if projectile is an arrow:
+		wait 100 ticks
+		delete event-projectile
+
+on arrow pickup:
+	if pvpIn(player) is false:
+		stop
+	cancel event

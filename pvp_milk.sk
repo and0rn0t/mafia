@@ -1,0 +1,80 @@
+# [milk.sk] 우유 스킬(우클릭, 쿨 15초): 걸린 모든 해로운 효과를 해제한다. 분류는 양동이(category 5). 기절 상태에서도 쓸 수 있는 유일한 스킬.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-milkcd}(쿨타임 종료 시각), {-skillitems::milk}
+# 해제 대상(milkCleanse): 상태이상 표시가 해로운 것("bad"/"cc")인 것 전부와 그 실제 효과.
+#   - 기절(stun_*): {-stunend} 삭제 + 느림/점프 불가/실명 포션 제거 + 타이틀 지우기
+#   - 낚싯대 구속(fishing_*): 도약 잠금과 구속 표시만 해제한다. 찌는 그대로 걸려 있어서 끝날 때 들어가는 피해는 무시하지 않는다.
+#   - 부싯돌 취약(flint): {-vuln} 삭제 + 불 끄기. ({-noburn} 은 불 피해를 막는 쪽이라 그대로 둔다)
+#   - 불길한 병 탈진: {-exhaust} 삭제 + stcap -1(ominousbottle.sk 의 정상 종료와 같은 처리)
+#   - 그 외 해로운 바닐라 포션 효과(독, 느림, 나약함, 실명, 멀미, 허기, 시듦, 채굴 피로, 공중 부양, 어둠, 불운, 불길한 징조)
+# 새 해로운 효과(상태이상)를 추가하면 여기 milkCleanse 에도 그 효과를 푸는 처리를 넣을 것(표시만 지우면 실제 효과가 남는다).
+# 기절 중 사용: skill_core.sk 의 skillHand 가 우유만 기절 검사를 건너뛰고, stun.sk 의 on click 이 우유 클릭은 취소하지 않는다.
+# 이펙트: 우유 마시는 소리(entity.generic.drink) + 초록 반짝이(주민 파티클 happy_villager).
+# 미검증: PotionEffectType.getByName, Player#resetTitle, World#spawnParticle(HAPPY_VILLAGER), 기절 중 우유 사용 흐름 전체.
+
+import:
+	org.bukkit.Particle
+	org.bukkit.potion.PotionEffectType
+
+on load:
+	set {-skillitems::milk} to milk bucket
+
+# 해로운 효과 전부 해제
+function milkCleanse(p: player):
+	set {_id} to "%uuid of {_p}%"
+	loop {-status::%{_id}%::*}:
+		set {_k} to loop-index
+		set {_ty} to {-statustype::%{_id}%::%{_k}%}
+		set {_hurt} to false
+		if {_ty} is "bad":
+			set {_hurt} to true
+		if {_ty} is "cc":
+			set {_hurt} to true
+		if {_hurt} is true:
+			if {_k} starts with "stun_":
+				delete {-stunend::%{_id}%}
+				{_p}.removePotionEffect(PotionEffectType.getByName("SLOWNESS"))
+				{_p}.removePotionEffect(PotionEffectType.getByName("JUMP_BOOST"))
+				{_p}.removePotionEffect(PotionEffectType.getByName("BLINDNESS"))
+				{_p}.resetTitle()
+			if {_k} starts with "fishing_":
+				delete {-jumplock::%{_id}%::%{_k}%}
+			if {_k} is "flint":
+				delete {-vuln::%{_id}%}
+				{_p}.setFireTicks(0)
+			if {_k} is "ominousbottle_exhaust":
+				if {-exhaust::%{_id}%} is set:
+					delete {-exhaust::%{_id}%}
+					if {-stcap::%{_id}%} > 0:
+						remove 1 from {-stcap::%{_id}%}
+			clearStatus({_p}, {_k})
+	loop "POISON", "SLOWNESS", "WEAKNESS", "BLINDNESS", "NAUSEA", "HUNGER", "WITHER", "MINING_FATIGUE", "LEVITATION", "DARKNESS", "UNLUCK" and "BAD_OMEN":
+		set {_skip} to false
+		# 삽 잠복(shovel.sk) 중에는 이동 불가용 느림을 풀지 않는다
+		if loop-value is "SLOWNESS":
+			if {-burrow::%{_id}%} is set:
+				if {-burrow::%{_id}%} > now:
+					set {_skip} to true
+		set {_t} to PotionEffectType.getByName(loop-value)
+		if {_t} is set:
+			if {_skip} is false:
+				{_p}.removePotionEffect({_t})
+
+on rightclick:
+	if skillHand(player, milk bucket) is false:
+		stop
+	# 바닐라 우유 마시기(효과 전부 해제 + 소모)를 막고 이 스킬만 쓴다
+	cancel event
+	if {-milkcd::%player's uuid%} is set:
+		if {-milkcd::%player's uuid%} > now:
+			stop
+	set {_p} to player
+	set {-milkcd::%{_p}'s uuid%} to now + 15 seconds
+	set item cooldown of milk bucket for {_p} to 15 seconds
+	milkCleanse({_p})
+	soundAround("entity.generic.drink", location of {_p}, 1, 1)
+	set {_c} to {_p}.getLocation().add(0, 1, 0)
+	{_c}.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, {_c}, 30, 0.4, 0.6, 0.4, 0, null, true)
+
+on join:
+	delete {-milkcd::%player's uuid%}

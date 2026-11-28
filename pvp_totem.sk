@@ -1,0 +1,64 @@
+# [totem.sk] 불사의 토템 스킬(우클릭, 쿨 60초): 5초간 무적, 그동안 도약 불가(jumplock 키 totem). 메인핸드 우선, 오프핸드도 작동
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-totemcd}(쿨타임 종료 시각), {-totemend}(무적 종료 시각, main.sk 의 on damage 가 읽어서 피해를 취소), {-skillitems::totem},
+#   {-jumplock::uuid::totem}(무적 동안만), 상태이상 출처 키 totem(보스바에 이로운 효과 "불사의 토템")
+# 이펙트: 사용 시 노란 flash 3번(2틱 간격) + 5초 동안 노란 발광(팀 totemyellow 외곽선 + glowing). 불길한 병/네더의 별과 같은 방식.
+# 무적은 main.sk 의 첫 on damage 맨 위에서 피해를 취소하는 방식이다(모든 피해 원인 공통, 전투 중 회복 차단 카운터도 올리지 않음).
+# 진짜 토템 아이템이라 손에 들고 죽으면 바닐라가 부활시키고 아이템을 소모한다. 이를 막으려고 items.sk 의 itemBuild 가 death_protection 컴포넌트를 지운다(미검증).
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.ChatColor
+	org.bukkit.Color
+	org.bukkit.Particle
+
+on load:
+	set {-skillitems::totem} to totem of undying
+
+on rightclick:
+	if skillHand(player, totem of undying) is false:
+		stop
+	cancel event
+	if {-totemcd::%player's uuid%} is set:
+		if {-totemcd::%player's uuid%} > now:
+			stop
+	set {_p} to player
+	set {_id} to "%player's uuid%"
+	set {-totemcd::%{_id}%} to now + 60 seconds
+	set item cooldown of totem of undying for {_p} to 60 seconds
+	set {-totemend::%{_id}%} to now + 5 seconds
+	set {-jumplock::%{_id}%::totem} to true
+	setStatus({_p}, "totem", "불사의 토템", 5 seconds, "good")
+	soundAround("item.totem.use", location of {_p}, 1, 1)
+	# 노란 발광: 발광 외곽선 색은 팀 색이라 노랑 팀 totemyellow 에 5초 동안 넣는다(불길한 병의 obred 와 같은 방식, 스코어보드 API 로 직접 처리).
+	set {_n} to {_p}'s name
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_team} to {_sb}.getTeam("totemyellow")
+	if {_team} is not set:
+		set {_team} to {_sb}.registerNewTeam("totemyellow")
+	{_team}.setColor(ChatColor.YELLOW)
+	set {_old} to {_sb}.getEntryTeam({_n})
+	scAdd({_team}, {_p})
+	apply glowing potion of tier 1 without any particles whilst hiding the potion icon to {_p} for 5 seconds replacing the existing effect
+	# 노란 flash 를 2틱 간격으로 3번(색 지정은 불길한 병과 같은 reflect 호출, 1.21.9 이상)
+	set {_c} to {_p}'s location ~ vector(0, 1, 0)
+	loop 3 times:
+		{_c}.getWorld().spawnParticle(Particle.FLASH, {_c}, 1, Color.fromRGB(255, 220, 0))
+		wait 2 ticks
+	wait 94 ticks
+	scRemove({_team}, {_p})
+	if {_old} is set:
+		{_old}.addEntry({_n})
+	delete {-totemend::%{_id}%}
+	delete {-jumplock::%{_id}%::totem}
+	if {_p} is online:
+		soundAround("block.beacon.deactivate", location of {_p}, 1, 1.5)
+
+on death of player:
+	delete {-totemend::%victim's uuid%}
+	delete {-jumplock::%victim's uuid%::totem}
+	clearStatus(victim, "totem")
+
+on join:
+	delete {-totemcd::%player's uuid%}
+	delete {-totemend::%player's uuid%}

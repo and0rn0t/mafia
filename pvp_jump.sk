@@ -1,0 +1,96 @@
+# [jump.sk] 점프(스페이스)를 두 번 눌러 발동하는 대시 스킬. 스태미너 30 이상에서 사용(10틱 동안 틱당 3, 총 30 소모), 스태미너 소모
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 꿀벌 조종 중(bee.sk)에는 이 입력을 무시한다(꿀벌 가속은 삭제됨).
+# 이 파일이 쓰는 변수: {-st}, {-stcap}, {-jump}(도약 실행 중), {-jumplock}(읽기 전용: 하나라도 있으면 도약 불가)
+# 발동 방식: 서바이벌/어드벤처 플레이어에게 비행 허용(flight mode)을 켜 두면, 스페이스 두 번이 "비행 전환(flight toggle)" 이벤트로 들어온다.
+# 그 이벤트를 취소해서 실제로 날지는 못하게 하고, 그 순간에 도약을 쓴다. (지상에서 두 번 눌러도, 공중에서 두 번 눌러도 발동)
+# 비행 허용은 접속/리스폰/게임모드 변경 때 다시 켠다. 크리에이티브/관전자는 건드리지 않는다.
+# 발동 키는 더블 점프(스페이스 두 번) 하나로 고정이다(예전 F키 모드와 무기고 토글은 삭제함). F키(손 바꾸기)는 핑 키라서 waypoint.sk 가 처리한다.
+
+function jumpFlightOn(p: player):
+	# PVP 월드에서만(마피아 쪽은 건드리지 않는다. 나갈 때는 pvp.sk 가 끈다)
+	if pvpIn({_p}) is false:
+		stop
+	if gamemode of {_p} is not survival:
+		if gamemode of {_p} is not adventure:
+			stop
+	# 비행 허용은 두 모드 모두 항상 켠다: 배고픔 바가 스태미너라(main.sk stFoodSync) 음식 수치 6 이하에서도 달릴 수 있으려면 필요하다(클라이언트는 비행 허용이면 배고픔과 상관없이 달리기를 허용)
+	set flight mode of {_p} to true
+
+# 스크립트를 리로드하면 이미 접속 중인 플레이어는 join 이 다시 일어나지 않으므로 로드 때 한 번 켠다.
+on load:
+	# 예전 발동 키 설정(F키 모드)은 쓰지 않으니 지운다
+	delete {leapmode::*}
+	loop all players:
+		jumpFlightOn(loop-player)
+
+on join:
+	jumpFlightOn(player)
+
+on respawn:
+	wait 1 tick
+	jumpFlightOn(player)
+
+on gamemode change:
+	wait 1 tick
+	jumpFlightOn(player)
+
+on flight toggle:
+	if pvpIn(player) is false:
+		stop
+	if gamemode of player is not survival:
+		if gamemode of player is not adventure:
+			stop
+	# 실제 비행은 막는다. 클라이언트의 비행 상태를 되돌리기 위해 한 틱 꺼 뒀다가 다시 켠다.
+	cancel event
+	set flight mode of player to false
+	set {_pl} to player
+	# 꿀벌 드론 조종 중(bee.sk)에는 도약을 쓰지 않는다
+	if {-beemode::%player's uuid%} is "drive":
+		wait 1 tick
+		jumpFlightOn({_pl})
+		stop
+	# 리스폰 낙하(겉날개 활강) 중에는 도약을 쓸 수 없다(game.sk 의 {-gdropon})
+	if {-gdropon::%player's uuid%} is true:
+		wait 1 tick
+		jumpFlightOn({_pl})
+		stop
+	if isStunned({_pl}) is true:
+		wait 1 tick
+		jumpFlightOn({_pl})
+		stop
+	if {-jumplock::%player's uuid%::*} is set:
+		# 구속 등으로 도약이 막힌 상태에서 시도하면 틱 소리
+		ccDeny({_pl})
+		wait 1 tick
+		jumpFlightOn({_pl})
+		stop
+	set {_cost} to jumpCost({_pl})
+	if {-st::%player's uuid%} >= {_cost}:
+		if {-jump::%player's uuid%} is not set:
+			push player upwards at speed 0.25
+			push player forwards at speed 0.9
+			soundAround("entity.player.attack.sweep", location of player, 1, 1.2)
+			add 1 to {-stcap::%player's uuid%}
+			set {-jump::%player's uuid%} to true
+			tutHook({_pl}, "leap")
+			loop 5 times:
+				remove {_cost} / 10 from {-st::%player's uuid%}
+				play 15 spit with offset of 0.1, 0.1, 0.1 and speed 0 at player in radius of 100
+				wait 1 ticks
+			delete {-jump::%player's uuid%}
+			# 도약이 시작된 뒤(5틱 후) 비행 허용을 다시 켜서 다음 도약 입력을 받는다
+			jumpFlightOn({_pl})
+			loop 5 times:
+				remove {_cost} / 10 from {-st::%player's uuid%}
+				play 15 spit with offset of 0.1, 0.1, 0.1 and speed 0 at player in radius of 100
+				wait 1 ticks
+			wait 39 ticks
+			if {-stcap::%player's uuid%} > 0:
+				remove 1 from {-stcap::%player's uuid%}
+		else:
+			wait 1 tick
+			jumpFlightOn({_pl})
+	else:
+		wait 1 tick
+		jumpFlightOn({_pl})

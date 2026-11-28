@@ -1,0 +1,33 @@
+# [sword.sk] 검 패시브: 검을 메인핸드에 들고 있으면 받는 피해를 한 번 막아준다(막으면 쿨타임 30초). 쿨타임이 끝나 막을 수 있는 동안은 머리 위 체력바가 하늘색.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-swcd::uuid}(다음에 다시 막을 수 있는 시각)
+# 피해를 막는 건 main.sk 첫 on damage(토템 무적 바로 아래)에서 swordReady() 로 판정하고 swordBlock() 을 부른다. 체력바 색은 healthbar.sk 가 swordReady() 로 정한다.
+# 막는 피해: 피해량이 0 초과인 모든 피해(근접/투사체/폭발/스킬 피해 등).
+# 패시브 아이템이라 우클릭 상호작용이 없으므로 skillHand 의 메인/오프핸드 규칙을 쓰지 않는다: 메인핸드나 오프핸드 중 어느 쪽이든 검을 들고 있으면 된다(무기고를 들고 있어도 상관없음).
+# 쿨타임은 아이템 쿨타임(item cooldown)으로 검에 표시한다(막는 순간 30초). 막을 수 있는 상태는 체력바 하늘색으로도 알린다.
+# 막는 소리: 금속이 부딪히는 "캉!" 느낌으로 모루 착지음(높은 음) + 아이언 골렘 피격음을 겹친다(귀로 확인 못 함, 마음에 안 들면 swordBlock 의 소리만 바꿀 것).
+
+function swordReady(e: entity) :: boolean:
+	if {_e} is not a player:
+		return false
+	set {_mh} to {_e}.getEquipment().getItemInMainHand().getType().name()
+	set {_oh} to {_e}.getEquipment().getItemInOffHand().getType().name()
+	set {_has} to false
+	if {_mh} ends with "_SWORD":
+		set {_has} to true
+	if {_oh} ends with "_SWORD":
+		set {_has} to true
+	if {_has} is false:
+		return false
+	set {_cd} to {-swcd::%uuid of {_e}%}
+	if {_cd} is set:
+		if {_cd} > now:
+			return false
+	return true
+
+# 피해를 막았을 때: 쿨타임 시작(아이템 쿨타임 표시 포함) + 금속 소리
+function swordBlock(p: player):
+	set {-swcd::%uuid of {_p}%} to now + 30 seconds
+	set item cooldown of netherite sword for {_p} to 30 seconds
+	soundAround("block.anvil.land", location of {_p}, 0.8, 2)
+	soundAround("entity.iron_golem.damage", location of {_p}, 1, 1.5)

@@ -63,6 +63,16 @@ public class BuildPack {
             for (Map.Entry<String, Path> e : files.entrySet()) {
                 put(zo, "assets/mafia/sounds/" + e.getKey() + ".ogg", Files.readAllBytes(e.getValue()));
             }
+            // PVP(MCK 전투) 리소스(pvp-pack.zip, tools/MergePvpPack.java)가 있으면 같이 넣는다
+            Path pvp = repo.resolve("pvp-pack.zip");
+            if (Files.exists(pvp)) {
+                try (ZipInputStream zi = new ZipInputStream(Files.newInputStream(pvp))) {
+                    ZipEntry ze;
+                    while ((ze = zi.getNextEntry()) != null) {
+                        if (!ze.isDirectory()) put(zo, ze.getName(), zi.readAllBytes());
+                    }
+                }
+            }
         }
         MessageDigest md = MessageDigest.getInstance("SHA-1");
         String sha = HexFormat.of().formatHex(md.digest(Files.readAllBytes(zip)));

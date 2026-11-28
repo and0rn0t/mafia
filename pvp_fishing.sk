@@ -1,0 +1,193 @@
+# [fishing.sk] 낚싯대 스킬(찌 속도 증가, 후한 판정(플레이어만), 엔티티에 걸리면 5초 걸림, 당길 때 피해, 쿨타임, 효과음, 상태이상 표시)
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-hook}, {-hooked}, {-hookcd}, {-hookcdset}, {-hookdmg}, {-skilldmg}(스킬 데미지 표시, main.sk 보정 제외용), {-jumplock}(걸린 대상의 도약 잠금, 키 fishing_낚시꾼uuid), {-status}/{-statusname}(걸린 대상의 구속 표시, 출처 fishing_낚시꾼uuid), {-skillitems::fishing_rod}
+# 효과음을 바꾸고 싶으면 아래 hookCatchSound / hookWarnSound / hookReleaseSound 함수의 소리 이름만 바꾸면 된다.
+
+using damage sources
+
+on load:
+	set {-skillitems::fishing_rod} to fishing rod
+
+function hookCooldown(p: player):
+	set {-hookcd::%{_p}'s uuid%} to now + 9 seconds
+	set {-hookcdset::%{_p}'s uuid%} to true
+	if {_p} is online:
+		set item cooldown of fishing rod for {_p} to 9 seconds
+
+# 엔티티에 찌가 걸린 순간: 던진 사람에게 당겨지는 소리. 걸린 게 플레이어면 그 사람에게도.
+function hookCatchSound(p: player, v: entity):
+	if {_p} is online:
+		play sound "block.pumpkin.carve" with volume 2 and pitch 0.8 to {_p}
+	if {_v} is a player:
+		if {_v} is online:
+			play sound "block.pumpkin.carve" with volume 2 and pitch 0.8 to {_v}
+
+# 소리 두 개를 한 번에 재생(한쪽 이름이 틀려도 다른 쪽은 들리도록). 대상이 오프라인이면 무시.
+function hookPlay(t: player, a: text, b: text, pit: number):
+	if {_t} is online:
+		play sound {_a} with volume 2 and pitch {_pit} to {_t}
+		play sound {_b} with volume 2 and pitch {_pit} to {_t}
+
+# 걸림이 곧 끝날 때(끝나기 전 경고): 사슬이 팽팽해지는 소리. pit 가 높을수록 임박한 느낌.
+function hookWarnSound(p: player, v: entity, pit: number):
+	hookPlay({_p}, "block.chain.hit", "item.crossbow.loading_middle", {_pit})
+	if {_v} is a player:
+		hookPlay({_v}, "block.chain.hit", "item.crossbow.loading_middle", {_pit})
+
+# 걸림이 풀릴 때(당겨지는 순간): 던진 사람에게 당겨지는 소리. 걸렸던 게 플레이어면 그 사람에게도.
+function hookReleaseSound(p: player, v: entity):
+	hookPlay({_p}, "item.crossbow.shoot", "entity.fishing_bobber.retrieve", 1.6)
+	if {_v} is a player:
+		hookPlay({_v}, "item.crossbow.shoot", "entity.fishing_bobber.retrieve", 1.6)
+
+# 걸림 해제: (플레이어면) 도약 잠금과 구속 표시를 지우고, 풀리는 소리. 쿨타임/찌 제거는 호출하는 쪽에서 처리.
+function hookRelease(p: player, v: entity):
+	if {_v} is a player:
+		delete {-jumplock::%{_v}'s uuid%::fishing_%{_p}'s uuid%}
+		clearStatus({_v}, "fishing_%{_p}'s uuid%")
+	hookReleaseSound({_p}, {_v})
+
+# 못 맞춤(아무 엔티티에도 안 걸리고 땅/물에 떨어짐): 쿨타임(이미 시작됐으면 다시 시작하지 않음) + 찌 회수
+function hookMiss(p: player, h: entity):
+	if {-hookcdset::%{_p}'s uuid%} is not set:
+		hookCooldown({_p})
+	{_h}.remove()
+
+function hookDamage(p: player, v: entity):
+	if {_v} is not alive:
+		stop
+	set {_src} to a custom damage source:
+		set the damage type to player attack
+		set the causing entity to {_p}
+		set the direct entity to {_p}
+	# main.sk 의 철퇴 x0.3 / 창 상한 보정에서 제외하려고 스킬 데미지 표시를 켰다가 끈다(damage 는 즉시 이벤트를 부름)
+	set {-skilldmg::%{_p}'s uuid%} to true
+	set {_amt} to hp(3)
+	damage {_v} by {_amt} hearts using {_src}
+	delete {-skilldmg::%{_p}'s uuid%}
+
+on fishing line cast:
+	if isStunned(player) is true:
+		cancel event
+		stop
+	if {-gdropon::%player's uuid%} is true:
+		cancel event
+		stop
+	set {_id} to uuid of player
+	if {-hookcd::%{_id}%} is set:
+		if {-hookcd::%{_id}%} > now:
+			cancel event
+			stop
+	set {_h} to fishing hook
+	set {_p} to player
+	delete {-hooked::%{_id}%}
+	delete {-hookcdset::%{_id}%}
+	delete {-hookdmg::%{_id}%}
+	set {-hook::%{_id}%} to {_h}
+	set {_assisted} to false
+	set {_still} to 0
+	wait 1 tick
+	set velocity of {_h} to (velocity of {_h}) * 3
+	while {_h} is valid:
+		set {_t} to {_h}.getHookedEntity()
+		if {_t} is not set:
+			if {_assisted} is false:
+				loop all entities in radius fishAssist() around {_h}:
+					if loop-entity is not {_p}:
+						if loop-entity is a player:
+							{_h}.setHookedEntity(loop-entity)
+							set {_assisted} to true
+							exit loop
+				set {_t} to {_h}.getHookedEntity()
+		# 첨벙첨벙(splash.sk) 중인 플레이어에게 걸리려 하면 흡수한다(못 맞힌 것으로 처리: 찌 제거 + 쿨타임)
+		if {_t} is a player:
+			if {-hooked::%{_id}%} is not set:
+				if splashActive({_t}) is true:
+					splashBlock({_t}, {_h}.getLocation())
+					{_h}.setHookedEntity(null)
+					hookMiss({_p}, {_h})
+					delete {_t}
+		if {_t} is set:
+			if {-hooked::%{_id}%} is not set:
+				# 엔티티에 처음 걸린 순간: 5초 걸림 시작
+				set {-hooked::%{_id}%} to {_t}
+				set {_until} to now + 5 seconds
+				set {_warn1} to now + 2 seconds
+				set {_warn2} to now + 2.5 seconds
+				if {_t} is a player:
+					# 플레이어면 구속(도약 불가) + 보스바 표시
+					set {-jumplock::%{_t}'s uuid%::fishing_%{_id}%} to true
+					setStatus({_t}, "fishing_%{_id}%", "구속", 5 seconds)
+				hookCatchSound({_p}, {_t})
+			else if now >= {_until}:
+				# 5초가 지나 자동으로 풀림(당기는 것과 같은 효과): 피해 + 풀림 처리/소리 + 쿨타임 + 찌 회수
+				set {_victim} to {-hooked::%{_id}%}
+				delete {-hooked::%{_id}%}
+				hookDamage({_p}, {_victim})
+				hookRelease({_p}, {_victim})
+				hookCooldown({_p})
+				{_h}.remove()
+			else:
+				# 끝나기 전 경고음(2초 지점, 2.5초 지점)
+				if {_warn1} is set:
+					if now >= {_warn1}:
+						delete {_warn1}
+						hookWarnSound({_p}, {-hooked::%{_id}%}, 1)
+				if {_warn2} is set:
+					if now >= {_warn2}:
+						delete {_warn2}
+						hookWarnSound({_p}, {-hooked::%{_id}%}, 1.5)
+		else:
+			if {-hooked::%{_id}%} is set:
+				# 걸려 있던 대상이 사라짐(사망, 접속 종료 등): 풀림 처리 + 쿨타임 + 찌 회수
+				set {_victim} to {-hooked::%{_id}%}
+				delete {-hooked::%{_id}%}
+				hookRelease({_p}, {_victim})
+				hookCooldown({_p})
+				{_h}.remove()
+			else:
+				# 아직 아무것도 못 맞힌 상태에서 멈췄거나(땅/벽) 물에 들어갔으면 못 맞춘 것.
+				# 꽃/잔디 같은 충돌 없는 블록은 찌가 그냥 통과하므로(멈추지 않음) 판정은 속도 기준:
+				# 속도가 거의 0인 상태가 2틱 연속이면 멈춘 것(포물선 꼭대기에서 순간적으로 느려지는 것과 구분).
+				set {_speed} to standard length of (velocity of {_h})
+				if {_speed} < 0.01:
+					add 1 to {_still}
+				else:
+					set {_still} to 0
+				set {_water} to {_h}.isInWater()
+				if {_still} >= 2:
+					hookMiss({_p}, {_h})
+				else if {_water} is true:
+					hookMiss({_p}, {_h})
+		wait 1 tick
+	# 찌가 사라짐 (릴 감기, 대상 사망, 물에 빠짐, 접속 종료 등)
+	if {-hook::%{_id}%} is {_h}:
+		if {-hooked::%{_id}%} is set:
+			set {_victim} to {-hooked::%{_id}%}
+			delete {-hooked::%{_id}%}
+			# 걸려 있는데 아직 피해를 안 줬다면(낚싯대를 손에서 치움 등) 여기서 피해. 던진 사람이 접속 중이고 살아 있을 때만.
+			if {-hookdmg::%{_id}%} is not set:
+				if {_p} is online:
+					if {_p} is alive:
+						hookDamage({_p}, {_victim})
+			delete {-hookdmg::%{_id}%}
+			hookRelease({_p}, {_victim})
+			hookCooldown({_p})
+		else if {-hookcdset::%{_id}%} is not set:
+			hookCooldown({_p})
+		delete {-hook::%{_id}%}
+
+# 찌를 당겨서 걸린 대상을 끌어올 때 피해. 모든 엔티티 대상. 이미 줬다는 표시를 남겨 찌가 사라질 때 중복 피해를 막는다.
+# (낚싯대를 손에서 치워 찌가 사라지는 경우는 위 loop 끝에서 피해. 대상이 먼저 사라지는 경우는 피해 없음)
+on entity hooked:
+	# 첨벙첨벙(splash.sk) 중인 플레이어는 걸리지 않는다(위 루프가 찌를 제거)
+	if hooked entity is a player:
+		if splashActive(hooked entity) is true:
+			cancel event
+			stop
+	hookDamage(player, hooked entity)
+	set {-hookdmg::%player's uuid%} to true
+
+# 낚싯대 찌가 플레이어를 "맞춘 것으로 보는" 반경(칸). 이 한 곳만 고치면 된다(예전 2 -> 3, 직접 수정용).
+function fishAssist() :: number:
+	return 3

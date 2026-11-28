@@ -25,4 +25,4 @@ function mAuLen(k: text) :: number:
 	return 0
 
 function mAuSha1() :: text:
-	return "0226837432d48f9421ae85bd18d2cc83a787ada0"
+	return "e72fbfb2cf3101029e20a66557a0e00361c418cb"

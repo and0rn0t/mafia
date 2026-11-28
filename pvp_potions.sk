@@ -1,0 +1,183 @@
+# [potions.sk] 포션 3종 스킬(우클릭, 마시지 않고 효과만): 체력 포션(쿨 12초, 체력 5 회복), 스태미너 포션(쿨 12초, 스태미너 50 회복),
+#   투명 포션(쿨 18초, 4초간 투명화 - 피해를 입거나 입히면 풀림). 메인핸드 우선, 오프핸드도 작동.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-potcd}(종류별 쿨타임 종료 시각), {-invis}(투명 효과 종료 시각), {-invishid}(손 아이템을 숨겨 둔 상태 표시), {-healok}(회복이 전투 중 차단을 통과하는 표시, main.sk 가 읽음)
+# 포션 종류 판정(potionKind), 종류별 쿨타임 확인(potionReady), skillHand 와의 우선순위는 skill_core.sk 에 있다.
+# 쿨타임: 종류별 {-potcd} 로 계산한다. 화면의 회색 쿨타임 게이지는 포션마다 쿨타임 그룹(use_cooldown 컴포넌트의 cooldown_group)을
+#   달리 줘서 따로 돌게 한다(potionVisual, Paper 데이터 컴포넌트 API 를 skript-reflect 로 호출, 미검증). 이 함수가 실패해도 효과/쿨타임 로직은 이미 끝난 뒤라 동작한다.
+# 마시는 동작은 이벤트를 취소해서 막는다(아이템은 줄지 않음).
+
+import:
+	io.papermc.paper.datacomponent.DataComponentTypes
+	io.papermc.paper.datacomponent.item.UseCooldown
+	net.kyori.adventure.key.Key
+	org.bukkit.Material
+	org.bukkit.inventory.ItemStack
+	org.bukkit.inventory.EquipmentSlot
+
+# 화면 쿨타임 게이지(쿨타임 그룹). secs 초 동안 이 포션 종류의 그룹에만 쿨타임을 건다.
+# 주의: getEquipment() 는 아이템의 복사본을 줘서 컴포넌트를 달아도 실제 아이템에 안 붙는다(게이지가 안 나왔던 원인으로 추정).
+# 실제 아이템을 바로 바꾸는 getInventory() 의 손 아이템을 써야 한다.
+function potionVisual(p: player, kind: text, secs: number):
+	# 실제 아이템에 컴포넌트가 붙도록: 손 아이템을 복제해서 컴포넌트를 달고 같은 손에 다시 넣는다.
+	set {_main} to false
+	if potionKind({_p}, "main") is {_kind}:
+		set {_main} to true
+	if {_main} is true:
+		set {_it} to {_p}.getInventory().getItemInMainHand().clone()
+	else:
+		set {_it} to {_p}.getInventory().getItemInOffHand().clone()
+	set {_key} to Key.key("andornot", "potion_%{_kind}%")
+	set {_cd} to UseCooldown.useCooldown({_secs}).cooldownGroup({_key}).build()
+	{_it}.setData(DataComponentTypes.USE_COOLDOWN, {_cd})
+	if {_main} is true:
+		{_p}.getInventory().setItemInMainHand({_it})
+	else:
+		{_p}.getInventory().setItemInOffHand({_it})
+	set {_ticks} to {_secs} * 20
+	{_p}.setCooldown({_it}, {_ticks})
+
+# 이번 우클릭에서 발동할 포션 종류("" 이면 없음). 메인핸드 포션 우선, 메인핸드 포션이 쿨타임이면 오프핸드로 양보.
+# 메인핸드가 다른 스킬 아이템이면(쿨타임이 아닐 때) 그 스킬이 우선이라 발동하지 않는다. 메인핸드에 창이 있으면 창이 우클릭을 쓴다.
+function potionToUse(p: player) :: text:
+	if isStunned({_p}) is true:
+		return ""
+	if {-gdropon::%{_p}'s uuid%} is true:
+		return ""
+	# 메인핸드에 무기고를 들고 있으면 오프핸드 포션도 쓰지 않는다.
+	if armoryHeld({_p}) is true:
+		return ""
+	set {_mk} to potionKind({_p}, "main")
+	set {_ok} to potionKind({_p}, "off")
+	if {_mk} is not "":
+		if potionReady({_p}, {_mk}) is true:
+			return {_mk}
+		if {_ok} is not "":
+			if {_ok} is not {_mk}:
+				if potionReady({_p}, {_ok}) is true:
+					return {_ok}
+		return ""
+	if {_ok} is "":
+		return ""
+	if isSkillItem({_p}'s tool) is true:
+		set {_mc} to false
+		if {_p} has {_p}'s tool on cooldown:
+			set {_mc} to true
+		if {_mc} is false:
+			return ""
+	set {_m} to {_p}.getEquipment().getItemInMainHand().getType().name()
+	if {_m} contains "SPEAR":
+		return ""
+	return {_ok}
+
+# 효과 발동(쿨타임 확인 포함). 효과 -> 쿨타임 기록 -> 화면 쿨타임 게이지 순서.
+function potionUse(p: player, kind: text):
+	if potionReady({_p}, {_kind}) is false:
+		stop
+	set {_id} to "%uuid of {_p}%"
+	if {_kind} is "heal":
+		set {-potcd::%{_id}%::heal} to now + 12 seconds
+		# 체력 5 = 2.5 하트. 전투 중 회복 차단(main.sk on heal)을 통과시킨다.
+		set {-healok::%{_id}%} to true
+		heal {_p} by 2.5 hearts
+		delete {-healok::%{_id}%}
+		play sound "entity.generic.drink" with volume 1 and pitch 1 to {_p}
+		potionVisual({_p}, "heal", 12)
+	else if {_kind} is "stamina":
+		set {-potcd::%{_id}%::stamina} to now + 12 seconds
+		add 50 to {-st::%{_id}%}
+		if {-st::%{_id}%} > 100:
+			set {-st::%{_id}%} to 100
+		play sound "entity.generic.drink" with volume 1 and pitch 1.3 to {_p}
+		potionVisual({_p}, "stamina", 12)
+	else if {_kind} is "invis":
+		set {-potcd::%{_id}%::invis} to now + 18 seconds
+		set {-invis::%{_id}%} to now + 4 seconds
+		apply invisibility potion without any particles whilst hiding the potion icon to {_p} for 4 seconds replacing the existing effect
+		setStatus({_p}, "potion_invis", "투명화", 4 seconds, "good")
+		# 몸에 꽂힌 화살 제거(투명화인데 화살이 보이지 않게). Paper LivingEntity#setArrowsInBody(int, boolean)
+		{_p}.setArrowsInBody(0, false)
+		play sound "entity.generic.drink" with volume 1 and pitch 0.7 to {_p}
+		potionVisual({_p}, "invis", 18)
+	tutHook({_p}, "potion")
+
+on rightclick:
+	# 꿀벌 조종 중/직후에는 포션을 쓰지 못한다(bee.sk)
+	if beeUseLocked(player) is true:
+		stop
+	set {_mk} to potionKind(player, "main")
+	# 메인핸드에 스킬 포션이 있으면 어떤 경우에도 마시지 못하게 막는다
+	if {_mk} is not "":
+		cancel event
+	set {_k} to potionToUse(player)
+	if {_k} is "":
+		stop
+	cancel event
+	potionUse(player, {_k})
+
+# 투명화/잠복 중에는 손에 든 아이템(메인/오프핸드)과 치장 모자(머리 칸)가 다른 플레이어에게 보이지 않는다(Player#sendEquipmentChange 로 빈손을 보낸다, bee.sk 의 beeHideHand 와 같은 방식, 미검증).
+#   서버가 장비를 다시 알리는 경우(칸 바꾸기 등)를 따라가려고 투명 중에는 2틱마다 다시 보낸다. 투명이 끝나면(시간 만료/피해로 해제/사망) 진짜 손 아이템을 다시 보낸다.
+#   꿀벌 조종 중에는 bee.sk 가 따로 숨기므로 건너뛴다.
+function invisHideHand(p: player):
+	set {_air} to new ItemStack(Material.AIR)
+	set {_hat} to hatIs({_p}.getInventory().getHelmet())
+	loop all players:
+		set {_v} to loop-player
+		if {_v} is not {_p}:
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HAND, {_air})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.OFF_HAND, {_air})
+			# 치장 모자(hats.sk)도 투명화/잠복 중에는 안 보이게 머리 칸을 빈 칸으로 보낸다
+			if {_hat} is true:
+				{_v}.sendEquipmentChange({_p}, EquipmentSlot.HEAD, {_air})
+
+function invisShowHand(p: player):
+	set {_main} to {_p}.getInventory().getItemInMainHand()
+	set {_off} to {_p}.getInventory().getItemInOffHand()
+	loop all players:
+		set {_v} to loop-player
+		if {_v} is not {_p}:
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HAND, {_main})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.OFF_HAND, {_off})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HEAD, {_p}.getInventory().getHelmet())
+
+every 2 ticks:
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		set {_p} to loop-player
+		set {_id} to "%uuid of {_p}%"
+		set {_on} to false
+		if {-invis::%{_id}%} is set:
+			if {-invis::%{_id}%} > now:
+				set {_on} to true
+		if {-beemode::%{_id}%} is "drive":
+			set {_on} to false
+		if {_on} is true:
+			invisHideHand({_p})
+			set {-invishid::%{_id}%} to true
+		else if {-invishid::%{_id}%} is set:
+			delete {-invishid::%{_id}%}
+			if {-beemode::%{_id}%} is not "drive":
+				invisShowHand({_p})
+
+# 투명 포션: 피해를 입거나 입히면 투명이 풀린다
+function invisBreak(e: entity):
+	if {_e} is a player:
+		if {-invis::%uuid of {_e}%} is set:
+			if {-invis::%uuid of {_e}%} > now:
+				set {_pl} to {_e}
+				remove invisibility from {_pl}
+				delete {-invis::%uuid of {_e}%}
+				clearStatus({_pl}, "potion_invis")
+
+on damage:
+	invisBreak(victim)
+	if attacker is set:
+		invisBreak(attacker)
+
+on death:
+	delete {-invis::%victim's uuid%}
+
+on join:
+	delete {-potcd::%player's uuid%::*}
+	delete {-invis::%player's uuid%}

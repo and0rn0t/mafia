@@ -1,0 +1,170 @@
+# [bow.sk] 활 스킬(당겨서 발사, 발사 후 쿨 2초): 충전 시간(최대 2초)에 비례해 데미지 3~12(실 체력: 화살 공통 기본 3 + 충전 추가 0~9), 화살 속도 증가. 최대 충전(1.5초)으로 쏘면 소닉붐 이펙트와 사운드.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: (충전 보스바는 지역 변수) {-bowstart}(당기기 시작 시각), {-bowcd}(쿨타임 종료 시각), {-bowextra::화살uuid}(그 화살의 추가 데미지, crossbow.sk 의 화살 on damage 가 기본 3 에 더하고 지움), {-skillitems::bow}
+# 데미지 3~12 은 기획 수치라 다시 곱하지 않는다. 화살 공통 기본 3(crossbow.sk)에 활 충전 추가분만 더한다.
+# 동작: 우클릭(당기기 시작) 때 시각을 기록 -> 놓아서 발사(on shoot)될 때 당긴 시간으로 충전도(0~1, 2초에 1)를 계산해 화살 속도와 데미지를 정한다.
+#   바닐라 활은 화살이 인벤토리에 있어야 당겨지므로, 당길 때 화살이 없으면 1개 지급한다(발사하면 소모되고 다음에 당길 때 다시 지급).
+#   쿨타임 중에는 우클릭을 취소해서 당기지 못하게 한다. 이 우클릭은 취소하지 않아야 당겨지므로 일반 skillHand 와 달리 cancel 을 쓰지 않는다.
+# 충전 속도(speed): 충전도 0 -> 1.5, 0 초과 1 미만은 선형으로 증가, 1(최대) -> 150. 아래 bowSpeed() 에서 고친다.
+# 화살 지급: 클라이언트는 당기기 시작할 때 자기 인벤토리에 화살이 있어야 당기는 상태로 인식한다(우클릭 이벤트에서 그때 화살을 주면 서버만 당기는 상태가 되어
+#   클라이언트는 당기지 않아 충전/발사가 안 됐다). 그래서 활을 든 동안 0.25초마다 화살이 없으면 미리 1개 지급하고, 발사로 소모되면 바로 다시 지급한다.
+# 보스바(Bukkit.createBossBar, main.sk 와 같은 방식)와 isHandRaised() 는 미검증.
+# 미검증: on shoot 의 shooter/projectile, 화살 속도 재설정, SONIC_BOOM 파티클.
+
+import:
+	org.bukkit.Particle
+	org.bukkit.Bukkit
+	org.bukkit.boss.BarColor
+	org.bukkit.boss.BarStyle
+	org.bukkit.Material
+	org.bukkit.inventory.ItemStack
+
+on load:
+	set {-skillitems::bow} to bow
+
+# 충전도(0~1)에 따른 화살 속도
+function bowSpeed(f: number) :: number:
+	# 집중 100%(최대 충전)이면 속도 150(사거리 제한 150칸과 같게. 999 로 두면 화살이 한 틱에 월드 밖까지 가서 서버가 멈춘다)
+	if {_f} >= 1:
+		return 150
+	return 1.5 + 2.5 * {_f}
+
+# 충전도(0~1)에 따른 추가 데미지(실 체력 0~9). 화살 공통 기본 3 에 더해 최종 3~12 이 된다.
+function bowExtra(f: number) :: number:
+	return hp(9 * {_f})
+
+# 활을 메인/오프핸드에 들고 있는데 인벤토리에 화살이 없으면 인벤토리 안쪽 칸에 1개 지급(핫바는 쓰지 않음, 핫바에 있는 화살은 치움)
+function bowArrow(p: player):
+	set {_h} to {_p}.getInventory().getItemInMainHand().getType().name()
+	set {_o} to {_p}.getInventory().getItemInOffHand().getType().name()
+	set {_has} to false
+	if {_h} is "BOW":
+		set {_has} to true
+	if {_o} is "BOW":
+		set {_has} to true
+	if {_has} is false:
+		stop
+	# 핫바(0~8번 칸)에 남아 있는 화살은 치운다(화살은 핫바가 아니라 인벤토리 안쪽 9~35번 칸에 둔다)
+	set {_i} to 0
+	while {_i} <= 8:
+		if {_p}.getInventory().getItem({_i}) is set:
+			if {_p}.getInventory().getItem({_i}).getType().name() is "ARROW":
+				set slot {_i} of {_p}'s inventory to air
+		add 1 to {_i}
+	if {_p}.getInventory().contains(Material.ARROW) is true:
+		stop
+	# 인벤토리 안쪽(9~35번 칸)의 첫 빈 칸에 화살 1개. 빈 칸이 없으면 기본 지급(addItem).
+	set {_j} to 9
+	while {_j} <= 35:
+		if {_p}.getInventory().getItem({_j}) is not set:
+			set slot {_j} of {_p}'s inventory to 1 arrow
+			stop
+		add 1 to {_j}
+	{_p}.getInventory().addItem(new ItemStack(Material.ARROW))
+
+every 5 ticks:
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		bowArrow(loop-player)
+
+on rightclick:
+	if skillHand(player, bow) is false:
+		stop
+	set {_id} to "%player's uuid%"
+	if {-bowcd::%{_id}%} is set:
+		if {-bowcd::%{_id}%} > now:
+			cancel event
+			stop
+	set {_p} to player
+	bowArrow({_p})
+	set {-bowstart::%{_id}%} to now
+	set {_start} to {-bowstart::%{_id}%}
+	# 충전 보스바: 당기는 동안 충전도(0~1)를 매 틱 막대로 보여준다. 최대 충전(2초)이 되면 막대와 제목 "집중"이 초록색으로 바뀌고 소리. 쏘거나 당기기를 취소하면 사라진다.
+	# 발사(on shoot)가 {-bowstart} 를 지우거나, 손을 내리는(isHandRaised 가 4틱 연속 false) 걸 보고 끝낸다. 같은 우클릭이 두 번 들어와도 {-bowstart} 값이 달라지면 앞의 루프는 끝난다.
+	set {_t} to colored "&e집중"
+	set {_b} to Bukkit.createBossBar({_t}, BarColor.YELLOW, BarStyle.SOLID)
+	{_b}.setProgress(0)
+	{_b}.addPlayer({_p})
+	set {_stts} to {_start}.getTimestamp()
+	set {_grace} to 0
+	set {_full} to false
+	loop 1200 times:
+		wait 1 tick
+		if {-bowstart::%{_id}%} is not {_start}:
+			exit loop
+		if {_p} is not online:
+			exit loop
+		if {_p}.isHandRaised() is true:
+			set {_grace} to 0
+		else:
+			add 1 to {_grace}
+			if {_grace} >= 4:
+				delete {-bowstart::%{_id}%}
+				exit loop
+		set {_nowd} to now
+		set {_ms} to {_nowd}.getTimestamp() - {_stts}
+		set {_cf} to {_ms} / 2000
+		if {_cf} > 1:
+			set {_cf} to 1
+		{_b}.setProgress({_cf})
+		if {_cf} >= 1:
+			if {_full} is false:
+				set {_full} to true
+				{_b}.setColor(BarColor.GREEN)
+				{_b}.setTitle(colored "&a집중")
+				play sound "block.note_block.pling" with volume 0.6 and pitch 2 to {_p}
+	{_b}.removeAll()
+
+# 활을 놓아 화살이 발사될 때(Skript 의 on shoot 는 ProjectileLaunchEvent 라 getBow 같은 활 전용 메서드가 없다). 우리 활 우클릭 기록이 있고
+# 메인/오프핸드 중 활을 든 상태의 화살만 처리한다(석궁 스크립트 발사는 제외).
+on shoot:
+	set {_p} to shooter
+	if {_p} is not a player:
+		stop
+	set {_id} to "%uuid of {_p}%"
+	if {-bowstart::%{_id}%} is not set:
+		stop
+	if projectile is not an arrow:
+		stop
+	set {_hand} to {_p}.getInventory().getItemInMainHand().getType().name()
+	set {_off} to {_p}.getInventory().getItemInOffHand().getType().name()
+	if {_hand} is not "BOW":
+		if {_off} is not "BOW":
+			stop
+	set {_pr} to projectile
+	set {_nowd} to now
+	set {_sd} to {-bowstart::%{_id}%}
+	set {_ms} to {_nowd}.getTimestamp() - {_sd}.getTimestamp()
+	set {_f} to {_ms} / 2000
+	if {_f} > 1:
+		set {_f} to 1
+	if {_f} < 0:
+		set {_f} to 0
+	delete {-bowstart::%{_id}%}
+	set {_v} to velocity of {_pr}
+	set {_sp} to bowSpeed({_f})
+	set velocity of {_pr} to (normalized {_v}) * {_sp}
+	# 사거리 150칸 제한(crossbow.sk 의 arrowTrack)
+	arrowTrack({_pr}, location of {_p})
+	# 추가 피해(화살 기본 3 에 더해져 3~12). crossbow.sk 의 화살 피해 처리가 읽는다.
+	set {-bowextra::%uuid of {_pr}%} to bowExtra({_f})
+	set {-bowcd::%{_id}%} to now + 2 seconds
+	set item cooldown of bow for {_p} to 2 seconds
+	# 최대 충전: 사운드 + 워든 소닉붐처럼 발사 방향으로 1칸 간격 일직선 소닉붐(최대 120칸, 블럭에 막히면 거기까지).
+	#   화살 속도 999 라 화살 위치를 읽는 방식은 믿을 수 없어서(맞기 전에 사라지면 위치가 틀어짐) 화살과 별개로 같은 방향 직선을 직접 따라간다.
+	#   블럭 판정은 Block#isPassable(미검증). 엔티티는 통과(화살이 맞아도 선은 끝까지 그린다).
+	if {_f} >= 1:
+		soundAround("entity.warden.sonic_boom", location of {_p}, 0.7, 1.4)
+		set {_eye} to {_p}.getEyeLocation()
+		set {_nd} to normalized {_v}
+		set {_d} to 1
+		while {_d} <= 120:
+			set {_fx} to {_eye} ~ ({_nd} * {_d})
+			if {_fx}.getBlock().isPassable() is false:
+				exit loop
+			{_fx}.getWorld().spawnParticle(Particle.SONIC_BOOM, {_fx}, 1, 0, 0, 0, 0, null, true)
+			add 1 to {_d}
+	# 발사로 소모된 화살을 바로 다시 지급(다음 당기기 전에 클라이언트에 반영되게)
+	wait 1 tick
+	bowArrow({_p})

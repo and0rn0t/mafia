@@ -1,0 +1,665 @@
+# [마피아 서버로 옮긴 사본] MCK(andornot 저장소)의 전투 코드를 마피아 서버의 PVP 월드에서만 돌도록 고친 것(pvp_*.sk). 연결·수정 내용은 pvp.sk 머리말. 아래 MCK 원래 문서의 저장소·게임 진행 설명은 마피아 서버에는 해당하지 않는다.
+# ==============================================================================
+# [인수인계 문서] 이 주석은 프로젝트 전체 규칙입니다. 작업을 이어받는 AI는 가장 먼저 읽으세요.
+# 파일/변수/스킬을 추가하거나 바꾸면 이 주석도 반드시 같이 갱신하세요.
+# ==============================================================================
+#
+# 1. 프로젝트
+#   - 마인크래프트 PvP 서버를 Skript로 제작 중.
+#   - 스태미너 게이지(0~100)는 배고픔 바로 표시(경험치 바는 더 이상 안 씀: 항상 0, 그 자리는 locate bar. 음식 수치 = 스태미너/5, main.sk stFoodSync, 리소스팩이 아이콘을 ⚡ 로 교체, 굶주림 피해/바닐라 증감 차단, 달리기는 스태미너와 무관하게 허용: jump.sk 가 비행 허용을 두 모드 모두 항상 켬). 추가 기획 진행 순서: 1) 배고픔 바 ⚡(완료) 2) 경험치 바 자리를 locate bar 로(완료: 스태미너 경험치 바 쓰기 제거, 전원 waypoint_transmit_range 0) 3) 핑 시스템(Q) 4) locate bar 팀원/오브젝트 표시 5) 네더의 별/불길한 병/불사의 토템 발광.
+#   - 아이템 기반 스킬(석궁, 낚싯대 등)을 계속 추가할 예정.
+#   - 스킬 아이템은 일반 아이템을 습득 불가하게 할 예정이라, 스킬 아이템 판정은 재질 단위로 충분.
+#     단, 포션 3종은 재질이 같으므로 포션 종류까지 구분해야 함(9번 참고).
+#
+# 2. 환경 (사용자가 jar 파일을 직접 올려 확인한 값)
+#   - Skript 2.13.0, skript-reflect 2.6.1. SkBee 등 다른 애드온은 없다고 가정.
+#   - 서버: Paper 1.21.11 (build 127). 데미지 소스(1.20.4+), 아이템 쿨타임 그룹(1.21.2+) 사용 가능.
+#   - AI는 서버를 실행해 볼 수 없다. 문법은 jar 안의 정의를 읽어서 확인한다.
+#
+# 3. 작업 규칙 (AI용)
+#   - 문법을 기억이나 추측으로 쓰지 말 것. 과거에 추측 문법 때문에 컴파일 오류가 여러 번 났음.
+#   - 확인 방법: Skript jar를 unzip 한 뒤 lang/default.lang 의 pattern 항목과
+#     클래스 파일의 문자열(strings 명령)에서 패턴을 찾는다.
+#     새 대화라면 사용자에게 Skript-2_13_0.jar, skript-reflect-2_6_1.jar 를 다시 올려달라고 요청.
+#   - jar에서 확인 못 한 문법이나 직접 실행해 보지 못한 동작은 사용자에게 "미검증"이라고 명시.
+#   - 컴파일 오류가 나면 줄 번호와 "Can't understand" 뒤 문구를 요청해서 그 줄만 고친다.
+#   - 코드 들여쓰기는 반드시 탭 문자. 파일 줄바꿈은 CRLF. 사용자는 윈도우 메모장으로 편집한다.
+#   - 파일을 고치면 GitHub 저장소 and0rn0t/andornot (루트에 .sk 파일들)에 커밋/푸시한다. 사용자 PC 가
+#     sync_to_server.bat 로 저장소를 받아 서버 스크립트 폴더에 자동 복사한다(리로드는 사용자가 /sk reload all).
+#     저장소가 세션에 연결되지 않았으면 예전처럼 파일 전체를 다시 제공해서 그대로 덮어쓰게 한다.
+#     저장소 파일은 CRLF 그대로 저장(.gitattributes 로 변환 끔). 
+#   - 답변은 한국어, 해요체, 간결하게. 모르는 것은 모른다고 말한다.
+#   - 이전 코드를 고칠 때는 요청하지 않은 동작을 바꾸지 말고, 바꿨다면 반드시 알린다.
+#
+# 4. 변수 규칙 (AI가 전부 관리)
+#   - 런타임 상태는 모두 임시 변수 {-이름::플레이어uuid}. 키는 %player's uuid% 형태.
+#     (임시 변수는 디스크에 저장되지 않음. 이름 키 {%player%::x} 형태는 쓰지 않는다.)
+#   - 새 변수를 만들면 아래 변수 목록에 추가하고, 지우면 목록에서도 지운다.
+#   - 플레이어 접속 시 초기화가 필요한 변수는 main.sk 의 on join 에서 초기화한다.
+#   - 여러 스킬이 같은 상태를 건드리는 경우(잠금 등)는 변수 하나를 같이 쓰지 말고
+#     출처별 키로 나눈다. 각 출처는 자기 키만 만들고 지우고, 읽는 쪽은 {변수::uuid::*} 가
+#     비어 있는지만 본다. 같은 스킬을 여러 명이 동시에 쓸 수 있으면 키에 사용자 uuid를 붙인다.
+#     새 잠금 출처(불사의 토템 등)는 여기 목록에 키를 추가하고, 끝날 때 반드시 자기 키를 지운다.
+#
+#   변수 목록
+#   {-st::uuid}              스태미너 0~100                         main, jump
+#   {-stcap::uuid}           스태미너 회복 차단 카운터(0 이하면 회복) main, jump
+#   {-oc::uuid}              전투 중 카운터(회복 이벤트 차단용)      main
+#   {-jump::uuid}            도약(점프 두 번) 실행 중                       jump
+#   {-jumplock::uuid::출처}  도약 잠금. 하나라도 있으면 도약 불가      jump(읽기), fishing, main(접속 시 삭제)
+#                            출처 키: fishing_낚시꾼uuid, (예정) totem
+#   {-bowcool::uuid}         석궁 발사 쿨타임                        crossbow, main(초기화)
+#   {-hook::uuid}            현재 던져진 찌                          fishing
+#   {-hooked::uuid}          찌에 걸려 있는 대상                     fishing
+#   {-hookcd::uuid}          낚싯대 쿨타임 종료 시각                 fishing
+#   {-hookcdset::uuid}       이번 투척의 쿨타임 시작 여부            fishing
+#   {-hookdmg::uuid}         이번 투척에서 당겨서 이미 피해를 줬는지    fishing
+#   {-pickstack::uuid}       곡괭이 중첩 수                          main(곡괭이 데미지, 접속 시 삭제)
+#   {-pickexp::uuid}         곡괭이 중첩 만료 시각(타격마다 +3초)       main(접속 시 삭제)
+#   {-atkcd::uuid}           공격 쿨다운 충전도 0~1(매 틱 기록)        main(기록/접속 시 삭제), cooldownScale 이 읽음
+#   {-skilldmg::uuid}        스킬이 데미지를 주는 중(철퇴/창 보정 제외용). 공격자 uuid   fishing(set/delete), main(읽기, 접속 시 삭제)
+#   {gamecfg::teams|mode|random|teammode} 게임 사전 설정(teammode: mmr=매튜 렁/random), {rating::uuid}·{rating::games::uuid} 내부 승점(기본 90, 0 미만 불가)/경기 수(저장, 티어 표기로만 공개), {ratingsince::uuid} 지금 승점 도달 시각(밀리초, 티어 동점 순위용, tier.sk)(저장 변수, 대시 없음. 팀 수 0=개인전)  gamesetup
+#   {-kc::uuid}              킬 연출 중 표시(연출 끝/접속 시 삭제)                killcine
+#   {-kcorig::uuid} {-groundwin}   라운드 종료 연출 중 원래 위치 / 라운드 승리 팀 키   killcine, game
+#   {-g*}                    게임 진행 상태({-gmode} {-gtarget} {-gteams} {-gplist::*} {-gteamlist::*} {-gname} {-gscore} {-gk/gd/ga/gdmg::uuid} {-gstar} {-gdead} {-gwinner} {-gpteam/gpname::uuid} 등)   game(자세한 설명은 game.sk 맨 위)
+#   {-gslot::uuid::아이템id}   게임 시작 직전 로비에서 정리해 둔 구성 아이템 칸(0~35). 게임 중 loadoutGive 가 이 칸에 먼저 넣음, gameCleanup 이 지움   game, items
+#   {-gfinale} {-gfcam}(종료 연출 카메라 엔티티) {-gfatt::uuid} {-gfv::*}(종료 연출 시청자 = 참가자+관전자) {-gfretry::uuid} {-gdummies::*} {-gpotmres}(POTM 이름) {-gpotmid}(POTM 참가자 id) {-gfgen} {-gdisp} {-gdummyid::uuid}   종료 연출 상태(POTM 자동 선정, 더미, 결과 디스플레이)   gameend
+#   {-grand::uuid::1~4} {-grandon}   랜덤 아이템 모드로 게임 중 뽑은 구성/켜짐 표시(게임이 끝나면 지움, 저장된 구성 {loadout} 은 그대로)   items, game
+#   {gamecfg::map} 게임 맵 월드 이름, {gamecfg::maprandom} 매 게임 랜덤 모드(관리자 메뉴 맵 설정, 저장 변수)  admin, game
+#   {gamecfg::loc::lobby|stage_<월드>::world|x|y|z|yaw|pitch} 로비 위치/월드별 결과 무대 위치(저장 변수, 월드 이름+좌표라 월드가 안 올라와 있어도 안 사라짐)  gameend(gcSaveLoc/gcLoadLoc)
+#   {gamecfg::loc::respawn_<월드>::world|x|y|z|yaw|pitch} 월드별 리스폰 지점(저장 변수)  admin, game(gcRespawnKey)
+#   {-gdropon|gdropchest|gdropgen|gdropflag::uuid} 상공 낙하(겉날개) 상태(RAM, 낙하 중 스킬/도약 불가)  game, killcine, skill_core(skillHand), potions, fishing, jump
+#   {gamecfg::loc::startcam_<월드>::world|x|y|z|yaw|pitch} 월드별 시작 카메라 위치(저장 변수)  admin, game(gcStartCamKey)
+#   {gamecfg::loc::lineup_<월드>::world|x|y|z|yaw|pitch} 월드별 팀 라인업 위치(시작 연출 더미 줄 가운데, 저장 변수)  admin, startcine(gcLineupKey)
+#   {-gstarting} {-gstartgen} {-gstartprev::uuid} 게임 시작 연출(시작 카메라/팀 더미 라인업, 19초) 상태(RAM)  game, startcine
+#   {-gsl::*}(라인업 자리) {-gsdummies::*}(보여주기용 더미)  startcine   /   {-grgen} 녹아웃 라운드 시작 연출 세대(RAM)  game
+#   {gamecfg::loc::training::world|x|y|z|yaw|pitch} 훈련장 위치(저장 변수, 월드 이름+좌표)  lobby
+#   {gamecfg::loc::tutorial|tutorialcam::world|x|y|z|yaw|pitch} 튜토리얼 스폰/시작 카메라(저장 변수, 튜토리얼 월드는 맵 추첨/선택 제외), {tutpending::uuid} 튜토리얼 미완료(저장), {-tut::uuid} 진행 상태  tutorial, admin(mapExcluded)
+#   {matchcount}, {matchlog::번호::json|mode|winner|map|rand|time|potm|rv::uuid|rvn::uuid}, {matchshelf::월드_x_y_z} 매치 기록/리뷰/등록 독서대(저장 변수)  matchhistory
+#   {ustat::uuid::win|loss|k|a|d|name}, {ustat::uuid::item::아이템id}, {istat::pick::아이템id}, {istat::win::아이템id}, {istat::pair::아이템id::아이템id}   유저 누적 통계/아이템 통계(저장 변수, stats.sk, 이름은 모두 stats.sk 에서만 씀)
+#   {-stgui::uuid}   독서대 3칸 메뉴 열림(RAM, stats.sk)
+#   {tieroff}   true 면 티어 표시 꺼짐(저장, tier.sk /티어 on|off)
+#   {gamecfg::unlock}  관리자 설정 잠금 해제 표시(저장 변수, true 면 잠금 꺼짐, 없으면 잠금 켜짐)  admin
+#   {gamecfg::worldlist::이름} 서버/스크립트를 불러올 때 자동으로 불러올 월드(저장 변수)  world
+#   {gamecfg::target::모드}   목표 스코어/승점(저장 변수, 대시 없음)                  gamesetup(gcTarget)
+#   {-ingame}                게임 진행 여부(true 면 무기고 해제). 지금은 아무도 안 켬   items(읽기), 나중에 게임 설계에서 설정
+#   {itemorder::*}           아이템 GUI 표시 순서(저장 변수, 대시 없음)           items
+#   {loadout::uuid::1~20} {loadoutset::uuid}  플레이어별 아이템 구성 id(4세트 x 4칸, 저장칸은 세트당 5칸 간격, 사용 중 세트 번호, 저장 변수, 대시 없음)       items
+#   {-itemgui::uuid} {-itemguislot::uuid} {-itemguimap::uuid::슬롯} {-itemguipick::uuid}  아이템 GUI 상태   items
+#   {-skillitems::키}        스킬 아이템 등록 (crossbow, fishing_rod) 각 스킬 파일의 on load
+#   {-status::uuid::출처}    상태이상 종료 시각(날짜). 만료되면 main 이 지움   skill_core 함수, main(표시/만료), fishing
+#   {-statusname::uuid::출처} 상태이상 표시 이름(예: 구속)                      skill_core 함수, main
+#   {-statustype::uuid::출처} 상태이상 종류 bad/good(해로운/이로운)             skill_core 함수, main
+#   {-statusdur::uuid::출처}  상태이상 전체 시간(밀리초, 막대 길이 계산용)          skill_core 함수, main
+#   {-statuslabel::uuid::출처}  이름 뒤 가변 표시(예: " x2")   skill_core 함수, main
+#   {-tntcd::uuid}           TNT 쿨타임 종료 시각                    tnt
+#   {-tntownerp::TNT엔티티uuid} 던진 플레이어(피해 출처 지정용)     tnt
+#   {-tntowner::TNT엔티티uuid} 던진 사람 uuid(텍스트). 폭발하면 지움      tnt
+#   {-ccshown::uuid}         cc 타이틀을 보여주는 중(끝나면 clearTitle)   main(접속 시 삭제)
+#   {-nscd::uuid}            네더의 별 쿨타임 종료 시각               netherstar
+#   {-obcd::uuid}            불길한 병 쿨타임 종료 시각               ominousbottle
+#   {-clockstart} {-clockphase}  시계 낮/밤 주기 시작 시각(게임 시작 때 set) / 현재 시간대 "day"|"night"   clock, game
+#   {-splcd::uuid}           첨벙첨벙 쿨타임 종료 시각                splash
+#   {-milkcd::uuid}          우유 쿨타임 종료 시각                    milk
+#   {-radcd::uuid}           레이더 쿨타임 종료 시각                  radar(레이더 핑은 {-wping_*} 에 "uuid#r번호" 키로 저장, wpOwner 로 주인 판별)
+#   {-shcd::uuid}            삽 쿨타임 종료 시각(잠복이 끝난 뒤부터 15초)  shovel
+#   {-burrow::uuid}          삽 잠복 종료 시각(잠복 중이면 지금보다 뒤, 무적)  shovel(set), main(on damage 에서 읽기)
+#   {-splash::uuid}          첨벙첨벙 효과 종료 시각(효과 중이면 지금보다 뒤)   splash(읽기: tnt, fishing, projectile 은 splashActive 함수로)
+#   {-team::uuid}            소속 팀 이름(텍스트). 같으면 아군. 게임 시작 때 gBuildTeams(game.sk)가 채움   isAlly 로 읽기, tnt
+#   {-potcd::uuid::종류}     포션 쿨타임 종료 시각(종류: heal, stamina, invis)  potions
+#   {-invis::uuid}          투명 포션 효과 종료 시각(피해를 주고받으면 풀림)    potions
+#   {-invishid::uuid}        투명화 중 손 아이템을 숨겨 둔 상태 표시(끝나면 진짜 아이템을 다시 보냄)    potions
+#   {-exhaust::uuid}         불길한 병 탈진 종료 시각(탈진 중 stcap +1)   ominousbottle
+#   {-bottle::uuid}          불길한 병 효과 종료 시각(효과 중이면 지금보다 뒤)   ominousbottle
+#   {-healok::uuid}          전투 중 회복 차단을 통과시키는 표시(회복하는 동안만)  ominousbottle(set/delete), main(on heal 에서 읽기)
+#   {-stunend::uuid}         기절 종료 시각(지금보다 뒤면 기절 중)      skill_core(stun), isStunned 로 읽기, main(접속 시 삭제)
+#   {-stag_d::uuid}          체력바 위 상태이상 이름 표시(텍스트 디스플레이)   statustag
+#   {-sbar::uuid::효과이름}   효과 하나당 보스바 객체(BossBar)              main(접속 종료 시 제거)
+#                            출처 키: fishing_낚시꾼uuid
+#
+# 5. 스킬 추가 절차
+#   - 스킬마다 파일을 새로 만들고, 파일 안에서 자기 아이템을 on load 로 등록한다.
+#       on load:
+#       (탭)set {-skillitems::키이름} to 아이템타입
+#   - 우클릭 스킬은 맨 앞에서 skillHand 로 발동 여부를 판단한다.
+#       on rightclick:
+#       (탭)if skillHand(player, 아이템타입) is false:
+#       (탭)(탭)stop
+#       (탭)cancel event
+#   - 규칙: 메인핸드에 스킬 아이템이 있으면 그 스킬이 우선. 오프핸드 스킬은 메인핸드가
+#     다른 스킬 아이템이 아니고 창(SPEAR)도 아닐 때만 발동(창은 우클릭으로 쓰는 아이템이라 취소하면 안 됨).
+#     단 메인핸드 스킬이 쿨타임(아이템 쿨타임)이면 오프핸드 스킬이 발동한다. 그래서 모든 스킬은 쿨타임을 set item cooldown 으로도 걸어야 한다. 이 판정은 아래 함수가 전부 처리한다.
+#   - 스킬이 damage 효과로 직접 데미지를 줄 때는 앞뒤로 {-skilldmg::%공격자 uuid%} 를 set / delete 한다(fishing.sk hookDamage 참고).
+#     그래야 main.sk 의 철퇴 x0.3, 창 상한 보정이 스킬 데미지에 적용되지 않는다. (투사체 데미지는 자동 제외)
+#   - 새 스킬이 쓰는 변수는 위 목록에 추가하고, 공용으로 필요한 함수는 이 파일에 추가한다.
+#   - 아이템 쿨타임 표시는 set item cooldown of 아이템타입 for 플레이어 to 시간 (재질 단위).
+#   - 상태이상(해로운/이로운 모두: 구속, 기절, 곡괭이 중첩, 네더의 별, 불길한 병 등)은 아래 함수로 보스바에 표시한다.
+#     표시/만료 처리는 main.sk 가 한다(효과 하나당 보스바 하나, 여러 개 쌓임).
+#       setStatus(대상, "출처키", "표시이름", 시간[, "good" 또는 "cc"])   예: setStatus({_t}, "fishing_%{_id}%", "구속", 5 seconds)
+#         마지막 인자는 생략하면 해로운 효과(bad, 빨강), "good" 이면 이로운 효과(초록). 이로운 효과를 걸 땐 반드시 "good".
+#         모든 행동을 막는 cc(기절 등)는 "cc": 보스바가 아니라 타이틀(이름)+서브타이틀(진행도 막대). 일부 행동만 막는 cc(구속 등)는 기본(bad) 보스바 + 막힌 행동 시도 시 ccDeny(플레이어) 호출.
+#       clearStatus(대상, "출처키")                   일찍 끝나는 모든 경우에 호출 (시간이 다 되면 자동 소멸)
+#     출처 키는 {-jumplock} 처럼 스킬/시전자별로 나눈다. 같은 이름의 상태가 여러 출처에서 걸리면
+#     보스바에는 이름 하나만 남은 시간이 가장 긴 것 기준으로 표시된다. 막대 길이는 그 효과의 남은 시간 비율(남은 초는 표시하지 않음, 매 틱 갱신).
+#
+# 6. 파일 구성
+#   - skill_core.sk : 이 문서 + 스킬 공용 함수
+#   - main.sk       : 스태미너 회복/표시, 상태이상 보스바 표시, 전투 중 처리, 경험치 차단, 아군 오사 방지(같은 팀 플레이어끼리 모든 피해 취소, priority lowest)
+#   - jump.sk       : 점프 두 번(비행 전환 이벤트) 대시 스킬
+#   - crossbow.sk   : 석궁 스킬
+#   - fishing.sk    : 낚싯대 스킬
+#   - gamesetup.sk  : 게임 사전 설정 GUI(팀 수/게임모드/랜덤 아이템, 변경 시 전체 알림). 게임 시스템은 gcTeams()/gcMode()/gcRandom() 로 읽는다
+#   - admin.sk      : /admin 관리자 메뉴(6줄 GUI, op 전용). 앞으로 관리자 전용 기능은 이 메뉴에 버튼으로 추가한다(추가법은 admin.sk 맨 위)
+#   - world.sk      : 월드 관리 명령(/world list|create|rename|forget|tp|info, 관리자 전용). 게임 로직과 무관
+#   - tutorial.sk   : 첫 접속자 튜토리얼(리소스 팩 대기 -> 튜토리얼 월드 로딩 -> 시작 카메라 -> 스폰 -> 단계: 도약/핑/무기고/포션), 도움말 다이얼로그(/도움말, 무기고 칸 8, 항목: 튜토리얼 4단계 + 모드/티어/자동 회복), /튜토리얼. 훅: tutHook(p, "leap"|"ping"|"loadout"|"potion"). 새 조작을 튜토리얼에 넣으려면 tutKey/tutTitle/tutLines/tutStepCount 를 고치고 해당 기능에서 tutHook 를 부른다.
+#   - lobby.sk      : 로비 근처 PvP 금지(반경 lobbyPvpRadius()=50), 훈련장 위치({gamecfg::loc::training}), 훈련장 이동 NPC(관리자 메뉴 버튼으로 설치)
+#   - killcine.sk   : 킬 연출(치명타 취소 -> 킬 처리 -> 고정 방향 스켈레톤+정면 가까운 관전 카메라 -> 폭발 -> 5초 뒤 리스폰, 녹아웃 라운드를 끝내는 킬은 전원 관람 + 승리자 더미 클로즈업 + 타이틀). 새 스킬에 on death 정리를 만들면 kcClearState 에도 추가
+#   - killlog.sk    : 킬로그(killLogShow 함수를 killcine 도 호출)
+#   - blockguard.sk : 블럭 상호작용 차단(부수기/설치/블럭 사용/양동이, 크리에이티브 관리자만 예외)
+#   - stats.sk      : 아이템 통계/랭킹(독서대 3칸 메뉴 stMenu, 매치 끝 statRecord, dialog 로 랭킹/아이템 통계, 명령 /랭킹 /아이템통계)
+#   - matchhistory.sk: 지난 매치 기록(종료 때 결과창 JSON 저장, 관리자 메뉴로 등록한 독서대 우클릭 -> 4줄 GUI, 작성된 책 클릭 -> dialog 결과창 + 한 줄 리뷰, 번호 MATCH 001 형식)
+#   - gameend.sk    : 게임 종료 연출(마지막 킬 연출을 모두 관전 -> 승리 팀 알림 -> 효과음 end 재생 + 카메라 이동(소리 시작 1.4초에 타이틀) -> 승리 팀 더미는 처음부터 보임(소리 시작 전까지 화면 암전, 소리와 함께 서서히 밝아짐) + 파티클 폭죽(소리 없음), 카메라는 줄 왼쪽/오른쪽 끝 바깥 약 1.5칸에서 옆모습을 비스듬히 보여 줌 -> 결과창은 연출 동안 숨기고(gfResultHide) 15초(소리 끝날 즈음) 투표 시작 때 보임(gfResultShow) + POTM 투표 + 투표 /potm -> 15초 뒤 로비).  관리자 명령 /gamestop(게임/연출 중단), 결과는 승리 팀 더미 뒤 텍스트 디스플레이로 표시(로비 위치/월드별 결과 무대 위치는 관리자 메뉴 버튼으로 저장. 종료 연출은 게임이 진행된 월드의 무대에서 하고 POTM 투표까지 거기서 끝낸 뒤, 로비 월드 무대에도 더미/결과를 놓는다. 무대는 다음 게임 시작 전까지 유지), POTM 투표는 승리 팀 더미 우클릭(득표는 별 개수)
+#   - gametab.sk    : 게임 중 탭리스트(헤더에 팀 스코어와 K D A DMG ITEM, 플레이어 줄 전적 + 구성 아이템 아이콘 전부(로비 탭리스트와 같음), 팀 순서 정렬). 칸 너비는 gtNameW 등 한 곳에서 조절
+#   - game.sk       : 게임 진행(시작/종료, 팀 배정, /sameteam 테스트용 전원 1팀 토글, 전적 K/D/A/피해, 바운티, 녹아웃, 크라운, 승리 판정). 맵 연결 자리는 gameSpawn(). 기획은 9번 아래 10번
+#   - clock.sk      : 시계 아이템(낮/밤 60초 주기, 구성에 넣으면 작동: 근접/원거리 피해 보정, 도약 비용 +20, 교체 알림과 겉모습 교체). jumpCost() 를 jump.sk 가 읽음
+#   - bow.sk        : 활 스킬(충전 데미지, 소닉붐)
+#   - blazerod.sk   : 블레이즈 지팡이 스킬(화염구, 3번째 사용 5연발)
+#   - bee.sk        : 꿀벌 스킬(쿨 75초, 분류 2): 꿀벌 드론을 탑승 조종(본체 더미는 앉아 있고 피격 피해는 본인에게 전달), 독침/자폭/조종 중지 3아이템, (가속/질주는 삭제됨, 꿀벌 스태미너 {-beest}/{-beelock} 는 배고픔 바 표시용으로만 남음)(조종 중지만 즉시 사용 가능(자폭 제외)), 본체 50칸 제한, 아이템은 벌 스폰 에그, 조종 중 화면 체력=꿀벌 체력/본체 체력은 더미 머리 위(변수 {-beebar}, {-beeslot}, {-beesnd}). 자세한 건 bee.sk 맨 위.
+#   - cdnotify.sk   : 쿨타임 8초 이상 스킬의 쿨타임이 끝나면 액션바에 "<스킬> 사용 가능"(소리 없음). 4틱마다 쿨타임 상태 변화를 감시(변수 {-cdn::uuid::이름}). 새 스킬이 8초 이상이면 cdScan 에 추가
+#   - soundfx.sk    : 거리 조절 사운드 함수 soundAround(소리, 위치, 볼륨, 피치) (최대 청음 60칸, 40칸까지 최대 볼륨, 40~60칸 감쇠. 월드 위치 효과음은 전부 이 함수를 쓴다, 미검증)
+#   - trident.sk    : 삼지창 스킬(우클릭 충전 1.5초 -> 시선 방향 순간이동 4~16칸, 도착 지점 반경 6칸의 적에게 피해 4, 쿨 18초, 근접 7). 분류는 1(금속 무기류)로 정함(확인 필요)
+#   - projectile.sk : 모든 발사체 최대 사거리 150칸(넘으면 제거)
+#   - windburst.sk  : 연막탄 스킬(반구 모양, 블럭에 막히면 번지지 않음)
+#   - startcine.sk  : 게임 시작 연출(먼저 리스폰 지점 시점으로 맵 로딩 구간 + 액션바 loading..., 이어서 시작 카메라 + 음악 gamestart + 맵 이름, 팀 더미 라인업 3구도 + 팀 이름, "강하를 준비하세요", 19초)과 음악 함수 bgmPlay/bgmStopAll
+#                     리소스팩 mck: resourcepack/mck(원본) + build_pack.py(zip/SHA-1 생성). 소리는 mck:gamestart(ogg -6dB, 재생 음량 bgmVolume()), mck:end(게임 종료 연출 효과음, 약 15초, gameend.sk 가 타이틀과 동시에 재생), mck:knockout(킬 연출 시작, 피격자와 공격자, -6dB)과 mck:killsound(더미 부서질 때 공격자에게만, -9.5dB)(killcine.sk, 피격자는 예전 바닐라 소리 3개). 녹아웃 라운드 시작(game.sk gRoundNext)은 5초 카운트다운(소리 없음, roundstart 음악은 제거됨)
+#   - quickuse.sk  : 즉시 사용 옵션({quickuse::uuid}, 무기고 메인 화면 칸 17 토글). 무기류 외 버프/디버프/포션류로 칸을 바꾸면 가짜 우클릭 이벤트로 바로 사용. 도약 토글은 칸 8.
+#   - nick.sk       : op 전용 가짜 신분(/nick <이름> [스킨 계정]으로 적용/몇 번이든 변경, /nick skin, /nick reset 으로 진짜 신분 복귀, 데이터 삭제 없음). 접속 때(AsyncPlayerPreLoginEvent) 프로필을 같은 UUID+가짜 이름+스킨으로 교체(서버 안 UUID 는 못 바꿈: 1.19+ 채팅 서명 키 검증)하고 패킷용 가짜 UUID 표({-umr2f}/{-umf2r})를 채움. nickProfile(p) 는 마네킹용 가짜 UUID 프로필(gameend/startcine 사용). 헤더 주석 참고, 전부 미검증
+#   - uuidmask.sk   : ProtocolLib 로 다른 사람에게 가는 패킷(PLAYER_INFO/SPAWN_ENTITY/CHAT 등) 속 진짜 UUID 를 nick.sk 의 가짜 UUID 로 교체(핵 클라이언트 대비). ProtocolLib 1.21.11 호환 빌드 필요, /uuidmask status|kill|revive, 전부 미검증
+#   - cmdhide.sk    : op 가 아닌 사람은 게임 명령어(cmdAllowed 허용 목록: 참가, lobby, 랭킹, 아이템통계, 튜토리얼, 도움말, 도움말항목, matchreview)만 사용 가능, 나머지는 실행 시 알 수 없는 명령 메시지 + 탭 자동완성/목록에서 제거. 게임 명령어를 새로 만들면 cmdAllowed 에 추가할 것, 미검증
+#   - ready.sk      : 준비 시스템. 게임 중이 아닐 때 모두의 핫바 8번째 칸(인덱스 7)에 준비 블록(녹색 "준비됨"/붉은색 "준비되지 않음" 콘크리트, 우클릭 토글), 탭리스트 닉네임 색(녹/적, items.sk readyColorJ), 접속자 전원이 준비되면 액션바 5초 카운트다운 뒤 gameBegin(vote.sk) 자동 실행(투표 중에는 준비 블록이 사라짐). 관리자 메뉴 아이템은 6번째 칸(인덱스 5). 게임 관전을 고른 사람은 시작 조건에서 제외
+#   - datareset.sk  : 관리자 /resetdata <match|rating|all> confirm — 지난 매치 기록({matchcount}/{matchlog::*})과 레이팅({rating::*}/{ratingsince::*}) 삭제(되돌릴 수 없음, confirm 필요, 게임/투표/종료 연출 중 거부, 독서대 등록은 유지)
+#   - vote.sk       : 게임 시작 전 맵+모드 투표. gameBegin(by)이 진입점(ready.sk 와 관리자 "게임 시작"이 부름). 맵 후보(mapCandidates) x 모드(gcModeIds) 조합 3개(서로 다른 맵 우선)를 로비 더미(마네킹, 태그 votedummy, 위치는 관리자 "투표 더미 위치 지정" 키 votedummy, 없으면 로비 앞)로 세우고 15초 투표(우클릭, 전원 투표하면 바로 마감) -> 득표 비례 확률 룰렛(더미 발광 순환) -> 로드아웃 변경 20초(액션바 남은 시간) -> {-gvmap}/{-gvmode} 를 두고 gameStart(팀 매칭+시작 연출). 켜고 끄기: 관리자 "맵/모드 투표" 버튼({gamecfg::vote}, 기본 on). 취소: /gamestop, 관리자 "게임 강제 종료"(voteCancel). 변수(RAM): {-gvoting}{-gvphase}{-gvgen}{-gv::*}{-gvd::*}{-gvote::uuid}{-gvmap}{-gvmode}
+#   - spectate.sk   : 게임 관전 토글. 게임 중이 아닐 때 모두의 7번째 칸(인덱스 6)에 흰색 "게임 참여"(기본)/회색 "게임 관전" 콘크리트(우클릭 토글). 관전을 고르면 탭리스트 닉네임이 회색, 시작 조건(전원 준비)에서 제외, 게임 시작 때 {-gplist} 에 안 들어가고 {-gwatch::uuid} 에 올라 관전 모드로 게임 월드 중앙에서 구경, 그 게임에는 /참가 불가. 변수: {-wspec::uuid}(관전 선택, RAM), {-gwatch::uuid}(이번 게임 관전자, game.sk gameStart 가 채우고 gameCleanup 이 지움)
+#   - mapgen/       : 맵 생성기(cube_map.py -> cube_map.schem, WorldEdit //schem 으로 붙여넣기). 3x3x3 큐브 퍼즐형 플랫폼 맵 v2(조각 13개: 아래 4/가운데 5/위 4, 세로줄마다 색, 가운데 검정, 위층<->가운데 계단길, 가운데층 모서리 4개 순환 다리, 아래층은 장식 지지대만, 밝기 블록 조명). sponge_map.py = 멩거 스펀지형(20조각, 흰 석영 길). 스크립트가 아니라 서버에 안 올라간다
+#   - tier.sk       : 티어 시스템(승점 -> 브론즈~챌린저, 닉네임 앞 티어 아이콘. 탭리스트/게임 결과/매치 기록에만 표시, 채팅/킬로그 제외)
+#                     관리자 /티어 on|off ({tieroff}=true 면 꺼짐, 저장): 내부 레이팅은 그대로 변동, 아이콘/랭킹(/랭킹, 기록실 메뉴의 랭킹 아이콘만 숨김, 칸 위치는 고정)/도움말 6번 항목 숨김, 탭·결과 열 폭 재정렬(tierPreMax/tierPreW=0). 미검증
+#   - flintsteel.sk : 부싯돌과 부시 스킬(취약 + 불태움)
+#   - totem.sk      : 불사의 토템 스킬
+#   - sword.sk      : 검 패시브(피해 1회 막기, 쿨 30초, 준비 중 체력바 양끝 흰색 괄호). 판정은 main.sk 첫 on damage, 색은 healthbar.sk
+#   - anvil.sk      : 모루 스킬
+#   - tnt.sk        : TNT 스킬(투척, 33틱 뒤 기절 폭발)
+#   - statustag.sk  : 해로운 상태이상을 체력바(healthbar.sk) 위에 <이름> 으로 표시
+#   - [남은 추가 기획(인수인계)] 1~2단계 완료(배고픔 바 ⚡, 경험치 바 자리 locate bar + 전원 waypoint_transmit_range 0: main.sk locatorHide). 아래는 아직 안 한 일이며 모두 미검증/조사 메모다.
+#       3) 핑 시스템: Q키(손 버리기 이벤트 취소로 받을 수 있음) -> 바라보는 위치에 파란 핑, 근처(감지 범위/정확도는 만들 때 사용자와 정함)에 적이 있으면 빨간 핑 + 그 적에게 팀원만 보는 빨간 발광(스코어보드 팀 색 방식은 game.sk gDropGlowOn 참고, 시청자별은 packet 이 필요해 불가능할 수 있음 -> 확인 필요).
+#       4) locate bar 팀원(초록)/오브젝트(크라운 주황, 나머지는 만들 때 사용자에게 제안): 마인크래프트 locate bar 는 transmit_range(보이는 쪽) / receive_range(보는 쪽) 속성과 /waypoint modify <대상> color|style 명령으로만 조절된다. 팀 단위 가시성은 바닐라에 없어서(전송 범위는 모든 수신자에게 똑같이 적용) 방법을 먼저 조사할 것(예: 패킷 직접 전송, 팀원끼리만 같은 월드/범위를 쓰는 우회 등). 웅크리기/머리 장착/투명 포션 플레이어는 바에서 자동으로 숨겨진다.
+#       [조사 결과] Paper/Bukkit 에는 locate bar API 가 없다(SPIGOT-8073 미해결). 선택지: (A) 패킷으로 직접 waypoint 를 보냄(WayBar 0.2.0 이 1.21.6~1.21.11 에서 ProtocolLib 로 하는 방식, 시청자별 완전 제어 가능, Skript 만으로는 어려워 NMS 리플렉션이나 작은 Java 플러그인 필요). (B) 마커 엔티티 방식: 투명한 갑옷 거치대(LivingEntity)에 waypoint_transmit_range 속성과 /waypoint modify 색을 주고, Player#hideEntity 로 적에게서 숨김 -> hideEntity 가 locate bar 에도 먹히는지는 실험으로 확인해야 함(Skript 만으로 가능, 먼저 이것부터 실험 권장). 모든 플레이어 transmit_range 0 은 유지한다.
+#       [ProtocolLib 확인] 사용자가 준 ProtocolLib.jar 는 5.5.0-SNAPSHOT-9cb125f 인데 paper-plugin.yml api-version 이 "26.3"(26.x 서버용 빌드)라서 Paper 1.21.11 에서는 로드가 거부될 가능성이 높다(미검증). 서버에 이미 1.21.11 에서 도는 ProtocolLib 이 있는지는 /version ProtocolLib 로 확인할 것. 다만 ProtocolLib 은 필수가 아니다: 전원 transmit_range 0 이라 바닐라 웨이포인트는 이미 없고, 우리가 보낼 웨이포인트만 서버 내부 패킷 net.minecraft.network.protocol.game.ClientboundTrackedWaypointPacket(정적 팩토리 addWaypointPosition/updateWaypointPosition/removeWaypoint, 아이콘은 net.minecraft.world.waypoints.Waypoint.Icon 에 색 지정)을 skript-reflect 리플렉션으로 CraftPlayer.getHandle().connection.send(...) 하면 된다(미검증, 클래스/메서드 이름은 1.21.11 Mojang 매핑 기준으로 확인할 것). ProtocolLib 의 TRACKED_WAYPOINT 패킷 타입에는 래퍼가 없어 쓰더라도 내부 객체를 직접 만져야 한다.
+#       [진행] waypoint.sk 완료(서버 확인됨): wpSend(시청자, uuid문자열, x, y, z, 색 10진수 RGB)/wpRemove(시청자, uuid문자열) 로 locate bar 점을 시청자별로 보낸다(서버 내부 패킷 ClientboundTrackedWaypointPacket, ProtocolLib 불필요). /wptest 로 시험. 숫자는 Math.toIntExact(Math.round(..)) 로 int 변환(intValue() 는 null). 핑 시스템(waypoint.sk): F키(손 바꾸기, on swap hand items. Q·휠 클릭은 삭제됨) -> 조준 자리 파란 핑 / 조준선(2칸)·조준 자리 주변(4.5칸)의 "화면에 보이는 적"(시야각 0.8 코사인 + hasLineOfSight, 벽 뒤 제외, 가장 가까운 하나)이면 그 적에게 빨간 핑(따라감), 5초(핑/발광 동일), 쿨다운 0.3초, 스팸 방지(3초 안 5번 -> 5초 제한 + 액션바, wpPingSpamSec/Count/LockSec), F 는 공격 쿨타임(attackStrengthTicker 리플렉션)을 저장/복원(미검증), 같은 팀에게만 locate bar + 소리 mck:pingblue/pingred. 숫자는 wpPingSec/CoolSec/Ray/Near. 시험: /pingtest [blue|red|clear](op, 게임 밖 본인에게만). 발광은 전부 시청자별 패킷: 엔티티 데이터 플래그(wpGlowSend) + 시청자에게만 보내는 가짜 팀(wpgrn 초록/wpred 빨강/wporg 주황, ClientboundSetPlayerTeamPacket, wpVTEnsure/wpColorApply/wpColorClear) -> 서버 스코어보드 팀과 무관하게 색이 정해진다. 우선순위 동료 초록(항상, 적에게는 안 보냄) > 빨간 핑 대상(투명 상태면 발광 안 켬) > 크라운 주황. 서버 스코어보드 팀 gpingred 는 더 이상 안 씀. 0.3초마다 재전송. 핑 생성 시 pmSync()+wpSyncViewers() 를 바로 불러 표식/점/발광이 같은 순간에 뜬다. 전부 미검증. 좌우 끝 붙이기(시야 밖 점을 바 끝에 붙이기)는 삭제함(wpEffPos 는 실제 위치만). wpTeamSync(0.1초마다): 게임 중 살아 있는 참가자에게 같은 팀 동료 초록(0x55FF55), 크라운 소지자 주황(0xFF8C1A, 본인 제외, 팀 무관) 점을 보내고 좌표가 바뀔 때만/3초마다 갱신, 빠진 점은 wpRemove. 캐시 {-wpset::보는사람::id}. 미검증. 다음: 네더의 별/불길한 병/불사의 토템 점+발광.
+#       5) 네더의 별/불길한 병/불사의 토템 오브젝트 발광(충돌 안 나게, 적은 표시 안 함): 크라운 발광은 스코어보드 팀 gcrown(GOLD) 이므로 같은 방식은 팀 충돌이 난다 -> 발광 색 우선순위 정할 것.
+#       핑 가시화(pingmark.sk, waypoint.sk 와 따로 돎): 핑 변수를 2틱마다 읽어 핑 자리 위(파란 1칸/빨간 대상 머리 위 2.7칸)에 마름모 표식 텍스트 디스플레이를 띄움(리소스팩 글꼴 mck:ping: U+E010 파랑/U+E011 빨강, 벽 너머로도 보임, 거리 비례 크기 pmScale, 핑을 볼 수 있는 사람에게만 showEntity). 미검증.
+#       핑 효과음(리소스팩에 추가됨): 파란 핑 mck:pingblue, 빨간 핑 mck:pingred (소리 크기는 둘 다 약 -24 LUFS 로 맞춤). 재생: play sound "mck:pingblue" to 플레이어 (Skript 의 play sound 는 리소스팩 사운드 이름도 받음, 미검증).
+#       리소스팩: 서버 적용은 server.properties 의 resource-pack URL(커밋 해시 고정) + sha1. 팩이 바뀐 마지막 커밋: `git log -1 --format=%H -- resourcepack/mck.zip`, sha1: `sha1sum resourcepack/mck.zip`.
+#   - [최근 변경] 체력바는 본인 포함 아군 초록/적 빨강(hpbar_vis). 크라운: 소지자 발광 주황(스코어보드 팀 gcrown=GOLD), 점수 1.5초당 1점({-gcprog} 진행도). 투표 더미: 스킨 계정 geia, 로비 소환 자리에서 7칸 앞(저장 위치가 4칸 안이면 밀어냄). POTM 은 ratingApply 에서 얻는 승점 2배(알림 없음).
+#   - [연출 카메라 규칙] 시작/킬/종료 연출의 카메라는 시선(yaw, pitch)을 샷 내내 고정하고 위치(앞뒤/좌우)로만 움직인다(WASD 이동처럼). 고정 pitch: 시작 0, 킬 0, 종료 -5. 시선을 대상에 맞춰 돌리면 화면이 끊겨 보여서 setDirection 에 고정 벡터를 쓴다.
+#   - healthbar.sk  : 머리 위 체력바(모든 모드 공통: 적은 빨강, 아군(isAlly)은 초록, 시청자별로 TEXT_DISPLAY 2개 {-hpbar_d}/{-hpbar_g} 를 showEntity/hideEntity 로 골라 보임) + 데미지 숫자(사용자가 직접 작성한 파일, statustag.sk 가 이 위에 상태이상을 띄움)
+#   - netherstar.sk : 네더의 별 스킬
+#   - potions.sk    : 포션 3종(체력/스태미너/투명) 스킬
+#   - ominousbottle.sk : 불길한 병 스킬
+#   - hats.sk       : 치장 모자 5종 + 기본 모자(안 보이는 가죽 모자, 머리 칸 기본) + 머리 칸 클릭 선택 GUI(/치장 명령은 폐기). 선택은 {hatsel::uuid} 저장, hatEnsure 가 복구. hatClear 로 게임 시작 때도 남김, 아직 해금 시스템 없음
+#   - radar.sk      : 레이더(만회 나침반) 스킬. 30칸 안 적 전원에게 핑 + 적에게 "감지됨!" 액션바
+#   - shovel.sk     : 삽 스킬. 3초 잠복(무적+투명), 쿨타임은 끝난 뒤부터
+#   - milk.sk       : 우유 스킬. 걸린 해로운 효과 전부 해제, 기절 중에도 사용 가능. [인수인계] 새 해로운 효과(상태이상)를 만들면 milk.sk 의 milkCleanse 에도 해제 처리를 넣을 것
+#   - splash.sk     : 첨벙첨벙(물 양동이) 스킬. 3초간 투사체 흡수. [인수인계] 투사체 무기를 새로 추가하면 splash.sk 맨 위 주석의 흡수 지점 목록을 보고 첨벙첨벙도 업데이트할 것
+#   * 아이템 lore 양식: 1번째 줄 [붉은 칼 아이콘+데미지] [시계 아이콘+쿨타임](items.sk 의 itemDamageText/itemCooldownText, 해당하는 것만), 2번째 줄부터 설명(itemLoreLines, 합니다체, 짙은 회색). 새 아이템/수치 변경 시 세 함수를 같이 갱신한다.
+#   * 새 아이템을 설계할 때 items.sk 의 분류(금속 -> 나무[활/쇠뇌류, 블레이즈 지팡이 포함] -> cc기 -> 포션류)에 안 맞으면 정렬 기준을 사용자에게 먼저 물어볼 것.
+#   - items.sk      : 아이템 시스템(카탈로그, 플레이어별 구성, 무기고 GUI, /itemorder 순서 편집, 탭리스트 아이콘). 상세는 items.sk 맨 위
+#   - stun.sk       : 기절 중 클릭/블럭/버리기 차단
+#
+# 7. jar에서 확인된 문법 메모 (Skript 2.13.0)
+#   - 낚시 이벤트: fishing line cast, entity hooked, bobber hit ground, fishing state change,
+#     fish caught, fish escape, fishing rod reel in 등. 이벤트 안에서 fishing hook 사용 가능.
+#   - hooked entity 표현식은 있으나, 걸려 있는 "상태"는 이벤트로 알 수 없어서
+#     skript-reflect 로 {_h}.getHookedEntity() / {_h}.setHookedEntity(...) 를 폴링한다.
+#   - 파티클: play 개수 종류 with offset of x, y, z and speed n at 위치 [in radius of n]
+#     (draw 문법은 2.13에 없음)
+#   - 데미지: damage 대상 by n hearts using 데미지소스 (damage source 는 실험 기능이라
+#     파일 맨 위에 using damage sources 필요. 사용 파일: fishing.sk)
+#   - 아이템 쿨타임: set item cooldown of 아이템 for 플레이어 to 시간
+#   - shoot ... from player 로 쏜 투사체는 on shoot 이벤트가 발동하지 않음.
+#     쏜 직후 last spawned entity 로 직접 표시한다.
+#   - 스크립트의 damage(on damage 의 damage, set damage to)는 하트 단위. 1 = 하트 1칸 = 체력 2 (jar 문서로 확인).
+#     damage 대상 by n hearts 도 같은 단위. 기획서의 수치는 하트가 아니라 실 체력 수치이므로,
+#     스크립트에서는 hp(n) 함수로 바꿔 쓴다(hp(6) = 3). 기획서 수치를 그대로 set damage 에 넣지 말 것.
+#   - 체력 비율: health of 대상 / max health of 대상 (둘 다 jar 에서 확인). 한 식에 같이 쓰면 파싱이 꼬일 수 있어 변수에 나눠 담는다.
+#   - 문자열 끝 검사: 변수 ends with "텍스트" (jar 에서 확인).
+#   - 조건 두 개를 or 로 묶는 문법은 없음. if 를 나누거나 값 목록(is a or b)만 쓴다.
+#   - 효과음: play sound "이름" with volume n and pitch n to 플레이어 (위치 생략 시 그 플레이어 위치에서 재생).
+#     위치에서 나는 효과음(스킬/폭발/발사음 등)은 play sound ... at 위치 대신 soundAround("이름", 위치, 볼륨, 피치)를 쓴다(soundfx.sk). 플레이어 한 명에게만 들리는 소리(UI/개인 피드백)는 to 플레이어 그대로.
+#     소리 이름 자체는 마인크래프트 쪽 값이라 jar로 확인 불가(미검증).
+#   - 남은 시간: seconds of 시간(timespan) 은 jar 에서 확인(ExprTimespanDetails). 날짜 - 날짜 = timespan.
+#   - loop-index: 리스트 변수를 loop 할 때 변수 이름의 * 자리 값(예: 출처 키)을 준다.
+#   - loop 안에 loop 가 또 있으면 loop-value 는 "multiple loops" 오류가 난다(컴파일 오류로 확인). 안쪽 리스트 loop 에서는
+#     loop-index 로 키를 얻어 {변수::%loop-index%} 로 값을 직접 읽는다.
+#   - seconds of (식) 처럼 괄호 안 식은 파싱되지 않는다(컴파일 오류로 확인). 먼저 변수에 담는다:
+#     set {_d} to difference between now and {_끝}  /  set {_초} to (seconds of {_d}) + 1
+#   - 찌 속도: standard length of (velocity of {_h}) (jar 에서 확인).
+#   - 엔티티 제거: 변수에 든 엔티티는 delete {_x} 로 지워지지 않고(변수만 지워짐)
+#     skript-reflect 의 {_x}.remove() 로 제거한다.
+#
+# 8. 알려진 설계 메모
+#   - 시작 연출 조작(startcine.sk): 연출 중 점프/앉기 입력은 그 사람 자신의 라인업 더미가 똑같이 하고(gsJump/gsSneak, PlayerInputEvent), F/Q/핫바/클릭은 전부 취소. 미검증.
+#   - 도약 발동: 서바이벌/어드벤처에 비행 허용을 켜 두고 on flight toggle(스페이스 두 번)을 취소하며 도약을 쓴다(jump.sk). 발동 키는 더블 점프 고정(F키 모드/무기고 토글/{leapmode}는 삭제, F키는 핑 전용이라 waypoint.sk 가 취소). push 속도 1.1.
+#     비행 허용은 접속/리스폰/게임모드 변경 때 jumpFlightOn() 으로 다시 켠다. 다른 곳에서 비행 허용을 끄는 코드를 만들면 도약이 안 나가니 주의.
+#   - 도약(jump.sk)은 스킬 아이템이 아니라 기본 이동기. 도약 잠금은 jumplock 출처 키로 분리됨.
+#   - 화살 사거리(crossbow.sk): 활/석궁 화살은 발사 위치를 {-arrows::uuid}/{-arrowo::uuid} 에 기록, every tick 에서 150칸 넘으면 delete
+#   - 석궁(crossbow.sk): 화살이 맞은 뒤 5초(wait 100 ticks) 지나면 delete event-projectile 로 제거(이벤트 값을 직접 지우므로
+#     엔티티가 삭제됨. delete {_변수} 는 변수만 지움). 화살 줍기는 모두 취소(on arrow pickup, jar 에서 확인).
+#     석궁 화살 표시 변수는 없앴고, 데미지 2는 모든 화살에 적용된다(스켈레톤 화살 포함).
+#   - 낚싯대: 찌가 어떤 엔티티에든 걸리면 5초간 걸림 상태. 걸린 게 플레이어면 구속(도약 불가, jumplock 키
+#     fishing_낚시꾼uuid + 상태이상 표시 "구속"). 5초가 지나면 자동으로 풀리고(당길 때와 같은 2하트 피해 + 풀림 소리)
+#     찌는 회수되며 그때부터 쿨타임 9초. 끝나기 전 2초/2.5초 지점에 경고음(hookWarnSound).
+#     3초 안에 찌를 당기면(on entity hooked) 걸린 엔티티에 2하트 피해(던진 사람 판정)를 주고 찌가 사라지면서 쿨타임 9초.
+#     낚싯대를 손에서 치워 찌가 사라질 때도(걸려 있었고 아직 피해를 안 줬으면, 던진 사람이 접속 중/생존일 때) 같은 피해.
+#     대상이 먼저 사라진 경우(사망, 접속 종료)는 피해 없음.
+#     못 맞춤 = 아무 엔티티에도 안 걸리고 땅이나 물에 떨어짐. 즉시 쿨타임 9초 + 찌 회수({_h}.remove()).
+#     땅/벽에 멈춤 판정은 loop 에서 찌 속도(standard length of (velocity of {_h}))가 0.01 미만으로 2틱 연속이면
+#     멈춘 것으로 본다. 꽃/잔디 같은 충돌 없는 블록은 찌가 통과하므로 멈추지 않는다.
+#     물은 {_h}.isInWater() (skript-reflect, 미검증). on bobber hit ground 이벤트는 쓰지 않는다
+#     (충돌 없는 블록에서도 발동해 찌를 지울 수 있는지 확인할 수 없어서 제거).
+#     걸릴 때 던진 사람(걸린 게 플레이어면 걸린 사람도)에게 당기는 소리, 끝나기 전 경고음, 풀릴 때 당겨지는 소리.
+#     효과음은 한쪽 이름이 틀려도 들리도록 2개씩 겹쳐 재생(hookPlay). 소리 이름은 미검증.
+#
+# 9. 스킬 아이템 기획서 (사용자 제공. 쿨타임/수치는 기획 기준, 데미지 숫자는 실 체력 수치. 하트 아님)
+#   구현 상태: [완료] 쇠뇌, 낚싯대, 도끼, 곡괭이, 괭이, 창, 철퇴, 검, TNT, 네더의 별, 불길한 병, 포션 3종, 불사의 토템, 모루, 활, 블레이즈 지팡이, 연막탄, 부싯돌과 부시
+#             [완료·미검증] 시계(2026-11-27 추가 기획, 아래 참고)
+#   - 체력 포션(즉시 치유의 포션) / 쿨 12초 : 체력 5 즉시 회복(2026-11 수정, 기존 8)   [완료: potions.sk]
+#   - 스태미너 포션(도약의 물약) / 쿨 12초 : 스태미너 50 즉시 회복   [완료: potions.sk]
+#       (※ "도약"은 F키 이동기 이름이기도 하니 코드에서는 스태미너 포션으로 부름)
+#   - 투명 포션(투명화 포션) / 쿨 18초 : 4초간 투명화(포션 이펙트 아이콘/파티클 X).   [완료: potions.sk]
+#       피해를 입거나 입히면 풀림
+#   - 불길한 병 / 쿨 30초 : 7초간 가한 피해의 30% 회복 + 스태미너 초당 20 추가 재생.
+#       스태미너 재생은 기본 회복과 별개로 더해지고 stcap 의 영향을 받지 않음.
+#       효과가 끝나면 탈진하여 스태미너 전부 소진   [완료: ominousbottle.sk. 탈진은 스태미너 0 + 5초간 회복 차단(stcap), 보스바 "탈진"]
+#   - 불사의 토템 / 쿨 60초 : 5초간 무적(노란 flash 3번 + 무적 동안 노란 발광), 그동안 도약 불가(jumplock 키 totem)   [완료: totem.sk, main.sk 의 on damage 맨 위에서 피해 취소]
+#   - TNT / 쿨 12초 : 투척. 투척 33틱(약 1.65초) 후 폭발(코드 기준 값. 기획 기존 2.5초 → 2초 → 1초 → 현재 코드 33틱). 데미지는 실 체력 2(하트 1칸) 고정(기존 "TNT 기본 데미지" 폐기, 밸런스 배율 미적용),
+#       폭발에 맞은 적에게 3초간 기절(setStatus 로 상태이상 표시 "기절"). 블럭은 파괴/손상하지 않음.   [완료: tnt.sk, stun.sk]
+#       구현: 점화된 TNT 엔티티(퓨즈 33틱, 속도 1.5, 경고음 pling 5번)를 던지고 폭발 이벤트를 취소(바닐라 데미지/블럭 피해 없음) + 소리/파티클(범위를 large explosion 으로 채움), tntRadius()=반경 4칸 안의 생명체(던진 사람과 {-team} 변수가 같은 아군은 제외)에게 hp(2) 피해, 플레이어는 추가로 stun(). 몹은 기절 없음(미정).
+#       기절 중에는 아무 행동도 할 수 없음(이동, 공격, 스킬/아이템 사용, 도약 등 전부 차단. 구현 시 차단 범위 확정).
+#   - (폐기) 브리즈 막대: 아래 연막탄로 대체됨
+#   ※ 2026-11 밸런스: 데미지를 기존의 약 80%로 조정하되 소수점 없는 정수로 반올림. 아래 수치는 기획 원본이고 괄호 안이 적용값.
+#   - 쇠뇌 / 쿨 16틱 : 데미지 3의 화살   [완료: crossbow.sk]
+#   - 낚싯대 / 쿨 9초 : 아무 엔티티에도 못 맞추고 떨어지면 쿨타임 시작 + 찌 회수. 맞추면 5초간 걸림(플레이어는 구속,
+#       도약 불가), 3초 뒤 자동 회수, 찌를 당기면 4(적용 3) 피해
+#       [fishing.sk 구현됨]
+#   - 도끼 / 데미지 6(적용 5, 능력 발동 시 7.5) : 체력 80% 이상인 적에게 1.5배 피해   [완료: main.sk]
+#   - 곡괭이 / 데미지 2(적용 2, 중첩 +1 그대로) : 타격 시 3초간 가하는 데미지 +1(보스바 표시 이름 "채굴 x1, 채굴 x2…"), 무한 중첩, 3초간 갱신 못 하면 전부 소멸   [완료: main.sk]
+#   - 괭이 / 데미지 2(적용 2, 능력 발동 시 4) : 체력 50% 이하인 적에게 가하는 데미지 100% 증가   [완료: main.sk]
+#     (도끼/곡괭이/괭이: 메인핸드에 든 아이템 재질 이름이 _AXE / _PICKAXE / _HOE 로 끝나면 모든 재질 공통.
+#      근접 데미지를 위 기본값으로 덮어쓴다 = 재질별 차이는 사라짐. 공격 쿨다운 약화(0.2+0.8*충전도^2)와 크리티컬(x1.5, 바닐라 판정)은 다시 반영한다.
+#      곡괭이는 중첩이 이번 타격 데미지에는 포함되지 않고 다음 타격부터 적용, 곡괭이 타격에만 적용/중첩.
+#      기준 체력은 타격 직전 체력.)
+#   - 네더의 별 / 쿨 45초 : 6초간(밸런스 너프, 기획 기존 8초) 저항1, 힘1, 재생1, 신속1 (포션 이펙트 표시 숨김)   [완료: netherstar.sk. 효과 중의 재생은 전투 중 회복 차단을 통과시킴]
+#   - 모루 / 쿨 90초 : 이번 게임 동안 가하는 피해 +10%, 쓸 때마다 무한 중첩(합연산), 중첩은 사망해도 유지되고 게임이 끝나거나 시작할 때 소멸(gameCleanup/gameStart 가 anvilClear 호출)   [완료: anvil.sk, main.sk 첫 on damage 끝에서 x(1+0.1*중첩). 게임 종료 시 anvilClear 연결 필요]
+#   - 검 / 데미지 5(고정)   [완료: main.sk, items.sk, sword.sk. 휩쓸기 피해는 덮어쓰지 않고 바닐라 값에 전체 배율만 적용] 패시브: 메인/오프핸드 어느 쪽이든 들고 있으면 받는 피해를 한 번 막음(skillHand 규칙 미적용, 쿨 30초는 아이템 쿨타임으로 표시, 막을 수 있는 동안 체력바 양끝 흰색 괄호).
+#   --- 2026-11 추가 기획(미구현) ---
+#   - 활 / 발사 후 쿨 2초   [완료: bow.sk] : 데미지 3~12(화살 공통 기본 3 + 충전 추가 0~9, 화살 속도도 충전에 비례, 100% 면 150, 화살 사거리 150칸 제한은 crossbow.sk 의 arrowTrack/every tick). 최대 3초까지 충전. 충전 중 보스바 "집중"(100% 면 초록색). 화살은 활/석궁 공통 기본 3(4 -> 3 으로 되돌림).
+#       최대 충전으로 발사하면 소닉붐 이펙트와 사운드.
+#   - 블레이즈 지팡이 / 쿨 4초(발사 딜레이 미포함)   [완료: blazerod.sk] : 사용 0.2초 후 화염구 발사(탄속 2칸/틱으로 상향, 큰 화염구. 3번째 사용 폭격은 플레이어 뒤쪽 5개 지점(뒤 4칸/위 3칸, 좌우 2칸 간격)에서 발사, 지점 8칸 안 가장 가까운 적 쪽으로 유도, brHome). 맞으면 폭발해서 반경 3칸 범위 피해 5(블럭 피해 없음, 쏜 사람/아군 제외).
+#       3번째 사용 때는 바라보는 지점 위쪽(10칸)에서 사선으로, 그 지점 반경 3칸 안 무작위 목표로 화염구 5개가 차례로 떨어짐.
+#   - 연막탄(돌풍구 아이템) / 쿨 30초   [완료: windburst.sk] : 브리즈 막대 대신 들어감. 맞은 자리에 10초간 지속되는 반구 모양 연막(반경 11칸, 위쪽 절반만) 생성. 블럭에 막힌 구역(벽 뒤/다른 층)과 천장 위로는 번지지 않음, 지속이 끝나면 2초에 걸쳐 사라짐.
+#       실명 효과는 없음(파티클 연출만, 사용자 변경 2026-11).
+#   - 부싯돌과 부시 / 쿨 20초   [완료: flintsteel.sk] : 사용 시 주변 10칸 안의 적을 모두 5초간 '취약' 상태로 만들고 불태움(불로는 데미지 없음).
+#       취약: 받는 데미지 1.2배. 사용 지점에서 범위 끝까지 불꽃이 퍼져나가는 이펙트.
+#   - 시계 / 쿨 60초 / 분류 유틸   [완료(미검증): clock.sk, 2026-11-27]
+#       게임 시작 후 60초마다 "낮"과 "밤"이 번갈아 바뀌고, 그때마다 시계를 가진 플레이어가 그 시간대의 효과를 얻는다.
+#       낮 : 근접 공격으로 받는 피해 25% 감소 / 원거리 공격으로 가하는 피해 50% 감소
+#       밤 : 원거리 공격으로 가하는 피해 25% 증가 / 근거리 공격으로 가하는 피해 25% 감소 / 도약 스태미나 소모량 20 증가
+#       시계 스프라이트는 낮용과 밤용 두 개를 준비한다(낮/밤이 바뀔 때 아이템 겉모습도 바뀜).
+#       확정(사용자 2026-11-27): 첫 시간대는 낮(게임 시작 시각 {-clockstart} 부터 60초마다 교체). 시계를 구성(1~4번)에 넣기만 하면 작동(들 필요 없음).
+#         원거리 = 활/쇠뇌 화살 + 블레이즈 지팡이 화염구만(삼지창/TNT 등 스킬 제외). 근접 = 무기로 직접 때린 피해. 교체 알림 = 소리(bell) + 액션바 + 시계 겉모습 교체. 쿨 60초 = 주기와 같은 값(표시용, 별도 쿨 없음).
+#         스프라이트: resourcepack/mck 의 clock_day / clock_night(item_model 로 교체). 시계 기본 스프라이트 원본이 저장소에 없어서 16x16 으로 새로 그림(원하는 그림으로 교체 가능).
+#         분류 6(유틸)을 새로 만들어 양동이류(5) 뒤, 미분류(0) 앞에 정렬(임의 지정, 확인 필요: 정렬 위치). 변수: {-clockstart}, {-clockphase}. 도약 비용은 jumpCost()(clock.sk)를 jump.sk 가 읽음.
+#   ※ 위 새 기획의 숫자는 실 체력 기준이고 이미 밸런스 80%가 반영된 값이다(다시 곱하지 말 것, 사용자 확인 2026-11).
+#     연막은 파티클 연출뿐이라 피아 구분이 없다. 취약은 적군만 대상(아군/팀 변수 isAlly 제외, 던진 사람 본인 제외).
+#     구현 시 임의로 정한 값(확인 필요): 블레이즈 지팡이 3번째 사용 카운터는 마지막 사용 후 10초 안 쓰면 0 으로 리셋(blazerod.sk brReset), 취약은 플레이어만 대상(몹 제외),
+#     부싯돌 불태움의 불 피해는 취소(화염 애니메이션만), 활은 당길 때 화살이 없으면 1개 지급(쏘면 소모), 화염구 폭발은 쏜 사람 본인 제외.
+#   확정 사항
+#   - 철퇴(mace) 공격 데미지 x0.3(밸런스 후 x0.24) 은 의도된 기능이라 main.sk 에 유지. 철퇴로 준 근접 데미지에만 적용(스킬/투사체 제외).
+#   - 창(spear) 데미지는 최대 6(밸런스 후 5, 스크립트 값 2.5). 창을 메인핸드에 들었거나 사용 중인 아이템(오프핸드 포함)이
+#     창일 때의 근접 데미지에 적용. 창 아이템은 Skript 2.13 jar 에 없어서 재질 이름에 SPEAR 가 들어가는지로 판단
+#     (skript-reflect, 미검증). 삼지창(TRIDENT)은 포함하지 않는다.
+#   - 도약(점프 두 번)은 스킬 아이템이 아니며 현재 구현이 기획대로임.
+#   - 낚싯대: 후한 판정은 플레이어만 걸지만, 걸림/효과음/피해는 모든 엔티티에 적용. 피해는 찌를 당길 때(on entity hooked)만 준다.
+#     구속은 도약 잠금만(이동 제한 없음), 5초 지속. 쿨타임/잠금/상태이상 표시 해제는 풀리는 모든 경우에 처리.
+#   - 상태이상이 걸리면 걸린 상태이상 이름과 남은 시간을 보스바에 표시한다(이로운/해로운 모두, 앞으로 모든 상태이상 공통, 위 5번 참고). 보스바는 skript-reflect(Bukkit API) 로 만들며 미검증.
+#   미정/확인 필요
+#   - 포션 3종: 모두 재질이 potion 이라 바닐라 아이템 쿨타임(재질 단위)이 셋에 공유됨.
+#     서버가 1.21.11 이라 쿨타임 그룹을 쓸 수 있음(Skript 2.13 item cooldown 은 쿨타임 그룹이
+#     있으면 그룹을 우선 적용한다고 jar 문서에 명시). 포션마다 use_cooldown 컴포넌트의
+#     cooldown_group 을 다르게 지정해야 함. 아이템 지급 방법/컴포넌트 문법은 구현 시 확인(미검증).
+#   - 설치형 아이템(TNT, 모루)은 우클릭 시 블록 설치 이벤트 취소 필요.
+#   - 체력 회복은 main.sk 의 on heal(전투 중 oc>0 이면 취소)에 막힘. 체력 포션/불길한 병의
+#     회복은 이를 우회하는 플래그가 필요.
+#   - 포션 이펙트 숨김 옵션이 Skript 2.13 에 있는지 jar 에서 확인 후 사용(미검증).
+#
+# 10. 게임 모드/진행 기획 (사용자 제공, 2026-11. 맵 설정(스폰/로비)은 아직 없음)
+#   구현 상태: [완료] 게임 시작/종료, 팀 배정, 전적(K/D/A/가한 피해), 바운티, 녹아웃, 크라운, 목표 스코어/승점 설정, 맵/모드 투표   [game.sk, gamesetup.sk, admin.sk, killcine.sk, vote.sk]
+#             [완료] 게임 중 탭리스트 전투 정보   [gametab.sk]
+#             [완료] 게임 종료 연출/결과 발표/Player Of The Match 자동 선정(승리 기여도)/채팅 상단 고정/15초 뒤 로비   [gameend.sk, killcine.sk]
+#             [완료] 녹아웃 라운드 시작 5분 뒤 서든 데스(3초마다 체력 감소, 리스폰 x,z 에서 먼 순서로 더 깎음, gStormTick, 변수 {-grstart}) + 5분이 되면 "서든 데스" 타이틀/채팅 안내(gStormAnnounce) + 액션바 리스폰 방향 화살표(gStormCompass, 미검증)   [game.sk]
+#             [완료] 로비/훈련장 월드는 맵 선택/랜덤에서 제외(mapExcluded)   [admin.sk, game.sk]
+#             [완료] 시작 연출 재작성(음악 + 팀 더미 라인업)과 녹아웃 라운드 시작 연출(음악 + 5초 카운트다운)   [startcine.sk, game.sk, resourcepack/]
+#             [완료] 티어 시스템(승점 기본 90=골드 I, 15점당 세부 티어, 마스터 225+ 순위제, 0점 하한)   [tier.sk, game.sk, gametab.sk, items.sk, gameend.sk]
+#             [완료] 지난 매치 독서대(GUI) + 결과 dialog + 리뷰, 결과창 맨 윗줄에 MATCH 번호   [matchhistory.sk, gameend.sk, admin.sk]
+#             [완료] 관리자 /gamestop(게임·연출 중단)   [gameend.sk]
+#             [미구현] 맵 설정(스폰 위치, 로비 위치, 팀별 스폰), 랜덤 아이템 모드 지급
+#             [완료, 서버 미검증] 아이템 통계/랭킹(독서대 메뉴 확장). 사용자 확정 사항(2026-11-25):
+#               - 독서대 우클릭 -> 3칸 메뉴(아이템 통계 / 랭킹 / 매치 기록). 매치 기록은 기존 mhOpen 그대로. 독서대 등록/해제/안내 문구는 이름만 손봄.
+#               - 아이템 통계(dialog): 선택률 = 그 아이템 선택 수 / 전체 선택 슬롯 수(참가자 x 4칸), 모든 아이템의 합이 100%. 승률 = 그 아이템을 고른 플레이어의 팀이 이긴 비율.
+#                 같이 선택된 아이템(쌍 횟수)도 보여줌. 랜덤 아이템 모드({-grand}) 게임은 아이템 통계에서 제외.
+#               - 랭킹(dialog): 승점 내림차순(동점은 {ratingsince} 이른 순) 1~10위 + 11번째 자리에 본인 순위. 세부 티어(예: 골드 II, 마스터 이상은 단일 티어)까지 표시, 승점 숫자는 숨김.
+#                 판수 제한 없음(경기 수 0 인 사람은 {rating} 이 없으니 제외). 유저 통계(승, 패, 승률, KDA = (K+A)/D 로 표기 "KDA", D 가 0 이면 K+A, 자주 쓰는 아이템)도 보여줌.
+#               - 승/패: 팀 소속이면 승(승리 팀 소속 = 승, 그 외 = 패). 개인전은 한 명이 한 팀. 무승부 처리 안 함. 중도 퇴장은 게임 종료 시점에 퇴장 상태인 참가자만 패배로 친다(나갔다가 다시 참가했으면 정상 판정: 승리 팀 소속이면 승). 퇴장 때 미리 기록하지 않고 종료 때 판정(KDA/아이템은 uuid 키 변수라 나가도 남아 있음, 확인 필요)(사용자 확정).
+#               - 수집 시점: 매치 끝(ratingApply/gmRecord 근처)에 참가자별로 한 번. 튜토리얼/관전자 제외. 이 기능을 넣은 시점부터 쌓임(과거 매치 JSON 으로는 복원 불가).
+#               - 저장 변수 후보: {ustat::uuid::win|loss|k|a|d}, {ustat::uuid::item::id}, {istat::pick::id}, {istat::win::id}, {istat::pair::id::id}(양방향). /resetdata 에 초기화 항목 추가, 이 문서 변수 목록 갱신.
+#   - 크라운(id crown, 기본 목표 100): 시작 10초 뒤 무작위 참가자에게 크라운({-gcrown}). 소지자는 발광 + 머리 위 ♛ 로 모두에게 위치가 보이고, 살아 있는 동안 1초마다 소지자 팀(개인전은 본인) 스코어 +1. 소지자를 처치하면 처치한 사람이 크라운을 빼앗고(킬이 아닌 죽음/이탈이면 무작위 다른 참가자), 목표를 먼저 채우면 승리(game.sk "크라운" 절, gCrownTick). 탭 점수 뒤 금색 ♛(gametab.sk). 목표값은 게임 설정 GUI 칸 4(10/50씩).
+#   - 바운티: 머리 위에 별(기본 2개). 플레이어를 처치하면 처치한 대상의 별만큼 스코어가 오르고, 처치한 사람의 별(현상금)이 1개 늘어난다(죽은 사람의 별은 기본으로 복귀). 제한시간 8분(game.sk gBountyLimit, 시작 시각 {-gbstart}): 시간이 다 되면 스코어 1위 팀 승리(동점이면 팀 킬 합계, 그래도 같으면 무작위, 내가 정한 규칙 확인 필요). 탭 하단에 남은 시간 표시(gametab.sk).
+#             먼저 목표 스코어를 채운 팀/플레이어가 승리. 목표 스코어는 관리자 메뉴(게임 설정 칸 4)에서 변경(기본 20).
+#   - 녹아웃: 모두 목숨 1개. 마지막까지 살아남은 팀이 승점 1점을 얻고 전투가 다시 시작된다(전원 사망이면 무승부 라운드). 먼저 목표 승점을 쌓으면 승리. 목표 승점은 같은 칸에서 변경(기본 3).
+#   - 개인전(팀 수 0)이면 플레이어 한 명이 한 팀이다. 팀전은 게임 시작 때 사람들을 섞어서 인원이 가장 적은 팀에 넣는다.
+#   - 처치로 승리가 정해지면: 마지막 킬 연출을 모든 플레이어가 감상(관전 상태 유지) -> 승리 팀 알림 -> 승리 팀 플레이어와 똑같이 생긴 더미를 일렬로 세우고
+#     채팅으로 결과 발표(팀 스코어, 플레이어 KDA, 가한 피해, 사용한 아이템). Player Of The Match 는 투표 없이 승리 팀 중 기여도(킬 3 + 어시스트 1.5 + 피해/10 - 데스)가 가장 높은 사람을 자동 선정(개인전 없음, 타이틀 발표 없음, 결과창 맨 아래와 더미 ★ 로 표시).
+#     결과 발표는 채팅 상단에 고정되고 아래 몇 줄은 평소처럼 채팅이 올라온다. 15초 뒤 게임 완전 종료, 로비로 이동.
+#   - 게임 중 탭리스트: 상단에 팀 스코어(팀전), 그 아래 줄에 K D A DMG ITEM 열 제목. 플레이어 줄은 (스킨 아이콘)이름 킬 / 데스 / 어시스트 / 가한 피해 / 사용 중인 아이템 아이콘, 팀 순서대로 정렬.
+# ==============================================================================
+
+# --- 스킬 공용 함수 ---
+
+function isSkillItem(i: itemtype) :: boolean:
+	loop {-skillitems::*}:
+		if {_i} is loop-value:
+			return true
+	return false
+
+# 기획서 수치(실 체력)를 스크립트 damage 값(하트 단위)으로 바꾼다. 스크립트 1 = 하트 1칸 = 체력 2.
+function hp(n: number) :: number:
+	return {_n} / 2
+
+# 바닐라 데미지에 곱하는 전체 배율(현재 0.8 = 80%). 적용처: 철퇴, 그 외 근접 공격, 창의 바닐라 데미지(main.sk).
+# 기획서 고정 수치(도끼/곡괭이/괭이/쇠뇌/낚싯대/창 상한)는 소수점이 안 생기도록 아래 정수 값으로 직접 정했다.
+function dmgMul() :: number:
+	return 0.8
+
+# 현재 체력 비율(0~1). 살아 있는 생물이 아니면 1.
+function healthRatio(e: entity) :: number:
+	if {_e} is not a living entity:
+		return 1
+	set {_hp} to health of {_e}
+	set {_max} to max health of {_e}
+	if {_max} <= 0:
+		return 1
+	return {_hp} / {_max}
+
+# 공격자가 쓰는 무기 종류: "spear"(이름에 SPEAR 가 들어간 모든 창), "mace"(철퇴),
+# "axe"/"pickaxe"/"hoe"(재질 이름이 _AXE/_PICKAXE/_HOE 로 끝나는 모든 도구), 아니면 "".
+# 창: 지금 사용 중인 아이템(오프핸드 포함) 또는 메인핸드. 나머지: 메인핸드. 재질 이름은 skript-reflect 로 읽는다(미검증).
+function weaponKind(e: entity) :: text:
+	if {_e} is not a living entity:
+		return ""
+	set {_use} to {_e}.getActiveItem().getType().name()
+	if {_use} contains "SPEAR":
+		return "spear"
+	set {_eq} to {_e}.getEquipment()
+	if {_eq} is not set:
+		return ""
+	set {_main} to {_eq}.getItemInMainHand().getType().name()
+	if {_main} contains "SPEAR":
+		return "spear"
+	if {_main} is "MACE":
+		return "mace"
+	if {_main} ends with "_PICKAXE":
+		return "pickaxe"
+	if {_main} ends with "_AXE":
+		return "axe"
+	if {_main} ends with "_HOE":
+		return "hoe"
+	if {_main} ends with "_SHOVEL":
+		return "shovel"
+	if {_main} ends with "_SWORD":
+		return "sword"
+	if {_main} is "TRIDENT":
+		return "trident"
+	return ""
+
+# 상태이상 표시 등록/해제. 표시와 만료 처리는 main.sk 에서 한다. (사용법은 위 5번 참고)
+# type: "bad"(해로운, 기본값, 보스바 빨강), "good"(이로운, 보스바 초록), "cc"(모든 행동을 막는 cc: 보스바 대신 타이틀/서브타이틀로 표시, 예: 기절).
+# 일부 행동만 막는 cc(구속 등)는 "bad" 로 보스바에 표시하고, 막힌 행동을 시도할 때 ccDeny() 로 틱 소리를 낸다.
+# label: 이름 뒤에 붙는 가변 표시(예: " x2" 중첩). 보스바는 이름 기준으로 하나를 유지하므로, 중첩 수처럼 바뀌는 값은 이름이 아니라 label 로 넘긴다.
+function setStatus(p: player, src: text, n: text, d: timespan, type: text = "bad", label: text = ""):
+	# 킬 연출 중({-kc})에는 상태이상을 새로 걸지 않는다(stun() 과 같은 이유).
+	if {-kc::%{_p}'s uuid%} is set:
+		stop
+	set {-status::%{_p}'s uuid%::%{_src}%} to now + {_d}
+	set {-statusname::%{_p}'s uuid%::%{_src}%} to {_n}
+	set {-statustype::%{_p}'s uuid%::%{_src}%} to {_type}
+	set {-statusdur::%{_p}'s uuid%::%{_src}%} to {_d}.getMilliSeconds()
+	set {-statuslabel::%{_p}'s uuid%::%{_src}%} to {_label}
+
+function clearStatus(p: player, src: text):
+	delete {-status::%{_p}'s uuid%::%{_src}%}
+	delete {-statusname::%{_p}'s uuid%::%{_src}%}
+	delete {-statustype::%{_p}'s uuid%::%{_src}%}
+	delete {-statusdur::%{_p}'s uuid%::%{_src}%}
+	delete {-statuslabel::%{_p}'s uuid%::%{_src}%}
+
+# 팀(아군) 판정. 팀은 스코어보드가 아니라 Skript 변수 {-team::uuid}(팀 이름 텍스트)로 관리한다. 스코어보드 팀은 발광 외곽선 색 용도로만 쓴다.
+# 두 uuid(텍스트) 가 서로 다른 대상이고 둘 다 팀이 있고 팀 이름이 같으면 아군. 팀 설정은 게임 설계가 확정되면 {-team} 을 채우는 쪽에서 한다.
+function isAlly(a: text, b: text) :: boolean:
+	if {_a} is {_b}:
+		return false
+	if {-team::%{_a}%} is not set:
+		return false
+	if {-team::%{_b}%} is not set:
+		return false
+	if {-team::%{_a}%} is {-team::%{_b}%}:
+		return true
+	return false
+
+# 일부 행동만 막는 cc(구속 등)에서 막힌 행동을 시도했을 때 나는 '틱' 소리. 소리를 바꾸려면 여기만 고친다(미검증 이름).
+function ccDeny(p: player):
+	if {_p} is online:
+		play sound "ui.button.click" with volume 1 and pitch 1.5 to {_p}
+
+# 기절 여부. 기절 종료 시각 {-stunend} 가 지금보다 뒤면 기절 중.
+# 삽 잠복(shovel.sk) 중에도 true 를 돌려준다: 잠복 중에는 스킬/공격/클릭 등 모든 행동이 막혀야 해서, 기절을 확인하는 모든 곳(스킬, 근접 공격, 낚싯대, 포션, stun.sk 의 클릭/설치/부수기/버리기 차단)이 그대로 막힌다.
+function isStunned(e: entity) :: boolean:
+	if {-stunend::%{_e}'s uuid%} is set:
+		if {-stunend::%{_e}'s uuid%} > now:
+			return true
+	if {-burrow::%{_e}'s uuid%} is set:
+		if {-burrow::%{_e}'s uuid%} > now:
+			return true
+	return false
+
+# 삽 잠복 중인지(기절은 제외). 우유(milk.sk)는 기절 중에는 쓸 수 있지만 잠복 중에는 못 쓴다.
+function isBurrowed(e: entity) :: boolean:
+	if {-burrow::%{_e}'s uuid%} is set:
+		if {-burrow::%{_e}'s uuid%} > now:
+			return true
+	return false
+
+# 기절 걸기(src: 출처 키, 예 "tnt_시전자uuid"). 타이틀에 "기절" 표시 + 이동/점프 불가 포션(숨김) + 실명(기절 시간만큼).
+# 이미 더 오래 기절 중이면 덮어쓰지 않는다. 행동 차단은 stun.sk 와 isStunned 를 확인하는 각 스킬 파일에서 한다.
+function stun(p: player, src: text, d: timespan):
+	# 킬 연출 중(killcine.sk, {-kc})인 플레이어에게는 걸지 않는다. TNT 처럼 피해를 준 뒤에 기절을 거는 스킬은 피해로 연출이 시작된 다음에 이 함수가 불려서,
+	# 기절 표시(타이틀/효과)가 연출로 딸려오곤 했다.
+	if {-kc::%{_p}'s uuid%} is set:
+		stop
+	set {_end} to now + {_d}
+	if {-stunend::%{_p}'s uuid%} is set:
+		if {-stunend::%{_p}'s uuid%} > {_end}:
+			stop
+	set {-stunend::%{_p}'s uuid%} to {_end}
+	setStatus({_p}, "stun_%{_src}%", "기절", {_d}, "cc")
+	apply slowness potion of tier 8 without any particles whilst hiding the potion icon to {_p} for {_d} replacing the existing effect
+	apply jump boost potion of tier 129 without any particles whilst hiding the potion icon to {_p} for {_d} replacing the existing effect
+	apply blindness potion without any particles whilst hiding the potion icon to {_p} for {_d} replacing the existing effect
+
+# 포션 스킬 종류. 해당 손의 아이템이 바닐라 포션(POTION)이고 기본 포션 종류가 치유/도약/투명화 계열이면
+# "heal"(체력 포션), "stamina"(스태미너 포션), "invis"(투명 포션), 아니면 "". hand: "main" 또는 "off".
+# 포션은 재질이 같아서 포션 종류로 구분한다(getBasePotionType 의 이름, skript-reflect, 미검증).
+function potionKind(p: player, hand: text) :: text:
+	if {_hand} is "main":
+		set {_it} to {_p}.getEquipment().getItemInMainHand()
+	else:
+		set {_it} to {_p}.getEquipment().getItemInOffHand()
+	set {_mat} to {_it}.getType().name()
+	if {_mat} is not "POTION":
+		return ""
+	set {_meta} to {_it}.getItemMeta()
+	set {_bt} to {_meta}.getBasePotionType()
+	if {_bt} is not set:
+		return ""
+	set {_n} to {_bt}.name()
+	if {_n} contains "HEALING":
+		return "heal"
+	if {_n} contains "LEAPING":
+		return "stamina"
+	if {_n} contains "INVISIBILITY":
+		return "invis"
+	return ""
+
+# 포션 종류별 쿨타임이 끝났는지(스크립트 변수 {-potcd} 로 판단). 포션은 재질이 같아 아이템 쿨타임으로 구분할 수 없다.
+function potionReady(p: player, kind: text) :: boolean:
+	if {-potcd::%{_p}'s uuid%::%{_kind}%} is set:
+		if {-potcd::%{_p}'s uuid%::%{_kind}%} > now:
+			return false
+	return true
+
+# 메인핸드 우선: 메인핸드 아이템이 이 스킬이면 true
+# 오프핸드 아이템이 이 스킬이면, 메인핸드가 (쿨타임이 아닌 다른 스킬 아이템)도 창(SPEAR)도 아닐 때만 true.
+# 메인핸드 스킬이 쿨타임이면 오프핸드 스킬이 발동한다(메인핸드 스킬은 양보). 쿨타임은 아이템 쿨타임(set item cooldown)으로 판단.
+# 메인핸드에 무기고를 들고 있는지(게임 중이 아닐 때만). 무기고를 열 때 오프핸드 스킬이 같이 발동하지 않게 하는 데 쓴다.
+function armoryHeld(p: player) :: boolean:
+	if {-ingame} is true:
+		return false
+	set {_n} to name of {_p}'s tool
+	if {_n} is not set:
+		return false
+	if {_n} is armoryName():
+		return true
+	if {_n} is adminItemName():
+		return true
+	return false
+
+function skillHand(p: player, t: itemtype) :: boolean:
+	# 스킬은 PVP 월드에서만(pvp.sk)
+	if pvpIn({_p}) is false:
+		return false
+	# 기절 중에는 스킬이 안 나가지만 우유(milk.sk)만 예외다(기절을 푸는 스킬)
+	if isBurrowed({_p}) is true:
+		return false
+	set {_stun} to isStunned({_p})
+	if {_stun} is true:
+		if {_t} is not milk bucket:
+			return false
+	# 더미(마네킹: 투표 더미, NPC, 승리 팀 더미 등)를 클릭하면 스킬이 나가지 않는다. 4칸 안에서 바라보는 엔티티가 마네킹이면 막는다.
+	set {_te} to {_p}.getTargetEntity(4)
+	if {_te} is set:
+		set {_tt} to {_te}.getType()
+		set {_tn} to {_tt}.name()
+		if {_tn} is "MANNEQUIN":
+			return false
+	# 꿀벌 조종 중/직후에는 드론 아이템 말고 다른 스킬 아이템을 쓰지 못한다(bee.sk)
+	if beeUseLocked({_p}) is true:
+		return false
+	# 리스폰 낙하(겉날개 활강) 중에는 스킬을 쓸 수 없다(game.sk 의 {-gdropon})
+	if {-gdropon::%{_p}'s uuid%} is true:
+		return false
+	# 메인핸드에 무기고(items.sk)를 들고 있으면(게임 중 아님) 오프핸드를 포함해 어떤 스킬도 발동하지 않는다.
+	if armoryHeld({_p}) is true:
+		return false
+	if {_p}'s tool is {_t}:
+		# 메인핸드 스킬이 쿨타임이고 오프핸드에 다른 스킬 아이템이 있으면 오프핸드 스킬에 양보한다.
+		if {_p} has {_t} on cooldown:
+			if isSkillItem({_p}'s offhand tool) is true:
+				if {_p}'s offhand tool is not {_t}:
+					return false
+			# 오프핸드에 쿨타임이 아닌 포션 스킬이 있으면 그쪽에 양보한다.
+			set {_ok} to potionKind({_p}, "off")
+			if {_ok} is not "":
+				if potionReady({_p}, {_ok}) is true:
+					return false
+		return true
+	if {_p}'s offhand tool is {_t}:
+		# 기절 중이면(우유만 여기까지 온다) 메인핸드 스킬/포션은 어차피 못 쓰므로 양보하지 않는다.
+		if isSkillItem({_p}'s tool) is true:
+			if {_stun} is false:
+				# 메인핸드 스킬이 쿨타임이면 오프핸드 스킬이 발동한다.
+				set {_mc} to false
+				if {_p} has {_p}'s tool on cooldown:
+					set {_mc} to true
+				if {_mc} is false:
+					return false
+		# 메인핸드에 쿨타임이 아닌 포션 스킬이 있으면 포션이 우선이다.
+		set {_mk} to potionKind({_p}, "main")
+		if {_mk} is not "":
+			if {_stun} is false:
+				if potionReady({_p}, {_mk}) is true:
+					return false
+		# 메인핸드에 창이 있으면 우클릭은 창이 쓴다(바닐라 창 사용). 오프핸드 스킬이 이벤트를 취소해서 창을 막지 않게 한다.
+		set {_m} to {_p}.getEquipment().getItemInMainHand().getType().name()
+		if {_m} contains "SPEAR":
+			return false
+		return true
+	return false
+
+# 바닐라 공격 쿨다운 배율(0.2~1). 덜 충전하고 때리면 약해지는 규칙. main.sk 가 매 틱 기록한 {-atkcd} 를 쓴다.
+function cooldownScale(e: entity) :: number:
+	if {-atkcd::%{_e}'s uuid%} is not set:
+		return 1
+	set {_s} to {-atkcd::%{_e}'s uuid%}
+	if {_s} > 1:
+		set {_s} to 1
+	if {_s} < 0:
+		set {_s} to 0
+	return 0.2 + 0.8 * {_s} * {_s}
+
+# [2026-11 밸런스 패치 요약] 삼지창 쿨 18초/근접 7, 회복/스태미너 포션 쿨 12초, 근접 무기 전체 +1(철퇴는 x0.3 유지 후 +1, 툴팁도 +1), 활 최대 충전 2초(1.5초에서 변경),
+#   꿀벌 자폭 10/독침 쿨 4초, 곡괭이 중첩당 +2, 모루 중첩은 게임 끝까지 유지, 투명화 포션은 꽂힌 화살 제거, 라운드/게임 시작 시 skillCdReset(아래),
+#   화살 적중 여유 arrowAssist()(projectile.sk, 기본 0.75칸)/낚싯대 fishAssist()(fishing.sk, 기본 3칸, 예전 2칸). 전부 미검증.
+# 라운드/게임 시작 때 모든 스킬 쿨타임을 초기화한다(game.sk 의 gameStart 첫 라운드, gRoundNext 에서 부름). 새 스킬 쿨타임 변수를 만들면 여기에도 추가할 것.
+#   변수 쿨타임을 지우고, 인벤토리 모든 아이템의 아이템 쿨타임(회색 게이지)도 0 으로 되돌린다(포션은 쿨타임 그룹이라 ItemStack 으로 푼다). 미검증: HumanEntity#setCooldown(ItemStack, int).
+function skillCdReset(p: player):
+	set {_id} to "%uuid of {_p}%"
+	delete {-bowcool::%{_id}%}
+	delete {-hookcd::%{_id}%}
+	delete {-hookcdset::%{_id}%}
+	delete {-tntcd::%{_id}%}
+	delete {-nscd::%{_id}%}
+	delete {-obcd::%{_id}%}
+	delete {-splcd::%{_id}%}
+	delete {-splash::%{_id}%}
+	delete {-milkcd::%{_id}%}
+	delete {-shcd::%{_id}%}
+	delete {-radcd::%{_id}%}
+	delete {-burrow::%{_id}%}
+	delete {-potcd::%{_id}%::*}
+	delete {-ancd::%{_id}%}
+	delete {-fscd::%{_id}%}
+	delete {-brcd::%{_id}%}
+	delete {-bowcd::%{_id}%}
+	delete {-swcd::%{_id}%}
+	delete {-totemcd::%{_id}%}
+	delete {-wbcd::%{_id}%}
+	delete {-tdcd::%{_id}%}
+	delete {-beecd::%{_id}%}
+	delete {-beestabcd::%{_id}%}
+	# 쿨타임 끝 알림(cdnotify.sk)의 "쿨타임 중" 기록도 지운다(초기화로 풀린 걸 알림으로 띄우지 않게)
+	delete {-cdn::%{_id}%::*}
+	set {_i} to 0
+	while {_i} <= 40:
+		set {_it} to {_p}.getInventory().getItem({_i})
+		if {_it} is set:
+			{_p}.setCooldown({_it}, 0)
+		add 1 to {_i}

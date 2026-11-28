@@ -1,0 +1,312 @@
+# ==============================================================================
+# [pvp.sk] 시간 때우기 PVP(개인전). MCK 의 전투 코드(pvp_*.sk, andornot 저장소에서 옮겨 와 고친 것)를 PVP 월드에서만 쓴다.
+#   점수·시간 제한·팀·게임 모드 없음. 마피아 로비에서 기다리는 동안 하는 것.
+# 로비 핫바: 5번 칸(인덱스 4) "PVP로" 엔더 진주(우클릭: PVP 월드로), 6번 칸(인덱스 5) "PVP 무기고" 상자(우클릭: MCK 무기고, 아이템 구성 고르기).
+#   PVP 월드 안: 5번 칸이 "로비로" 엔더 진주, 6번 칸은 그대로 무기고. 7~9번 칸(관전/준비/안내서)은 로비와 같아서 PVP 중에도 준비할 수 있다.
+#   구성 아이템 4개는 1~4번 칸(pvp_items.sk loadoutGive, 5~9번 칸은 비워 둔다).
+# PVP 에서 죽으면 로비로 돌아간다(아이템은 떨어뜨리지 않음). /pvp 로 들어가고 나오기(별칭 /로비, /lobby 는 나오기).
+# 마피아 게임이 시작되면 PVP 에 있던 사람을 모두 로비로 돌리고 PVP 상태를 초기화한다(pvpStopAll, mjoin.sk mStart 가 맨 먼저 부른다).
+# 마피아 게임 중에는 들어갈 수 없다(진주·상자는 로비에서만 있고, 게임이 시작되면 mLobbyClear 가 치운다).
+# 관리자: /mpvp world <월드 이름>(PVP 월드 지정), /mpvp spawn(지금 서 있는 곳을 PVP 스폰으로), /mpvp info.
+#   PVP 월드 = {mcfg::pvp::world}(그 월드 안에서만 MCK 전투가 켜진다: pvpIn), 스폰 = mLocSave("pvp", ...)(없으면 그 월드의 스폰).
+#   월드는 미리 불러와 있어야 한다(마피아 /world 명령 등). 마피아 게임 월드·로비와 다른 월드를 써야 한다.
+# 변수: {-pvp::in::uuid}(PVP 중), {-pvp::dead::uuid}(PVP 에서 죽어 로비로 보낼 사람)
+# MCK 쪽 수정: 모든 이벤트·매 틱 루프에 PVP 월드 검사(pvpIn/pvpEnt), 무기고 이름 "PVP 무기고", 무기고 1초 고정·탭 이름 끔, 지급은 PVP 월드에서만,
+#   MCK 게임 진행·튜토리얼·핑·티어 등에 쓰던 함수는 pvp_compat.sk 가 빈 함수로 대신한다. 리소스팩은 mck 팩(글꼴 덮어쓰기 제외)을 마피아 팩에 합쳤다(pvp-pack.zip, tools/MergePvpPack.java).
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+# 그 사람이 PVP 월드 안에 있는지(MCK 전투 코드가 켜지는 곳)
+function pvpIn(p: player) :: boolean:
+	if {_p} is not set:
+		return false
+	if {mcfg::pvp::world} is not set:
+		return false
+	if "%world of {_p}%" is {mcfg::pvp::world}:
+		return true
+	return false
+
+# 엔티티(피해를 받은 몹·플레이어 등)가 PVP 월드에 있는지
+function pvpEnt(e: entity) :: boolean:
+	if {_e} is not set:
+		return false
+	if {mcfg::pvp::world} is not set:
+		return false
+	if "%world of {_e}%" is {mcfg::pvp::world}:
+		return true
+	return false
+
+# PVP 스폰: 저장한 곳, 없으면 PVP 월드의 스폰
+function pvpSpawn() :: location:
+	set {_l} to mLocLoad("pvp")
+	if {_l} is set:
+		return {_l}
+	if {mcfg::pvp::world} is not set:
+		return {_none}
+	set {_w} to Bukkit.getWorld({mcfg::pvp::world})
+	if {_w} is not set:
+		return {_none}
+	return {_w}.getSpawnLocation()
+
+function pvpGoName() :: text:
+	return "&bPVP로"
+
+function pvpBackName() :: text:
+	return "&bPVP 나가기(로비로)"
+
+function pvpGoItem() :: itemtype:
+	set {_i} to ender pearl named pvpGoName()
+	set lore of {_i} to "&7PVP 월드로 갑니다(개인전, 점수·시간 제한 없음).", "&7마피아 게임이 시작되면 자동으로 로비로 돌아옵니다."
+	return {_i}
+
+function pvpBackItem() :: itemtype:
+	set {_i} to ender pearl named pvpBackName()
+	set lore of {_i} to "&7로비로 돌아갑니다."
+	return {_i}
+
+# 이 이름이 PVP 핫바 아이템(진주·상자)인지
+function pvpItemName(n: text) :: boolean:
+	if {_n} is pvpGoName() or pvpBackName() or armoryName():
+		return true
+	return false
+
+# 로비·PVP 핫바 5번(진주)·6번(상자) 칸을 맞춘다(mjoin.sk mLobbyEnsure 가 부른다)
+function pvpLobbySlots(p: player):
+	set {_want} to pvpGoName()
+	if pvpIn({_p}) is true:
+		set {_want} to pvpBackName()
+	set {_n} to name of slot 4 of {_p}'s inventory
+	set {_ok} to false
+	if {_n} is set:
+		if {_n} is {_want}:
+			set {_ok} to true
+	if {_ok} is false:
+		if pvpIn({_p}) is true:
+			set slot 4 of {_p}'s inventory to pvpBackItem()
+		else:
+			set slot 4 of {_p}'s inventory to pvpGoItem()
+	set {_n} to name of slot 5 of {_p}'s inventory
+	set {_ok} to false
+	if {_n} is set:
+		if {_n} is armoryName():
+			set {_ok} to true
+	if {_ok} is false:
+		set slot 5 of {_p}'s inventory to armoryItem()
+	set {_o} to name of slot 40 of {_p}'s inventory
+	if {_o} is set:
+		if pvpItemName({_o}) is true:
+			clear slot 40 of {_p}'s inventory
+
+# 마피아 게임이 시작될 때 진주·상자를 치운다(mjoin.sk mLobbyClear 가 부른다)
+function pvpLobbyClear(p: player):
+	loop 4 and 5:
+		set {_n} to name of slot loop-value of {_p}'s inventory
+		if {_n} is set:
+			if pvpItemName({_n}) is true:
+				clear slot loop-value of {_p}'s inventory
+
+# PVP 로 들어간다
+function pvpEnter(p: player):
+	if mState() is not "lobby":
+		send "&c마피아 게임 중에는 PVP 에 들어갈 수 없습니다." to {_p}
+		stop
+	if pvpIn({_p}) is true:
+		stop
+	set {_l} to pvpSpawn()
+	if {_l} is not set:
+		send "&cPVP 월드가 정해지지 않았습니다. 관리자가 /mpvp world <월드 이름> 으로 정해야 합니다." to {_p}
+		stop
+	set {-pvp::in::%uuid of {_p}%} to true
+	pvpResetBody({_p})
+	clear {_p}'s inventory
+	if {_p} is not op:
+		set {_p}'s gamemode to adventure
+	else if gamemode of {_p} is spectator or creative:
+		set {_p}'s gamemode to adventure
+	mTp({_p}, {_l})
+	wait 2 ticks
+	if pvpIn({_p}) is not true:
+		stop
+	mLobbyEnsure({_p})
+	loadoutInit({_p})
+	loadoutGive({_p})
+	jumpFlightOn({_p})
+	mSound({_p}, "entity.enderman.teleport", 0.6, 1.2)
+	send action bar colored "&bPVP &7| 죽거나 5번 칸 진주를 쓰면 로비로 돌아갑니다" to {_p}
+
+# 체력·배고픔·효과·불 등 몸 상태를 처음으로
+function pvpResetBody(p: player):
+	set {_p}'s health to 20
+	{_p}.setFoodLevel(20)
+	{_p}.setSaturation(5)
+	{_p}.setFireTicks(0)
+	{_p}.setFallDistance(0)
+	remove all potion effects from {_p}
+
+# MCK 쪽 상태를 그 사람에 대해 지운다(스태미너, 상태이상 보스바, 쿨타임 등. 접속 때 하던 정리와 같게)
+function pvpResetState(p: player):
+	set {_id} to "%uuid of {_p}%"
+	set {-st::%{_id}%} to 100
+	set {-stcap::%{_id}%} to 0
+	set {-oc::%{_id}%} to 0
+	loop {-sbar::%{_id}%::*}:
+		set {_bb} to loop-value
+		{_bb}.removeAll()
+	delete {-sbar::%{_id}%::*}
+	delete {-status::%{_id}%::*}
+	delete {-statusname::%{_id}%::*}
+	delete {-statusdur::%{_id}%::*}
+	delete {-statustype::%{_id}%::*}
+	delete {-statuslabel::%{_id}%::*}
+	delete {-jump::%{_id}%}
+	delete {-jumplock::%{_id}%::*}
+	delete {-stunend::%{_id}%}
+	delete {-ccshown::%{_id}%}
+	delete {-cdn::%{_id}%::*}
+	delete {-invis::%{_id}%}
+	delete {-burrow::%{_id}%}
+	delete {-totemend::%{_id}%}
+	delete {-splash::%{_id}%}
+	delete {-bottle::%{_id}%}
+	delete {-exhaust::%{_id}%}
+	delete {-pickstack::%{_id}%}
+	delete {-pickexp::%{_id}%}
+	delete {-skilldmg::%{_id}%}
+	hpbar_remove({_id})
+	stagRemove({_id})
+	{_p}.clearTitle()
+
+# PVP 에서 나온다(로비로). quiet = 알림 없이
+function pvpLeave(p: player, quiet: boolean):
+	set {_id} to "%uuid of {_p}%"
+	delete {-pvp::in::%{_id}%}
+	delete {-pvp::dead::%{_id}%}
+	# 꿀벌 조종 중이면 끝낸다(bee.sk)
+	if {-beemode::%{_id}%} is set:
+		beeClean({_p}, true)
+	pvpResetState({_p})
+	clear {_p}'s inventory
+	if gamemode of {_p} is survival or adventure:
+		set flight mode of {_p} to false
+	pvpResetBody({_p})
+	if mState() is "lobby":
+		mTp({_p}, mLobbyLoc())
+		wait 2 ticks
+		mLobbyEnsure({_p})
+	if {_quiet} is false:
+		send action bar colored "&7로비로 돌아왔습니다." to {_p}
+
+# 마피아 게임이 시작될 때: PVP 에 있는 모두를 꺼내고 PVP 쪽 떠도는 것(화살, 표시 등)을 정리한다(mjoin.sk mStart)
+function pvpStopAll():
+	loop all players:
+		if pvpIn(loop-player) is true:
+			pvpLeave(loop-player, true)
+			send "&7마피아 게임이 시작되어 PVP 가 끝났습니다." to loop-player
+		else if {-pvp::in::%uuid of loop-player%} is set:
+			delete {-pvp::in::%uuid of loop-player%}
+	delete {-pvp::*}
+
+# 로비 진주 우클릭: PVP 로 / PVP 안의 진주 우클릭: 로비로(진주를 던지지 않게 취소)
+on right click:
+	set {_h} to event.getHand()
+	if {_h} is not set:
+		stop
+	if {_h}.name() is not "HAND":
+		stop
+	set {_tn} to name of player's tool
+	if {_tn} is not set:
+		stop
+	if {_tn} is pvpGoName():
+		cancel the event
+		pvpEnter(player)
+	else if {_tn} is pvpBackName():
+		cancel the event
+		pvpLeave(player, false)
+
+# 진주·상자는 버릴 수 없다
+on drop:
+	set {_dn} to name of event-item
+	if {_dn} is not set:
+		stop
+	if pvpItemName({_dn}) is true:
+		cancel the event
+
+# PVP 에서 죽으면 아이템을 떨어뜨리지 않고, 다시 살아나면 로비로
+on death of player:
+	if pvpEnt(victim) is false:
+		stop
+	clear drops
+	set dropped exp to 0
+	set {-pvp::dead::%uuid of victim%} to true
+
+on respawn:
+	set {_id} to "%uuid of player%"
+	if {-pvp::dead::%{_id}%} is not set:
+		stop
+	set respawn location to mLobbyLoc()
+	wait 1 tick
+	pvpLeave(player, true)
+	send action bar colored "&7PVP 에서 죽어 로비로 돌아왔습니다." to player
+
+# 나가면 PVP 상태를 지운다(다음 접속은 로비로, mjoin.sk 의 접속 처리)
+on quit:
+	delete {-pvp::in::%uuid of player%}
+	delete {-pvp::dead::%uuid of player%}
+
+# 마피아 로비에서 접속했는데 PVP 월드에 있으면(서버 재시작 등) 로비로
+on join:
+	wait 5 ticks
+	if pvpIn(player) is true:
+		if mState() is "lobby":
+			pvpLeave(player, true)
+
+command /pvp:
+	description: PVP 들어가기/나오기
+	executable by: players
+	trigger:
+		if pvpIn(player) is true:
+			pvpLeave(player, false)
+		else:
+			pvpEnter(player)
+
+command /lobby:
+	aliases: /로비
+	description: PVP 에서 로비로
+	executable by: players
+	trigger:
+		if pvpIn(player) is true:
+			pvpLeave(player, false)
+		else:
+			send "&7이미 로비에 있습니다." to player
+
+command /mpvp [<text>] [<text>]:
+	permission: minecraft.command.op
+	permission message: &c권한이 없습니다.
+	description: PVP 설정(관리자)
+	trigger:
+		if arg-1 is "world":
+			if arg-2 is not set:
+				send "&c/mpvp world <월드 이름>" to sender
+				stop
+			if Bukkit.getWorld(arg-2) is not set:
+				send "&c불러와 있지 않은 월드입니다: %arg-2%" to sender
+				stop
+			set {mcfg::pvp::world} to arg-2
+			send "&aPVP 월드: %arg-2%" to sender
+		else if arg-1 is "spawn":
+			if sender is not a player:
+				stop
+			set {mcfg::pvp::world} to "%world of player%"
+			mLocSave("pvp", location of player)
+			send "&aPVP 스폰을 여기로 정했습니다(월드 %world of player%)." to sender
+		else:
+			set {_w} to "(없음)"
+			if {mcfg::pvp::world} is set:
+				set {_w} to {mcfg::pvp::world}
+			send "&ePVP 월드: &f%{_w}%" to sender
+			send "&7/mpvp world <월드 이름> | /mpvp spawn(서 있는 곳)" to sender
+			set {_n} to 0
+			loop all players:
+				if pvpIn(loop-player) is true:
+					add 1 to {_n}
+			send "&7지금 PVP 중: %{_n}%명" to sender

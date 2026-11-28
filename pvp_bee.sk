@@ -1,0 +1,844 @@
+# [bee.sk] 꿀벌 스킬(쿨 75초, 유틸/낚싯대류 분류): 꿀벌 드론을 소환해 조종한다. 아이템 id "bee"(벌 스폰 에그 bee spawn egg).
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수(RAM, 키 = 플레이어 uuid 텍스트): {-beemode::k}("drive" 조종 중 / "hold" 꿀벌만 멈춰 있고 플레이어는 본체로 돌아옴), {-bee::k}(꿀벌 엔티티), {-beep::k}(플레이어),
+#   {-beebody::k}(본체 더미=마네킹), {-beeseat::k}(더미가 앉는 보이지 않는 갑옷 거치대), {-beebodyloc::k}(본체 자리), {-beeown::더미uuid / 꿀벌uuid}(소유 플레이어),
+#   {-beeinv::k::칸}(조종 전 인벤토리 보관), {-beein::k::f/b/l/r/j/s}(입력: 앞/뒤/왼/오/점프/웅크리기, 1 또는 0), {-beebar::k}(본체 더미 머리 위 체력바 텍스트 디스플레이), {-beebarkey::k}(체력바 마지막 값), {-beeslot::k}(사용 때 손에 든 칸 번호: 조종이 끝나면 이 칸으로 돌아감), {-beesnd::k}(이동 소리 틱 카운터), {-beeuse::k}(조종이 끝난 직후 다른 아이템 사용 금지 종료 시각), {-beeglow::k}/{-beeglowteam::k}(더미로 옮긴 발광의 끝 시각(ms)/팀 이름), {-beest::k}(꿀벌 스태미너 0~100, 플레이어와 별개), {-beelock::k}(꿀벌 스태미너 회복 차단 남은 틱), 
+#   {-beecd::k}(쿨타임 종료 시각), {-beestabcd::k}(독침 쿨타임 종료 시각), {-beecomb::k}(꿀벌 전투 종료 시각: 마지막 피격 8초 뒤), {-beeflag::k}(내가 내리게 하는 중 표시), {-beegame::k}(시작 때의 {-ingame})
+# 흐름:
+#   사용(우클릭): 플레이어 자리에 플레이어 모습(스킨, 갑옷)의 더미(마네킹)를 앉은 자세로 세우고(보이지 않는 갑옷 거치대에 태움), 꿀벌(체력 10)을 소환해 플레이어를 꿀벌에 태운다
+#     (플레이어는 투명 + 무적, 시선은 자유, 이동은 PlayerInputEvent 로 WASD/점프/웅크리기를 읽어 매 틱 꿀벌 속도를 정한다: 하늘을 나는 드론). 인벤토리는 보관하고 아이템 3개만 준다.
+#     꿀벌은 본체에서 50칸 넘게 못 간다(바깥 방향 속도를 지움). 지속시간 제한 없음.
+#   본체 피격: 더미가 맞으면 그 피해를 취소하고, 같은 피해를 플레이어 본인에게 준다(잠깐 무적을 풀고 damage(양, 피해 출처) 로 줘서 킬 판정/킬로그가 그대로 간다). 경고음 + 액션바.
+#     치명타면 조종을 먼저 끝내(인벤토리 복구) 본체 자리로 돌려놓고, 꿀벌/더미를 쿨타임 없이 치운 뒤 그 자리에서 죽게 한다.
+#   체력 표시: 보스바는 없다. 조종 중 플레이어 화면 체력바(하트)에는 본체 체력이 그대로 보이고, 본체 더미 머리 위에도 체력바가 뜬다(꿀벌 체력은 healthbar.sk 의 몹 체력바).
+#   조종 중 손에 든 아이템은 다른 플레이어에게 보이지 않는다(Player#sendEquipmentChange 로 빈손을 보냄). 조종이 끝나면 원래 손에 든 아이템/체력을 다시 보낸다.
+#   꿀벌 스태미너: 100에서 시작하고 플레이어 것과 따로 쓴다(가속/질주 기능은 삭제되어 지금은 소모처가 없음). 조종 중에는 배고픔 바에 꿀벌 스태미너가 보인다.
+#   버프: 저항/재생/무적 같은 효과는 본체(플레이어) 체력에 그대로 적용된다. 발광(외곽선)만 꿀벌 위치를 알려 주므로 조종 중에는 본체 더미로 옮기고(팀 색 포함), 조종이 끝나면 남은 시간만큼 돌려준다.
+#   조종 중과 끝난 직후 5틱은 다른 스킬 아이템이 안 쓰인다(beeUseLocked: 복구된 인벤토리 아이템이 같은 클릭에 써지는 문제 방지).
+#   체력바: 꿀벌에는 체력바를 달지 않는다(healthbar.sk 도 드론 꿀벌은 건너뜀). 본체 체력바는 healthbar.sk 가 조종 중에만 플레이어 대신 본체 더미에 상시 표시(탑승한 투명 플레이어에게는 안 뜸, 피해 숫자도 더미 위).
+#   조종이 끝나면 손에 든 칸이 꿀벌 아이템을 쓰던 칸으로 돌아간다. 움직이는 동안 평소 날갯짓 소리(entity.bee.loop)를 볼륨 2.0 으로 1초마다 꿀벌 위치에서 낸다.
+#   꿀벌 체력 회복: 마지막 피격 8초 뒤부터 0.75초마다 체력 +2(main.sk 의 비전투 회복과 같은 규칙).
+#   꿀벌 사망(자폭 포함): 조종 중이면 끝내고 쿨타임 75초 시작(아이템 쿨타임 표시 포함). 정지(hold) 상태에서 죽어도 즉시 쿨타임이 돈다.
+#   정지(방벽): 꿀벌은 그 자리에 멈추고 플레이어는 본체로 돌아온다. 꿀벌이 살아 있는 동안 다시 사용(우클릭)하면 이어서 조종한다(60칸 안일 때, 쿨타임 없음).
+#   플레이어 사망/접속 종료/게임 상태가 바뀌면(시작/종료) 꿀벌과 더미를 치운다(쿨타임 없음).
+# 아이템(items.sk 카탈로그에 id 만 있고 무기고 목록에는 없음): bee_sting(독침, 데미지 3 쿨 4초, 맞은 대상 7초 중독), bee_bomb(자폭, 데미지 10, 반경 4), bee_stop(조종 중지).
+# 독침은 근접 공격(좌클릭)이며 피해는 직접 줘서(스킬 피해 표시) main.sk 무기 보정을 받지 않는다. 쿨타임 중에는 공격이 취소된다.
+# 미검증(전부): 발광/팀 색을 더미로 옮기기(PotionEffect 생성자, 팀 addEntry(더미 uuid)), 더미 setGlowing, Player#stopSound(String)(조종이 멈출 때 꿀벌 소리 끊기), Entity#setSilent(정지한 꿀벌 무음), 경험치 바에 꿀벌 스태미너 표시, Player#sendEquipmentChange, 더미 머리 위 텍스트 디스플레이 높이, bee spawn egg 별칭, 이동 소리 간격, 마네킹이 갑옷 거치대에 타서 앉은 자세로 보이는지, 꿀벌에 플레이어를 태우고 조종/시선이 되는지, PlayerInputEvent(Paper) 수신, org.bukkit.event.entity.EntityDismountEvent(Paper) 취소(웅크리기로 못 내리게),
+#   Mob#setAware(false)+setVelocity 로 꿀벌이 움직이는지, 더미 피격 -> 본인 피해(Damageable#damage(double, DamageSource)), 꿀벌 사망 처리, arrow of poison 아이템, Player#setCooldown(Material, ticks).
+
+using damage sources
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.Material
+	org.bukkit.entity.EntityType
+	org.bukkit.attribute.Attribute
+	org.bukkit.inventory.EquipmentSlot
+	org.bukkit.potion.PotionEffect
+	org.bukkit.potion.PotionEffectType
+	org.bukkit.inventory.ItemStack
+	io.papermc.paper.datacomponent.item.ResolvableProfile
+	net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+	org.bukkit.event.player.PlayerInputEvent
+	org.bukkit.event.entity.EntityDismountEvent
+	org.bukkit.event.entity.ProjectileHitEvent
+
+on load:
+	set {-skillitems::bee} to bee spawn egg
+
+# 꿀벌을 조종 중인 플레이어(꿀벌에 탑승한 투명한 몸)는 투사체(화살 등) 판정을 없앤다: 맞아도 그냥 통과해서 아래/안쪽의 꿀벌이 맞는다.
+# (본체 더미는 그대로 맞는다.) 미검증: Paper 에서 ProjectileHitEvent(엔티티 적중) 취소 시 투사체가 통과해 계속 나아가는지.
+on ProjectileHitEvent:
+	set {_he} to event.getHitEntity()
+	if {_he} is not set:
+		stop
+	if {_he} is a player:
+		if {-beemode::%uuid of {_he}%} is "drive":
+			event.setCancelled(true)
+
+# 꿀벌 조종 중이거나 조종이 막 끝난 직후(5틱)에는 드론 아이템 말고 다른 스킬 아이템을 쓰지 못한다.
+#   조종이 끝나면 보관한 인벤토리가 같은 틱에 돌아오는데, 같은 우클릭(오프핸드 이벤트, 즉시 사용 가짜 이벤트)이 그 복구된 아이템을 써 버리는 일을 막는다.
+#   skillHand(skill_core.sk)와 potions.sk 의 우클릭이 이 함수를 본다.
+function beeUseLocked(p: player) :: boolean:
+	set {_k} to "%uuid of {_p}%"
+	if {-beemode::%{_k}%} is "drive":
+		return true
+	if {-beeuse::%{_k}%} is set:
+		if {-beeuse::%{_k}%} > now:
+			return true
+	return false
+
+# 손에 꿀벌 아이템(벌 스폰 에그)이 있는지. Skript 별칭(bee spawn egg)으로 아이템을 비교하면 스폰 에그가 안 잡힐 수 있어서(미검증) 재질 이름으로 판정한다.
+#   skillHand(skill_core.sk)와 같은 사전 조건(스턴/리스폰 낙하/무기고)과 메인/오프핸드 양보 규칙을 따른다.
+function beeHand(p: player) :: boolean:
+	if {-beeuse::%{_p}'s uuid%} is set:
+		if {-beeuse::%{_p}'s uuid%} > now:
+			return false
+	if isStunned({_p}) is true:
+		return false
+	if {-gdropon::%{_p}'s uuid%} is true:
+		return false
+	if armoryHeld({_p}) is true:
+		return false
+	set {_m} to {_p}.getInventory().getItemInMainHand().getType().name()
+	if {_m} is "BEE_SPAWN_EGG":
+		return true
+	set {_o} to {_p}.getInventory().getItemInOffHand().getType().name()
+	if {_o} is "BEE_SPAWN_EGG":
+		if isSkillItem({_p}'s tool) is true:
+			if {_p} has {_p}'s tool on cooldown:
+				return true
+			return false
+		return true
+	return false
+
+# 꿀벌 스태미너 회복(조종/정지 상태 공통, 매 틱): 회복 차단 중이면 차단 시간만 줄이고, 아니면 +1(플레이어와 같은 규칙)
+function beeStTick(k: text):
+	if {-beest::%{_k}%} is not set:
+		set {-beest::%{_k}%} to 100
+	if {-beelock::%{_k}%} > 0:
+		remove 1 from {-beelock::%{_k}%}
+	else if {-beest::%{_k}%} < 100:
+		add 1 to {-beest::%{_k}%}
+		if {-beest::%{_k}%} > 100:
+			set {-beest::%{_k}%} to 100
+
+function beeSpeed() :: number:
+	return 0.4
+
+function beeRange() :: number:
+	return 50
+
+# ===== 본체 더미 =====
+function beeMakeBody(p: player):
+	set {_k} to "%uuid of {_p}%"
+	set {_l} to {_p}.getLocation()
+	set {_w} to {_l}.getWorld()
+	set {_st} to {_w}.spawnEntity({_l}, EntityType.ARMOR_STAND)
+	{_st}.setInvisible(true)
+	{_st}.setMarker(true)
+	{_st}.setGravity(false)
+	{_st}.setInvulnerable(true)
+	{_st}.setSilent(true)
+	{_st}.addScoreboardTag("beeseat")
+	set {_m} to {_w}.spawnEntity({_l}, EntityType.MANNEQUIN)
+	set {_pf} to nickProfile({_p})
+	{_m}.setProfile(ResolvableProfile.resolvableProfile({_pf}))
+	{_m}.setImmovable(true)
+	{_m}.setSilent(true)
+	{_m}.setDescription(GsonComponentSerializer.gson().deserialize("{""text"":""""}"))
+	{_m}.customName(GsonComponentSerializer.gson().deserialize("{""text"":""%name of {_p}%""}"))
+	{_m}.setCustomNameVisible(true)
+	set {_inv} to {_p}.getInventory()
+	set {_meq} to {_m}.getEquipment()
+	{_meq}.setHelmet({_inv}.getHelmet())
+	{_meq}.setChestplate({_inv}.getChestplate())
+	{_meq}.setLeggings({_inv}.getLeggings())
+	{_meq}.setBoots({_inv}.getBoots())
+	# 본체 더미는 꿀벌 스폰알을 손에 든다(조종 중이라는 표시). (마네킹은 Mob 이 아니라 드롭 확률 설정은 못 한다: 설정하면 IllegalArgumentException)
+	{_meq}.setItemInMainHand(new ItemStack(Material.BEE_SPAWN_EGG))
+	{_m}.addScoreboardTag("beebody")
+	{_st}.addPassenger({_m})
+	set {-beeseat::%{_k}%} to {_st}
+	set {-beebody::%{_k}%} to {_m}
+	# 본체 머리 위 체력바는 만들지 않는다(없앰). {-beebar} 가 없으면 beeBodyBar 는 아무것도 하지 않고, 정리 코드(beeRemoveBody/on load/on unload)는 안전용으로 남겨 뒀다.
+	delete {-beebarkey::%{_k}%}
+	set {-beebodyloc::%{_k}%} to {_l}
+	set {-beeown::%uuid of {_m}%} to {_p}
+
+function beeRemoveBody(k: text):
+	if {-beebar::%{_k}%} is set:
+		delete entity within {-beebar::%{_k}%}
+	delete {-beebar::%{_k}%}
+	delete {-beebarkey::%{_k}%}
+	if {-beebody::%{_k}%} is set:
+		set {_m} to {-beebody::%{_k}%}
+		delete {-beeown::%uuid of {_m}%}
+		{_m}.remove()
+	if {-beeseat::%{_k}%} is set:
+		{-beeseat::%{_k}%}.remove()
+	delete {-beebody::%{_k}%}
+	delete {-beeseat::%{_k}%}
+
+# 발광(네더의 별/불길한 병/불사의 토템의 외곽선)을 본체 더미로 옮긴다. 플레이어는 꿀벌 위에서 투명하게 날아다니므로 외곽선이 꿀벌 위치를 알려 주기 때문.
+#   남은 시간은 {-beeglow::k}(끝나는 시각, 밀리초). 팀 색(빨강/노랑)은 플레이어가 속한 팀에 더미도 넣어서 그대로 보이게 한다.
+#   나머지 효과(저항/재생/무적 등)는 원래 본체(플레이어) 체력에 적용되는 것이라 그대로 둔다.
+function beeGlowMove(p: player, k: text):
+	set {_pe} to {_p}.getPotionEffect(PotionEffectType.GLOWING)
+	if {_pe} is not set:
+		stop
+	set {_dur} to {_pe}.getDuration()
+	if {_dur} <= 0:
+		stop
+	set {_m} to {-beebody::%{_k}%}
+	if {_m} is not set:
+		stop
+	set {_nw} to now
+	set {-beeglow::%{_k}%} to {_nw}.getTimestamp() + {_dur} * 50
+	{_p}.removePotionEffect(PotionEffectType.GLOWING)
+	{_m}.setGlowing(true)
+	set {_n} to {_p}'s name
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_team} to {_sb}.getEntryTeam({_n})
+	if {_team} is set:
+		{_team}.addEntry("%uuid of {_m}%")
+		set {-beeglowteam::%{_k}%} to {_team}.getName()
+
+# 더미 발광을 끝낸다. back 이 true 면 남은 시간만큼 플레이어에게 발광을 돌려준다(조종이 끝났을 때).
+function beeGlowEnd(p: player, k: text, back: boolean):
+	if {-beeglow::%{_k}%} is not set:
+		stop
+	set {_m} to {-beebody::%{_k}%}
+	if {_m} is set:
+		{_m}.setGlowing(false)
+		if {-beeglowteam::%{_k}%} is set:
+			set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+			set {_team} to {_sb}.getTeam({-beeglowteam::%{_k}%})
+			if {_team} is set:
+				{_team}.removeEntry("%uuid of {_m}%")
+	if {_back} is true:
+		set {_nw} to now
+		set {_rem} to {-beeglow::%{_k}%} - {_nw}.getTimestamp()
+		set {_tk} to floor({_rem} / 50)
+		if {_tk} > 0:
+			{_p}.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, {_tk}, 0, false, false, false))
+	delete {-beeglow::%{_k}%}
+	delete {-beeglowteam::%{_k}%}
+
+# 본체 체력바 갱신(값이 바뀔 때만)
+function beeBodyBar(p: player, k: text):
+	set {_d} to {-beebar::%{_k}%}
+	if {_d} is not set:
+		stop
+	set {_mh} to {_p}.getAttribute(Attribute.MAX_HEALTH).getValue()
+	set {_ch} to {_p}.getHealth()
+	set {_ratio} to {_ch} / {_mh}
+	if {_ratio} > 1:
+		set {_ratio} to 1
+	if {_ratio} < 0:
+		set {_ratio} to 0
+	set {_filled} to round({_ratio} * 10)
+	if {_ch} > 0:
+		if {_filled} < 1:
+			set {_filled} to 1
+	set {_key} to "%{_filled}%"
+	if {-beebarkey::%{_k}%} is {_key}:
+		stop
+	set {-beebarkey::%{_k}%} to {_key}
+	set {_c} to "&c"
+	if {_ratio} > 0.6:
+		set {_c} to "&a"
+	else if {_ratio} > 0.3:
+		set {_c} to "&e"
+	set {_bar} to ""
+	loop 10 times:
+		if loop-number <= {_filled}:
+			set {_bar} to "%{_bar}%%{_c}%█"
+		else:
+			set {_bar} to "%{_bar}%&8█"
+	set text of {_d} to {_bar}
+
+# 조종 중 손에 든 아이템을 다른 플레이어에게 안 보이게(빈손을 보낸다)
+function beeHideHand(p: player):
+	set {_air} to new ItemStack(Material.AIR)
+	loop all players:
+		set {_v} to loop-player
+		if {_v} is not {_p}:
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HAND, {_air})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.OFF_HAND, {_air})
+			# 자폭(스켈레톤 머리)은 머리 장비 칸에도 놓일 수 있는 아이템이라 머리/방어구 칸도 같이 비워서 보낸다
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HEAD, {_air})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.CHEST, {_air})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.LEGS, {_air})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.FEET, {_air})
+
+# 조종이 끝나면 다른 플레이어에게 진짜 손 아이템을 다시 보낸다
+function beeShowHand(p: player):
+	set {_main} to {_p}.getInventory().getItemInMainHand()
+	set {_off} to {_p}.getInventory().getItemInOffHand()
+	loop all players:
+		set {_v} to loop-player
+		if {_v} is not {_p}:
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HAND, {_main})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.OFF_HAND, {_off})
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.HEAD, {_p}.getInventory().getHelmet())
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.CHEST, {_p}.getInventory().getChestplate())
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.LEGS, {_p}.getInventory().getLeggings())
+			{_v}.sendEquipmentChange({_p}, EquipmentSlot.FEET, {_p}.getInventory().getBoots())
+
+# 꿀벌 조종용 아이템 3개(독침/자폭/조종 중지)를 인벤토리에서 전부 치운다(조종 도중 죽거나 서버가 꺼졌을 때 리스폰/접속 뒤에 남지 않게)
+function beeItemsScrub(p: player):
+	set {_i} to 0
+	while {_i} <= 40:
+		set {_n} to name of slot {_i} of {_p}'s inventory
+		if {_n} is set:
+			if {_n} is itemName("bee_sting"):
+				set slot {_i} of {_p}'s inventory to air
+			else if {_n} is itemName("bee_bomb"):
+				set slot {_i} of {_p}'s inventory to air
+			else if {_n} is itemName("bee_stop"):
+				set slot {_i} of {_p}'s inventory to air
+		add 1 to {_i}
+
+# ===== 인벤토리 =====
+function beeItemsGive(p: player):
+	set {_k} to "%uuid of {_p}%"
+	set {_inv} to {_p}.getInventory()
+	delete {-beeinv::%{_k}%::*}
+	set {_i} to 0
+	while {_i} <= 35:
+		set {_it} to {_inv}.getItem({_i})
+		if {_it} is set:
+			set {-beeinv::%{_k}%::%{_i}%} to {_it}
+		set slot {_i} of {_p}'s inventory to air
+		add 1 to {_i}
+	set {_off} to {_inv}.getItem(40)
+	if {_off} is set:
+		set {-beeinv::%{_k}%::40} to {_off}
+	set slot 40 of {_p}'s inventory to air
+	set slot 0 of {_p}'s inventory to itemBuild("bee_sting")
+	set slot 1 of {_p}'s inventory to itemBuild("bee_bomb")
+	set slot 2 of {_p}'s inventory to itemBuild("bee_stop")
+	{_inv}.setHeldItemSlot(0)
+
+function beeItemsRestore(p: player):
+	set {_k} to "%uuid of {_p}%"
+	set {_inv} to {_p}.getInventory()
+	set {_i} to 0
+	while {_i} <= 35:
+		set slot {_i} of {_p}'s inventory to air
+		if {-beeinv::%{_k}%::%{_i}%} is set:
+			{_inv}.setItem({_i}, {-beeinv::%{_k}%::%{_i}%})
+		add 1 to {_i}
+	set slot 40 of {_p}'s inventory to air
+	if {-beeinv::%{_k}%::40} is set:
+		{_inv}.setItem(40, {-beeinv::%{_k}%::40})
+	delete {-beeinv::%{_k}%::*}
+
+# ===== 조종 시작/끝 =====
+# 조종을 시작한다(새로 소환하든 정지한 꿀벌을 다시 잡든 공통): 본체 더미를 세우고, 인벤토리를 바꾸고, 꿀벌에 태운다.
+function beeTake(p: player, bee: entity):
+	set {_k} to "%uuid of {_p}%"
+	set {_hs} to {_p}.getInventory().getHeldItemSlot()
+	set {-beeslot::%{_k}%} to "%{_hs}%" parsed as number
+	beeMakeBody({_p})
+	beeGlowMove({_p}, {_k})
+	beeItemsGive({_p})
+	{_p}.setInvisible(true)
+	{_p}.setInvulnerable(true)
+	set {-beein::%{_k}%::f} to 0
+	set {-beein::%{_k}%::b} to 0
+	set {-beein::%{_k}%::l} to 0
+	set {-beein::%{_k}%::r} to 0
+	set {-beein::%{_k}%::j} to 0
+	set {-beein::%{_k}%::s} to 0
+	set {-beegame::%{_k}%} to "%{-ingame}%"
+	set {-beemode::%{_k}%} to "drive"
+	{_bee}.setSilent(false)
+	{_bee}.addPassenger({_p})
+
+# 조종을 끝낸다(플레이어를 꿀벌에서 내리고 본체 자리로 돌려놓는다). restore: 보관한 인벤토리를 돌려줄지(사망이면 false).
+function beeRelease(p: player, restore: boolean):
+	set {_k} to "%uuid of {_p}%"
+	if {-beemode::%{_k}%} is not "drive":
+		stop
+	set {-beeflag::%{_k}%} to true
+	if {-bee::%{_k}%} is set:
+		{-bee::%{_k}%}.removePassenger({_p})
+	delete {-beeflag::%{_k}%}
+	{_p}.setInvisible(false)
+	{_p}.setInvulnerable(false)
+	if {_restore} is true:
+		beeItemsRestore({_p})
+		# 손에 든 칸을 꿀벌 아이템이 있던 칸으로(즉시 사용 아이템과 칸이 엇갈리지 않게)
+		if {-beeslot::%{_k}%} is a number:
+			{_p}.getInventory().setHeldItemSlot({-beeslot::%{_k}%})
+	else:
+		delete {-beeinv::%{_k}%::*}
+	if {-beebodyloc::%{_k}%} is set:
+		teleport {_p} to {-beebodyloc::%{_k}%}
+	beeGlowEnd({_p}, {_k}, true)
+	beeRemoveBody({_k})
+	delete {-beein::%{_k}%::*}
+	delete {-beeslot::%{_k}%}
+	set {-beeuse::%{_k}%} to now + 5 ticks
+	# 조종이 멈추면 꿀벌 소리도 멈춘다: 이미 재생 중인 소리를 끊고, 멈춘 꿀벌은 소리를 내지 않게 한다
+	if {-bee::%{_k}%} is set:
+		{-bee::%{_k}%}.setSilent(true)
+	loop all players:
+		set {_sv} to loop-player
+		{_sv}.stopSound("entity.bee.loop_aggressive")
+		{_sv}.stopSound("entity.bee.loop")
+	# (배고픔 바는 stFoodSync 가 조종이 끝나면 본체 스태미너로 되돌린다)
+	set {-beemode::%{_k}%} to "hold"
+	beeShowHand({_p})
+
+# 꿀벌이 죽었다(또는 자폭했다): 조종을 끝내고 쿨타임 75초를 시작한다.
+function beeLose(k: text):
+	set {_p} to {-beep::%{_k}%}
+	if {-bee::%{_k}%} is set:
+		delete {-beeown::%uuid of {-bee::%{_k}%}%}
+	set {_was} to {-beemode::%{_k}%}
+	if {_p} is online:
+		beeRelease({_p}, true)
+		{_p}.setCooldown(Material.BEE_SPAWN_EGG, 1500)
+		send colored "&c꿀벌 드론이 파괴되었습니다." to {_p}
+		# 조종 중이 아닐 때(정지해 둔 드론이 파괴됨) 알림과 함께 꿀벌이 다치는 소리를 본인에게만 들려준다
+		if {_was} is not "drive":
+			play sound "entity.bee.hurt" with volume 1 and pitch 1 to {_p}
+	delete {-bee::%{_k}%}
+	delete {-beep::%{_k}%}
+	delete {-beemode::%{_k}%}
+	delete {-beecomb::%{_k}%}
+	delete {-beest::%{_k}%}
+	delete {-beelock::%{_k}%}
+	set {-beecd::%{_k}%} to now + 75 seconds
+
+# 쿨타임 없이 전부 치운다(사망, 접속 종료, 게임 상태 변경)
+function beeClean(p: player, restore: boolean):
+	set {_k} to "%uuid of {_p}%"
+	if {-beemode::%{_k}%} is not set:
+		stop
+	if {-beemode::%{_k}%} is "drive":
+		beeRelease({_p}, {_restore})
+	if {-bee::%{_k}%} is set:
+		delete {-beeown::%uuid of {-bee::%{_k}%}%}
+		{-bee::%{_k}%}.remove()
+	beeRemoveBody({_k})
+	delete {-bee::%{_k}%}
+	delete {-beep::%{_k}%}
+	delete {-beemode::%{_k}%}
+	delete {-beecomb::%{_k}%}
+	delete {-beegame::%{_k}%}
+	delete {-beest::%{_k}%}
+	delete {-beelock::%{_k}%}
+
+# ===== 사용 =====
+on rightclick:
+	if beeHand(player) is false:
+		stop
+	cancel event
+	set {_p} to player
+	set {_k} to "%uuid of {_p}%"
+	if gamemode of {_p} is not survival:
+		if gamemode of {_p} is not adventure:
+			stop
+	# 쿨타임 중(새로 소환하려는 경우)에는 공중 안내 메시지도 띄우지 않고 조용히 끝낸다
+	if {-beemode::%{_k}%} is not set:
+		if {-beecd::%{_k}%} is set:
+			if {-beecd::%{_k}%} > now:
+				stop
+	# 공중에서는 시작/재개할 수 없다(본체 더미가 허공에 서게 되므로)
+	if {_p}.isOnGround() is not true:
+		send colored "&c공중에서는 꿀벌을 조종할 수 없습니다." to {_p}
+		ccDeny({_p})
+		stop
+	# 정지해 둔 꿀벌이 살아 있으면 이어서 조종
+	if {-beemode::%{_k}%} is "hold":
+		set {_bee} to {-bee::%{_k}%}
+		set {_v} to {_bee}.isValid()
+		if {_v} is true:
+			if {_bee}.getWorld() is {_p}.getWorld():
+				if distance between {_bee}.getLocation() and {_p}.getLocation() <= 60:
+					beeTake({_p}, {_bee})
+					soundAround("entity.bee.loop_aggressive", location of {_p}, 1, 1)
+					stop
+			send colored "&c꿀벌 드론이 너무 멀리 있습니다." to {_p}
+			stop
+		beeLose({_k})
+		stop
+	if {-beemode::%{_k}%} is "drive":
+		stop
+	if {-beecd::%{_k}%} is set:
+		if {-beecd::%{_k}%} > now:
+			stop
+	set {_l} to {_p}.getLocation()
+	set {_bl} to {_l} ~ vector(0, 1.2, 0)
+	set {_bee} to {_l}.getWorld().spawnEntity({_bl}, EntityType.BEE)
+	{_bee}.setAware(false)
+	{_bee}.setGravity(false)
+	{_bee}.setCollidable(false)
+	{_bee}.setRemoveWhenFarAway(false)
+	{_bee}.getAttribute(Attribute.MAX_HEALTH).setBaseValue(10)
+	{_bee}.setHealth(10)
+	{_bee}.addScoreboardTag("beedrone")
+	{_bee}.setRotation({_l}.getYaw(), 0)
+	set {-bee::%{_k}%} to {_bee}
+	set {-beep::%{_k}%} to {_p}
+	set {-beeown::%uuid of {_bee}%} to {_p}
+	delete {-beecomb::%{_k}%}
+	set {-beesnd::%{_k}%} to 0
+	set {-beest::%{_k}%} to 100
+	set {-beelock::%{_k}%} to 0
+	beeTake({_p}, {_bee})
+	soundAround("entity.bee.loop_aggressive", location of {_p}, 1, 1)
+
+# 아이템 3개의 우클릭(조종 중에만)
+on rightclick:
+	set {_p} to player
+	set {_k} to "%uuid of {_p}%"
+	if {-beemode::%{_k}%} is not "drive":
+		stop
+	set {_h} to event.getHand()
+	if {_h} is not set:
+		stop
+	if {_h}.name() is not "HAND":
+		cancel event
+		stop
+	set {_tn} to name of player's tool
+	if {_tn} is not set:
+		stop
+	if {_tn} is itemName("bee_bomb"):
+		cancel event
+		beeExplode({_p})
+		stop
+	if {_tn} is itemName("bee_stop"):
+		cancel event
+		beeHold({_p})
+		stop
+	if {_tn} is itemName("bee_sting"):
+		cancel event
+
+# 조종 중지: 꿀벌은 그 자리에 멈추고, 플레이어는 본체로 돌아온다
+function beeHold(p: player):
+	set {_k} to "%uuid of {_p}%"
+	set {_bee} to {-bee::%{_k}%}
+	if {_bee} is set:
+		{_bee}.setVelocity(vector(0, 0, 0))
+	beeRelease({_p}, true)
+	send colored "&7꿀벌 드론이 멈췄습니다. 꿀벌 아이템을 다시 사용하면 이어서 조종합니다." to {_p}
+
+# 자폭: 반경 4칸의 적(본인/아군/마네킹/갑옷 거치대/관전 제외)에게 실 체력 10, 꿀벌은 사망
+function beeExplode(p: player):
+	set {_k} to "%uuid of {_p}%"
+	set {_bee} to {-bee::%{_k}%}
+	if {_bee} is not set:
+		stop
+	set {_loc} to {_bee}.getLocation()
+	soundAround("entity.generic.explode", {_loc}, 1.5, 1.2)
+	play 1 explosion emitter at {_loc} in radius of 100
+	# 본체 더미 자리에도 같은 폭발음을 낮게 재생해 자연스럽게 들리게 한다(드론 쪽 소리와 겹치지 않게 볼륨을 줄임)
+	if {-beebody::%{_k}%} is set:
+		set {_bl} to {-beebody::%{_k}%}.getLocation()
+		soundAround("entity.generic.explode", {_bl}, 0.8, 1.2)
+	set {_src} to a custom damage source:
+		set the damage type to player explosion
+		set the causing entity to {_p}
+		set the direct entity to {_p}
+	set {-skilldmg::%{_k}%} to true
+	loop all living entities in radius 4 around {_loc}:
+		set {_e} to loop-entity
+		set {_ok} to true
+		if "%uuid of {_e}%" is {_k}:
+			set {_ok} to false
+		if {_e} is an armor stand:
+			set {_ok} to false
+		if {_e} is {_bee}:
+			set {_ok} to false
+		if isAlly({_k}, "%uuid of {_e}%") is true:
+			set {_ok} to false
+		if {_e}.getType().name() is "MANNEQUIN":
+			set {_ok} to false
+		if {_e} is a player:
+			if gamemode of {_e} is spectator:
+				set {_ok} to false
+		if {_ok} is true:
+			damage {_e} by hp(10) hearts using {_src}
+	delete {-skilldmg::%{_k}%}
+	{_bee}.remove()
+	beeLose({_k})
+
+# ===== 입력 =====
+on PlayerInputEvent:
+	set {_p} to event.getPlayer()
+	set {_k} to "%uuid of {_p}%"
+	if {-beemode::%{_k}%} is not "drive":
+		stop
+	set {_in} to event.getInput()
+	set {_oj} to {-beein::%{_k}%::j}
+	set {-beein::%{_k}%::f} to 0
+	set {-beein::%{_k}%::b} to 0
+	set {-beein::%{_k}%::l} to 0
+	set {-beein::%{_k}%::r} to 0
+	set {-beein::%{_k}%::j} to 0
+	set {-beein::%{_k}%::s} to 0
+	if {_in}.isForward() is true:
+		set {-beein::%{_k}%::f} to 1
+	if {_in}.isBackward() is true:
+		set {-beein::%{_k}%::b} to 1
+	if {_in}.isLeft() is true:
+		set {-beein::%{_k}%::l} to 1
+	if {_in}.isRight() is true:
+		set {-beein::%{_k}%::r} to 1
+	if {_in}.isJump() is true:
+		set {-beein::%{_k}%::j} to 1
+	if {_in}.isSneak() is true:
+		set {-beein::%{_k}%::s} to 1
+
+# 웅크리기로 꿀벌에서 내려오는 것을 막는다(우리가 내리게 하는 중이면 통과)
+on EntityDismountEvent:
+	set {_e} to event.getEntity()
+	if {_e} is not a player:
+		stop
+	set {_k} to "%uuid of {_e}%"
+	if {-beemode::%{_k}%} is not "drive":
+		stop
+	if {-beeflag::%{_k}%} is true:
+		stop
+	cancel event
+
+# ===== 매 틱: 이동, 범위 제한, 체력 표시 =====
+every tick:
+	loop {-beemode::*}:
+		set {_k} to loop-index
+		beeStTick({_k})
+		if loop-value is "drive":
+			set {_p} to {-beep::%{_k}%}
+			set {_bee} to {-bee::%{_k}%}
+			if {_p} is not online:
+				beeClean({_p}, false)
+			else:
+				set {_v} to {_bee}.isValid()
+				if {_v} is not true:
+					beeLose({_k})
+				else:
+					beeDrive({_p}, {_bee}, {_k})
+
+function beeDrive(p: player, bee: entity, k: text):
+	set {_d} to {_p}.getLocation().getDirection()
+	set {_dx} to {_d}.getX()
+	set {_dy} to {_d}.getY()
+	set {_dz} to {_d}.getZ()
+	set {_fw} to {-beein::%{_k}%::f} - {-beein::%{_k}%::b}
+	set {_st} to {-beein::%{_k}%::r} - {-beein::%{_k}%::l}
+	set {_ud} to {-beein::%{_k}%::j} - {-beein::%{_k}%::s}
+	set {_hl} to sqrt({_dx} * {_dx} + {_dz} * {_dz})
+	set {_rx} to 0
+	set {_rz} to 0
+	if {_hl} > 0.001:
+		set {_rx} to (0 - {_dz}) / {_hl}
+		set {_rz} to {_dx} / {_hl}
+	set {_sp} to beeSpeed()
+	set {_vx} to ({_dx} * {_fw} + {_rx} * {_st}) * {_sp}
+	set {_vy} to ({_dy} * {_fw}) * {_sp} + {_ud} * {_sp} * 0.75
+	set {_vz} to ({_dz} * {_fw} + {_rz} * {_st}) * {_sp}
+	set {_vel} to vector({_vx}, {_vy}, {_vz})
+	# 본체에서 50칸 넘게 못 간다: 밖으로 향하는 속도 성분을 지운다
+	set {_bl} to {-beebodyloc::%{_k}%}
+	if {_bl} is set:
+		set {_bp} to {_bee}.getLocation()
+		if {_bl}.getWorld() is {_bp}.getWorld():
+			set {_off} to vector between {_bl} and {_bp}
+			set {_len} to {_off}.length()
+			if {_len} >= beeRange():
+				set {_out} to normalized {_off}
+				set {_dot} to {_vel}.dot({_out})
+				if {_dot} > 0:
+					set {_vel} to {_vel} - {_out} * {_dot}
+				send action bar colored "&e더 멀리 갈 수 없습니다." to {_p}
+	{_bee}.setVelocity({_vel})
+	{_bee}.setRotation({_p}.getLocation().getYaw(), 0)
+	# 화면 체력바(하트)는 본체 체력 그대로다(가짜 체력을 보내지 않는다).
+	beeBodyBar({_p}, {_k})
+	# 더미 발광이 끝날 시각이 되면 끈다
+	if {-beeglow::%{_k}%} is set:
+		set {_gn} to now
+		if {_gn}.getTimestamp() >= {-beeglow::%{_k}%}:
+			beeGlowEnd({_p}, {_k}, false)
+	# 배고픔 바에는 꿀벌 스태미너가 보인다(main.sk stFoodSync 가 조종 중 {-beest} 를 쓴다)
+	beeHideHand({_p})
+	# 움직이는 동안 꿀벌의 평소 날갯짓 소리(entity.bee.loop)를 볼륨 2.0 으로 덧붙여 크게 한다(1초마다).
+	#   위치는 변수에 먼저 담아서 쓴다({_x}.getLocation() 를 play sound 에 바로 쓰면 콘솔에 오류가 났다).
+	if {_vel}.length() > 0.01:
+		add 1 to {-beesnd::%{_k}%}
+		if {-beesnd::%{_k}%} >= 20:
+			set {-beesnd::%{_k}%} to 0
+			set {_sl} to {_bee}.getLocation()
+			soundAround("entity.bee.loop", {_sl}, 2, 1)
+	else:
+		set {-beesnd::%{_k}%} to 20
+
+# ===== 꿀벌 체력 회복(비전투 규칙: 마지막 피격 8초 뒤부터 0.75초마다) =====
+every 15 ticks:
+	loop {-bee::*}:
+		set {_k} to loop-index
+		set {_bee} to loop-value
+		set {_v} to {_bee}.isValid()
+		if {_v} is true:
+			set {_c} to true
+			if {-beecomb::%{_k}%} is set:
+				if {-beecomb::%{_k}%} > now:
+					set {_c} to false
+			if {_c} is true:
+				set {_h} to {_bee}.getHealth()
+				if {_h} < 10:
+					set {_nh} to {_h} + 2
+					if {_nh} > 10:
+						set {_nh} to 10
+					{_bee}.setHealth({_nh})
+
+# 게임 상태(시작/종료)가 바뀌면 치운다
+every second:
+	loop {-beemode::*}:
+		set {_k} to loop-index
+		set {_p} to {-beep::%{_k}%}
+		if {_p} is not online:
+			continue
+		if {-beegame::%{_k}%} is set:
+			if {-beegame::%{_k}%} is not "%{-ingame}%":
+				beeClean({_p}, true)
+
+# ===== 피해 처리 =====
+on damage with priority highest:
+	set {_v} to victim
+	# 1) 본체 더미가 맞으면 취소하고, 같은 피해를 본인에게 전달한다
+	if {-beeown::%uuid of {_v}%} is set:
+		if {_v}.getType().name() is "MANNEQUIN":
+			cancel event
+			set {_o} to {-beeown::%uuid of {_v}%}
+			set {_ok} to "%uuid of {_o}%"
+			if {_o} is not online:
+				stop
+			if {-beemode::%{_ok}%} is not "drive":
+				stop
+			set {_ev} to event
+			set {_amt} to {_ev}.getFinalDamage()
+			set {_ds} to {_ev}.getDamageSource()
+			set {_ae} to {_ds}.getCausingEntity()
+			set {_aid} to ""
+			if {_ae} is set:
+				set {_aid} to "%uuid of {_ae}%"
+				# 본인과 아군은 본체를 때려도 피해가 전달되지 않는다(이벤트는 위에서 이미 취소됨)
+				if {_aid} is {_ok}:
+					stop
+				if isAlly({_ok}, {_aid}) is true:
+					stop
+				# 모루 버프(main.sk)가 이 이벤트와 전달된 이벤트에서 두 번 곱해지지 않게 나눠 둔다
+				if {-anvil::%{_aid}%} is a number:
+					set {_amt} to {_amt} / (1 + 0.1 * {-anvil::%{_aid}%})
+			if {_amt} <= 0:
+				stop
+			play sound "block.note_block.bass" with volume 1 and pitch 0.5 to {_o}
+			play sound "block.note_block.bass" with volume 1 and pitch 0.7 to {_o}
+			send action bar colored "&c본체가 공격받고 있습니다!" to {_o}
+			set {_hp} to {_o}.getHealth()
+			if {_amt} >= {_hp}:
+				# 치명타: 인벤토리를 되돌리며 본체 자리로 돌려놓고, 꿀벌/더미를 쿨타임 없이 치운 뒤 거기서 죽게 한다
+				beeRelease({_o}, true)
+				beeClean({_o}, true)
+			{_o}.setInvulnerable(false)
+			if {_aid} is not "":
+				set {-skilldmg::%{_aid}%} to true
+			{_o}.damage({_amt}, {_ds})
+			if {_aid} is not "":
+				delete {-skilldmg::%{_aid}%}
+			if {_o} is online:
+				if {-beemode::%{_ok}%} is "drive":
+					{_o}.setInvulnerable(true)
+			stop
+	# 2) 꿀벌이 맞았을 때: 주인/아군의 공격은 취소, 아니면 전투 상태 표시(회복 8초 지연)
+	if {_v}.getType().name() is "BEE":
+		if {-beeown::%uuid of {_v}%} is set:
+			set {_o2} to {-beeown::%uuid of {_v}%}
+			set {_ok2} to "%uuid of {_o2}%"
+			if attacker is set:
+				if "%uuid of attacker%" is {_ok2}:
+					cancel event
+					stop
+				if isAlly({_ok2}, "%uuid of attacker%") is true:
+					cancel event
+					stop
+			set {-beecomb::%{_ok2}%} to now + 8 seconds
+			stop
+	# 3) 조종 중인 플레이어의 근접 공격 = 독침
+	if attacker is a player:
+		set {_ak} to "%uuid of attacker%"
+		if {-beemode::%{_ak}%} is "drive":
+			if {-skilldmg::%{_ak}%} is set:
+				stop
+			if projectile is set:
+				stop
+			cancel event
+			set {_tn} to name of attacker's tool
+			if {_tn} is not itemName("bee_sting"):
+				stop
+			if {_v} is attacker:
+				stop
+			if {-beeown::%uuid of {_v}%} is set:
+				stop
+			if {_v}.getType().name() is "MANNEQUIN":
+				stop
+			if isAlly({_ak}, "%uuid of {_v}%") is true:
+				stop
+			if {-beestabcd::%{_ak}%} is set:
+				if {-beestabcd::%{_ak}%} > now:
+					stop
+			set {-beestabcd::%{_ak}%} to now + 4 seconds
+			set {_ap} to attacker
+			{_ap}.setCooldown(Material.TIPPED_ARROW, 80)
+			set {_src} to a custom damage source:
+				set the damage type to player attack
+				set the causing entity to {_ap}
+				set the direct entity to {_ap}
+			set {-skilldmg::%{_ak}%} to true
+			damage {_v} by hp(3) hearts using {_src}
+			delete {-skilldmg::%{_ak}%}
+			if {_v} is alive:
+				apply poison potion of tier 1 to {_v} for 7 seconds
+				if {_v} is a player:
+					setStatus({_v}, "bee_%{_ak}%", "중독", 7 seconds)
+			soundAround("entity.bee.sting", location of {_ap}, 1, 1)
+
+# 꿀벌 사망: 아이템/경험치 드롭 없음, 쿨타임 시작
+on death of bee:
+	set {_e} to victim
+	if {-beeown::%uuid of {_e}%} is not set:
+		stop
+	clear drops
+	set {_o} to {-beeown::%uuid of {_e}%}
+	beeLose("%uuid of {_o}%")
+
+# 조종 중에는 인벤토리를 못 만지고 아이템을 못 버린다
+on inventory click:
+	if {-beemode::%uuid of player%} is "drive":
+		cancel event
+
+on drop:
+	if {-beemode::%uuid of player%} is "drive":
+		cancel event
+
+# 플레이어 사망: 보관한 인벤토리는 돌려주지 않고(리스폰 규칙이 따로 있음) 전부 치운다
+on death of player:
+	set {_k} to "%uuid of victim%"
+	if {-beemode::%{_k}%} is set:
+		if {-beemode::%{_k}%} is "drive":
+			clear drops
+		beeClean(victim, false)
+
+on quit:
+	beeClean(player, true)
+
+# 조종 중 죽으면(치명타가 아닌 /kill 등) 조종용 3아이템이 리스폰 뒤에 남지 않게 치운다(items.sk 의 리스폰 지급보다 먼저 실행됨). 접속 때도 같은 이유로 치운다.
+on respawn:
+	beeItemsScrub(player)
+
+on join:
+	beeItemsScrub(player)
+
+on load:
+	loop all text displays:
+		set {_e} to loop-entity
+		if {_e} has scoreboard tag "beebar":
+			delete entity within {_e}
+		if {_e} has scoreboard tag "beebeebar":
+			delete entity within {_e}
+
+on unload:
+	loop {-beebar::*}:
+		delete entity within loop-value
+	loop {-bee::*}:
+		loop-value.remove()
+	loop {-beebody::*}:
+		loop-value.remove()
+	loop {-beeseat::*}:
+		loop-value.remove()

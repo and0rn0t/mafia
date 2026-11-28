@@ -1,0 +1,76 @@
+# [shovel.sk] 삽 스킬(우클릭, 쿨 15초): 3초간 땅을 파고 들어가 잠복한다. 잠복 중에는 무적 + 투명. 분류는 금속 도구(category 1). 메인핸드 우선, 오프핸드도 작동
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-shcd}(쿨타임 종료 시각), {-burrow}(잠복 종료 시각, 있고 지금보다 뒤면 잠복 중. main.sk 의 on damage 가 읽어서 피해를 취소),
+#   {-invis}(투명 포션과 같은 표시를 같이 켜서 손 아이템/체력바/별 표시가 숨겨진다. potions.sk 규칙대로 피해를 주면 투명만 풀리고 무적은 유지), {-skillitems::iron_shovel},
+#   상태이상 출처 키 shovel(보스바 이로운 효과 "잠복")
+# 공중(땅에 서 있지 않은 상태)에서는 쓸 수 없다. 알림 없이 무시하고 쿨타임도 안 돈다.
+# 쿨타임은 잠복이 끝난 시점부터 15초가 돈다(잠복 중에는 3초짜리 아이템 쿨타임으로 재사용을 막고, 끝나면 15초로 다시 건다).
+# 잠복 중에는 아무 행동도 못 한다(스킬, 공격, 클릭, 설치/부수기/버리기, 우유 포함): skill_core.sk 의 isStunned() 가 잠복 중에도 true 라서 기절과 같은 차단 경로를 탄다.
+# 잠복 중에는 움직일 수 없다: 이동 불가(느림 8) + 점프 불가(점프 강화 129) 포션(아이콘 숨김)과 도약 잠금(jumplock 키 shovel). 시선 회전은 가능. 우유(milk.sk)도 잠복 중에는 느림을 풀지 않는다.
+# 실제로 플레이어를 땅에 묻지는 않는다(위치/충돌 그대로). 무적은 totem.sk 와 같은 방식(피해만 취소, 기절 같은 cc 는 그대로 걸림).
+# 이펙트: 사용 시/종료 시 흙 부수는 소리(block.gravel.break) + 흙 블럭 부서지는 파티클.
+# 미검증: Particle.BLOCK + Material.DIRT.createBlockData() 의 spawnParticle 8인자 호출, 삽 재질 netherite shovel + item_model iron_shovel.
+
+import:
+	org.bukkit.Material
+	org.bukkit.Particle
+	org.bukkit.potion.PotionEffectType
+
+on load:
+	set {-skillitems::iron_shovel} to netherite shovel
+
+function burrowFx(p: player):
+	soundAround("block.gravel.break", location of {_p}, 1.5, 0.8)
+	set {_c} to {_p}.getLocation().add(0, 0.2, 0)
+	{_c}.getWorld().spawnParticle(Particle.BLOCK, {_c}, 40, 0.5, 0.2, 0.5, 0, Material.DIRT.createBlockData())
+
+on rightclick:
+	if skillHand(player, netherite shovel) is false:
+		stop
+	cancel event
+	set {_p} to player
+	set {_id} to "%uuid of {_p}%"
+	if {-shcd::%{_id}%} is set:
+		if {-shcd::%{_id}%} > now:
+			stop
+	# 공중에서는 잠복할 수 없다(알림/쿨타임 없이 무시). 바닥 판정은 Entity#isOnGround.
+	set {_gnd} to {_p}.isOnGround()
+	if {_gnd} is not true:
+		stop
+	set {_end} to now + 3 seconds
+	# 잠복이 끝나기 전에는 다시 못 쓰게 쿨타임 변수를 넉넉히(3초 + 15초) 잡아 두고, 끝나면 15초로 다시 정한다.
+	set {-shcd::%{_id}%} to now + 18 seconds
+	set item cooldown of netherite shovel for {_p} to 3 seconds
+	set {-burrow::%{_id}%} to {_end}
+	set {-invis::%{_id}%} to {_end}
+	apply invisibility potion without any particles whilst hiding the potion icon to {_p} for 3 seconds replacing the existing effect
+	setStatus({_p}, "shovel", "잠복", 3 seconds, "good")
+	{_p}.setArrowsInBody(0, false)
+	apply slowness potion of tier 8 without any particles whilst hiding the potion icon to {_p} for 3 seconds replacing the existing effect
+	apply jump boost potion of tier 129 without any particles whilst hiding the potion icon to {_p} for 3 seconds replacing the existing effect
+	set {-jumplock::%{_id}%::shovel} to true
+	burrowFx({_p})
+	wait 60 ticks
+	# 도중에 죽었거나(on death 가 {-burrow} 삭제) 다시 시작된 경우는 여기서 끝낸다
+	if {-burrow::%{_id}%} is not {_end}:
+		stop
+	delete {-burrow::%{_id}%}
+	delete {-jumplock::%{_id}%::shovel}
+	if {_p} is online:
+		clearStatus({_p}, "shovel")
+		# 기절 중이면 기절이 건 포션이라 건드리지 않는다
+		if isStunned({_p}) is false:
+			{_p}.removePotionEffect(PotionEffectType.getByName("SLOWNESS"))
+			{_p}.removePotionEffect(PotionEffectType.getByName("JUMP_BOOST"))
+		set {-shcd::%{_id}%} to now + 15 seconds
+		set item cooldown of netherite shovel for {_p} to 15 seconds
+		burrowFx({_p})
+
+on death of player:
+	delete {-burrow::%victim's uuid%}
+	delete {-jumplock::%victim's uuid%::shovel}
+	clearStatus(victim, "shovel")
+
+on join:
+	delete {-shcd::%player's uuid%}
+	delete {-burrow::%player's uuid%}

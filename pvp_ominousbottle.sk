@@ -1,0 +1,116 @@
+# [ominousbottle.sk] 불길한 병 스킬(우클릭, 쿨 30초): 7초간 가한 피해의 30% 회복 + 스태미너 초당 20 추가 재생. 끝나면 탈진(스태미너 0 + 5초간 회복 차단, 보스바 "탈진")
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-obcd}(쿨타임 종료 시각), {-bottle}(효과 종료 시각, 있고 지금보다 뒤면 효과 중), {-exhaust}(탈진 종료 시각, 탈진 중 stcap +1), {-healok}(회복이 전투 중 차단을 통과하는 표시, main.sk 가 읽음),
+#   {-skillitems::ominous_bottle}, 상태이상 출처 키 ominousbottle(보스바 이로운 효과 "불길한 병")
+# 이펙트: 사용 시 몸에서 붉은 flash 파티클(번쩍), 불길한 사운드(레이드 징조 + 위더 울음 + 워든 심장박동)가 난다.
+# 지속시간 7초 동안 빨간 발광(glowing, 빨강 팀 obred 의 외곽선 색). 팀 변경은 명령어가 아니라 skript-reflect 로 직접 해서 op/콘솔에 메시지가 안 뜬다.
+# 스태미너 추가 재생: 기본 재생이 틱당 +1(초당 20)이므로 효과 중엔 틱당 +1 을 더한다(기본 재생과 별개, stcap 영향 없음).
+# 회복량: 가한 피해(실제로 깎인 체력)의 30%. 다른 스크립트의 데미지 보정이 끝나도록 1틱 뒤 체력 차이로 계산한다.
+# "ominous bottle" 아이템 별칭이 Skript 2.13 별칭 목록에 있는지 jar 에서 확인 못 함(미검증). 컴파일 오류가 나면 이 줄이 원인.
+
+import:
+	org.bukkit.Bukkit
+	org.bukkit.ChatColor
+	org.bukkit.Color
+	org.bukkit.Particle
+
+on load:
+	set {-skillitems::ominous_bottle} to ominous bottle
+
+on rightclick:
+	if skillHand(player, ominous bottle) is false:
+		stop
+	cancel event
+	if {-obcd::%player's uuid%} is set:
+		if {-obcd::%player's uuid%} > now:
+			stop
+	set {-obcd::%player's uuid%} to now + 30 seconds
+	set item cooldown of ominous bottle for player to 30 seconds
+	set {-bottle::%player's uuid%} to now + 7 seconds
+	setStatus(player, "ominousbottle", "불길한 병", 7 seconds, "good")
+	# 강렬한 사운드(불길한/어두운 느낌): 레이드 징조 + 낮은 위더 울음 + 워든 심장박동. 주변 플레이어도 들린다.
+	soundAround("event.mob_effect.raid_omen", location of player, 3, 0.8)
+	soundAround("entity.wither.ambient", location of player, 1.5, 0.5)
+	soundAround("entity.warden.heartbeat", location of player, 3, 0.7)
+	# flash 의 색 지정은 1.21.9 이상에서만 가능(skript 문법은 색을 못 받아서 reflect 로 직접 호출). 그 미만 버전이면 이 줄에서 오류가 난다.
+	set {_c} to player's location ~ vector(0, 1, 0)
+
+	# 빨간 발광: 발광 외곽선 색은 팀 색이라 빨강 팀 obred 에 7초 동안 넣는다.
+	# 팀은 명령어 대신 스코어보드 API 로 바꿔서 op/콘솔에 안내 메시지가 나오지 않는다. 원래 팀이 있었으면 끝난 뒤 돌려놓는다.
+	set {_n} to player's name
+	set {_sb} to Bukkit.getScoreboardManager().getMainScoreboard()
+	set {_team} to {_sb}.getTeam("obred")
+	if {_team} is not set:
+		set {_team} to {_sb}.registerNewTeam("obred")
+	{_team}.setColor(ChatColor.RED)
+	set {_old} to {_sb}.getEntryTeam({_n})
+	scAdd({_team}, player)
+	apply glowing potion of tier 1 without any particles whilst hiding the potion icon to player for 7 seconds replacing the existing effect
+	loop 3 times:
+		{_c}.getWorld().spawnParticle(Particle.FLASH, {_c}, 1, Color.fromRGB(255, 0, 0))
+		wait 2 ticks
+	wait 134 ticks
+	scRemove({_team}, player)
+	if {_old} is set:
+		{_old}.addEntry({_n})
+
+# 효과 중: 스태미너 틱당 +1 추가. 끝나면 탈진(스태미너 0).
+on every 1 ticks:
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		set {_id} to "%loop-player's uuid%"
+		# 꿀벌 조종 중(bee.sk)에는 배고픔 바에 꿀벌 스태미너가 보이므로 본체 스태미너 값만 바꾸고 바는 건드리지 않는다.
+		set {_dr} to false
+		if {-beemode::%{_id}%} is "drive":
+			set {_dr} to true
+		if {-bottle::%{_id}%} is set:
+			if {-bottle::%{_id}%} > now:
+				if {-st::%{_id}%} < 100:
+					add 1 to {-st::%{_id}%}
+					if {-st::%{_id}%} > 100:
+						set {-st::%{_id}%} to 100
+			else:
+				delete {-bottle::%{_id}%}
+				set {-st::%{_id}%} to 0
+				play sound "entity.player.breath" with volume 1 and pitch 0.8 to loop-player
+				# 탈진: 5초 동안 스태미너 회복 차단(stcap +1) + 보스바에 "탈진"(해로운 효과)
+				add 1 to {-stcap::%{_id}%}
+				set {-exhaust::%{_id}%} to now + 5 seconds
+				setStatus(loop-player, "ominousbottle_exhaust", "탈진", 5 seconds)
+		if {-exhaust::%{_id}%} is set:
+			if {-exhaust::%{_id}%} <= now:
+				delete {-exhaust::%{_id}%}
+				if {-stcap::%{_id}%} > 0:
+					remove 1 from {-stcap::%{_id}%}
+
+# 효과 중 가한 피해의 30% 회복
+on damage:
+	if attacker is a player:
+		set {_a} to attacker
+		if {-bottle::%{_a}'s uuid%} is set:
+			if {-bottle::%{_a}'s uuid%} > now:
+				set {_v} to victim
+				set {_before} to {_v}'s health
+				wait 1 tick
+				set {_after} to {_v}'s health
+				set {_d} to {_before} - {_after}
+				if {_d} > 0:
+					set {_heal} to {_d} * 0.3
+					set {-healok::%{_a}'s uuid%} to true
+					heal {_a} by {_heal} hearts
+					delete {-healok::%{_a}'s uuid%}
+
+on death:
+	delete {-bottle::%victim's uuid%}
+	if {-exhaust::%victim's uuid%} is set:
+		delete {-exhaust::%victim's uuid%}
+		if {-stcap::%victim's uuid%} > 0:
+			remove 1 from {-stcap::%victim's uuid%}
+		clearStatus(victim, "ominousbottle_exhaust")
+
+on join:
+	delete {-obcd::%player's uuid%}
+	delete {-bottle::%player's uuid%}
+	delete {-exhaust::%player's uuid%}
+	delete {-healok::%player's uuid%}

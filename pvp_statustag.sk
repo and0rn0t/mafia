@@ -1,0 +1,90 @@
+# [statustag.sk] 해로운 상태이상(구속, 기절 등)이 걸린 플레이어의 체력바 위에 <기절> <구속> 처럼 이름을 띄운다.
+# 환경, 작업 규칙, 변수 목록, 스킬 추가 절차는 skill_core.sk 맨 위 주석을 먼저 읽을 것.
+# 이 파일이 쓰는 변수: {-stag_d}(상태 표시용 텍스트 디스플레이 엔티티), 읽기: {-status}, {-statusname}, {-statustype}
+# 체력바는 사용자의 healthbar.sk(플레이어 체력바 높이 0.6)를 전제로, 그 위(기본 0.9)에 따로 텍스트 디스플레이를 태운다.
+# 체력바 스크립트와 별개의 엔티티(태그 "stag")라서 서로 지우지 않는다. 높이는 아래 status-height 만 바꾸면 된다.
+# 표시 대상: 해로운 효과("bad", "cc")만. 이로운 효과("good", 예: 채굴)는 표시하지 않는다.
+# 텍스트 디스플레이/태그/탑승 문법은 사용자의 healthbar.sk 에서 가져옴(서버에서 동작 확인된 문법).
+
+options:
+	status-height: 0.9
+
+function stagRemove(id: text):
+	set {_d} to {-stag_d::%{_id}%}
+	if {_d} is set:
+		delete entity within {_d}
+	delete {-stag_d::%{_id}%}
+
+function stagUpdate(p: player):
+	set {_id} to "%uuid of {_p}%"
+	delete {_n::*}
+	set {_cnt} to 0
+	loop {-status::%{_id}%::*}:
+		set {_src} to loop-index
+		if {-status::%{_id}%::%{_src}%} > now:
+			if {-statustype::%{_id}%::%{_src}%} is not "good":
+				set {_nm} to {-statusname::%{_id}%::%{_src}%}
+				if {_n::%{_nm}%} is not set:
+					set {_n::%{_nm}%} to true
+					add 1 to {_cnt}
+	if {_cnt} <= 0:
+		stagRemove({_id})
+		stop
+	set {_txt} to ""
+	set {_i} to 0
+	loop {_n::*}:
+		add 1 to {_i}
+		if {_i} > 1:
+			set {_txt} to "%{_txt}% "
+		set {_txt} to "%{_txt}%&c<%loop-index%>"
+	set {_d} to {-stag_d::%{_id}%}
+	set {_new} to false
+	if {_d} is not set:
+		set {_new} to true
+	else if {_d} is dead:
+		set {_new} to true
+	else if vehicle of {_d} is not {_p}:
+		delete entity within {_d}
+		set {_new} to true
+	if {_new} is true:
+		spawn a text display at location of {_p}:
+			set {_d} to event-entity
+			add "stag" to scoreboard tags of event-entity
+			set billboard of event-entity to center
+			set transformation translation of event-entity to vector(0, {@status-height}, 0)
+			add event-entity to passengers of {_p}
+		set {-stag_d::%{_id}%} to {_d}
+	set text of {_d} to {_txt}
+
+every 5 ticks:
+	loop all players:
+		if pvpIn(loop-player) is false:
+			continue
+		stagUpdate(loop-player)
+
+# 주인이 사라져 떠돌게 된 표시 정리
+every 2 seconds:
+	loop all text displays:
+		set {_t} to loop-entity
+		if {_t} has scoreboard tag "stag":
+			if vehicle of {_t} is not set:
+				delete entity within {_t}
+
+on death:
+	stagRemove("%uuid of victim%")
+
+on quit:
+	stagRemove("%uuid of player%")
+
+on load:
+	loop all text displays:
+		set {_e} to loop-entity
+		if {_e} has scoreboard tag "stag":
+			delete entity within {_e}
+	delete {-stag_d::*}
+
+on unload:
+	loop {-stag_d::*}:
+		set {_e} to loop-value
+		delete entity within {_e}
+	delete {-stag_d::*}

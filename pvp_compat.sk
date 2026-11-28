@@ -1,0 +1,57 @@
+# ==============================================================================
+# [pvp_compat.sk] MCK 전투 코드(pvp_*.sk)가 부르지만 마피아 서버에는 옮기지 않은 MCK 기능(게임 진행, 관리자 메뉴, 준비·관전, 티어, 튜토리얼, 모자)의 함수 대신.
+#   전부 "없는 것"처럼 답한다(게임 중 아님, 준비 기능 없음 등). 구조는 pvp.sk 머리말.
+# 미검증: 전체(서버 실행 불가).
+# ==============================================================================
+
+# 관리자 메뉴 아이템(MCK admin.sk): 마피아 서버에는 없다. 어떤 아이템 이름과도 겹치지 않는 이름
+function adminItemName() :: text:
+	return "&0&k__mck_admin_unused__"
+
+function adminItem() :: itemtype:
+	return air
+
+function adminOpen(p: player):
+	stop
+
+# 게임 진행(MCK game.sk): 마피아 서버의 PVP 는 게임 진행이 없다
+function gInGame(p: player) :: boolean:
+	return false
+
+# 준비·관전(MCK ready.sk, spectate.sk): 마피아 쪽 준비·관전과는 따로라 쓰지 않는다
+function readyActive() :: boolean:
+	return false
+
+function readyOn(p: player) :: boolean:
+	return false
+
+function specOn(p: player) :: boolean:
+	return false
+
+# 티어 아이콘(MCK tier.sk): 없음
+function tierPreJ(id: text) :: text:
+	return ""
+
+# 튜토리얼(MCK tutorial.sk): 없음
+function tutHook(p: player, k: text):
+	stop
+
+# 무기고 도움말 칸(MCK tutorial.sk): 빈 칸으로 둔다
+function helpItem() :: itemtype:
+	return gray stained glass pane named " "
+
+function helpDialog(p: player, n: number):
+	stop
+
+# 모자(MCK hats.sk): 없음
+function hatIs(it: itemstack) :: boolean:
+	return false
+
+# nickProfile 은 마피아 쪽 nick.sk 에 있다(같은 함수)
+
+# 스코어보드 팀에 넣고 빼기(MCK game.sk 의 발광 색 팀). 이름(과 UUID)을 항목으로 쓴다
+function scAdd(team: object, p: player):
+	{_team}.addEntry(name of {_p})
+
+function scRemove(team: object, p: player):
+	{_team}.removeEntry(name of {_p})
