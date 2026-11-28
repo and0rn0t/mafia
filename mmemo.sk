@@ -6,6 +6,7 @@
 #   메모 안 한 사람 "???"(회색) / 메모한 사람 "(직업?)"(그 직업 팀 색) /
 #   모두에게 공개된 직업({-m::pubrole::uuid}: 투표로 죽지 않은 정치인, 기자 특종, 공격을 버텨낸 군인)은 메모를 무시하고 "[직업]"(팀 색) /
 #   같은 마피아 팀원(서로 아는 사이)은 진짜 직업 / 자기 자신은 표시 없음.
+#   관전자(사망자, 참가하지 않은 사람)는 메모와 상관없이 모든 사람의 진짜 직업 "[직업]".
 # 변수: {-m::memo::보는사람::대상} = 직업 id (mReset 이 지운다)
 # 탭 목록은 mbody.sk 의 mBodyInfo 가 받는 사람마다 이 표시를 붙여 보낸다(이름이 다시 보내질 때). 메모를 바꾸면 탭을 다시 보낸다.
 # 채팅·기록: 대화는 기록({-m::log::*})에 말한 사람 자리 {{n:uuid}} 로 남고, 보여 줄 때 보는 사람의 메모로 바꾼다(mcore.sk mLogRender). 메모를 바꾸면 채팅창을 비우고 최근 기록 60줄을 새 표시로 다시 보낸다(mChatRedraw).
@@ -22,6 +23,15 @@ function mMemoTag(viewer: text, target: text) :: text:
 		return ""
 	if {-m::players::*} does not contain {_target}:
 		return ""
+	# 관전자(사망자, 참가하지 않은 사람)는 모든 사람의 진짜 직업을 본다
+	set {_spec} to true
+	if {-m::players::*} contains {_viewer}:
+		if {-m::alive::%{_viewer}%} is true:
+			set {_spec} to false
+	if {_spec} is true:
+		set {_tr} to {-m::role::%{_target}%}
+		if {_tr} is set:
+			return "&8[%mTeamColor(mRolePool({_tr}))%%mRoleName({_tr})%&8]"
 	set {_pr} to {-m::pubrole::%{_target}%}
 	if {_pr} is set:
 		return "&8[%mTeamColor(mRolePool({_pr}))%%mRoleName({_pr})%&8]"
