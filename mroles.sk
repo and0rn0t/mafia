@@ -195,6 +195,12 @@ function mDraw(n: number) :: texts:
 				add loop-value to {_rest::*}
 	set {_rest::*} to shuffled {_rest::*}
 	set {_left} to {_k::4} - 2
+	# 10명 이상이면 광인은 반드시 나온다(확정, 직업 켜고 끄기와 상관없이)
+	if {_n} >= 10:
+		if {_left} > 0:
+			add "madman" to {_out::*}
+			remove "madman" from {_rest::*}
+			subtract 1 from {_left}
 	if {_left} > 0:
 		set {_pick::*} to first {_left} elements of {_rest::*}
 		add {_pick::*} to {_out::*}
