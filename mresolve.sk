@@ -326,6 +326,7 @@ function mResolve():
 		else:
 			set {-m::team::%{_th}%} to "none"
 		add "steal|%{_th}%|%{_v}%" to {-m::ev::*}
+		Bukkit.getConsoleSender().sendMessage("[mafia] 도둑 %mNameOf({_th})% 이(가) %mNameOf({_v})% 의 직업(%mRoleName({_nr})%)을 훔침, 팀: %{-m::team::%{_th}%}%")
 		set {_nrn} to mRoleName({_nr})
 		mAddInfo({_th}, "&e도둑: &f%{_nrn}%&e 직업을 훔쳤습니다.")
 		if {_nr} is "madman":

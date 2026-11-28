@@ -153,6 +153,30 @@ function mWinCheck() :: text:
 			return "draw"
 	return ""
 
+# 지금 팀. 도둑은 훔친 직업의 팀을 따른다(확정): 시민 직업 → 시민 팀, 마피아 → 마피아 팀, 중립 → 중립, 보조 → 접선 전이면 소속 없음.
+#   밤 처리(mresolve.sk)가 팀을 바꾸지만, 어긋나 있으면 여기서 바로잡는다(승패 판정이 훔친 팀을 따르게).
+function mTeamNow(id: text) :: text:
+	set {_tm} to {-m::team::%{_id}%}
+	if {-m::orig::%{_id}%} is "thief":
+		if {-m::stolen::%{_id}%} is set:
+			set {_sp} to mRolePool({-m::stolen::%{_id}%})
+			set {_want} to {_tm}
+			if {_sp} is "citizen":
+				set {_want} to "citizen"
+			else if {_sp} is "mafia":
+				set {_want} to "mafia"
+			else if {_sp} is "neutral":
+				set {_want} to "neutral"
+			else if {_sp} is "support":
+				if {-m::contact::%{_id}%} is true:
+					set {_want} to "mafia"
+				else:
+					set {_want} to "none"
+			if {_want} is not {_tm}:
+				set {-m::team::%{_id}%} to {_want}
+				set {_tm} to {_want}
+	return {_tm}
+
 # 기본 승리 조건(ROLES.md 표)
 function mWinBase() :: text:
 	set {_a} to 0
@@ -168,7 +192,7 @@ function mWinBase() :: text:
 			if {-m::role::%loop-value%} is "jester":
 				continue
 			add 1 to {_a}
-			set {_tm} to {-m::team::%loop-value%}
+			set {_tm} to mTeamNow(loop-value)
 			if {_tm} is "mafia":
 				add 1 to {_m}
 				if {-m::role::%loop-value%} is "mafia":

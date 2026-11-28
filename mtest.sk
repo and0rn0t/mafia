@@ -365,7 +365,7 @@ function mBotMentions(msg: text, t: text) :: boolean:
 
 # 봇이 마피아 팀(마피아 직업이거나 접선한 보조)인지
 function mBotEvilSide(b: text) :: boolean:
-	if {-m::team::%{_b}%} is "mafia":
+	if mTeamNow({_b}) is "mafia":
 		return true
 	return false
 
@@ -416,6 +416,7 @@ function mBotInit():
 	delete {-mt::pushed::*}
 	delete {-mt::saidtxt::*}
 	delete {-mt::susr::*}
+	delete {-mt::thiefsaid::*}
 	delete {-mt::repdue::*}
 	delete {-mt::noparse::*}
 	loop {-m::players::*}:
@@ -858,7 +859,8 @@ function mBotPlain(s: text) :: text:
 function mBotLiar(b: text) :: boolean:
 	if {-m::role::%{_b}%} is "madman":
 		return false
-	if {-m::team::%{_b}%} is "citizen":
+	# 지금 팀(도둑은 훔친 직업의 팀, mvote.sk mTeamNow)
+	if mTeamNow({_b}) is "citizen":
 		return false
 	return true
 
@@ -970,6 +972,10 @@ function mBotRepMake(b: text) :: text:
 	if {-m::role::%{_b}%} is "madman":
 		set {_mad} to true
 	set {_t} to {_at}
+	# 도둑이 어젯밤 훔쳤으면 어젯밤 행동은 새 직업의 능력이 아니다(대상 없음으로 보고)
+	loop {-m::ev::*}:
+		if loop-value starts with "steal|%{_b}%|":
+			set {_t} to "-"
 	if {_r} is "police":
 		if {_t} is not "-":
 			if {-m::inv::%{_b}%} is set:
@@ -1079,7 +1085,24 @@ function mBotReport(b: text):
 		set {_t} to {_f::2}
 	# 보고는 뜻이 정해져 있으니 AI 로 다시 읽지 않는다
 	set {-mt::noparse::%{_b}%} to true
-	mBotSpeak({_b}, "report", {_t}, "", mBotRepText({_b}, {_spec}))
+	set {_txt} to mBotRepText({_b}, {_spec})
+	# 시민 직업을 훔친 도둑: 이제 시민 팀이니 정체를 털어놓고 진짜 직업으로 보고한다(앞서 한 거짓 주장을 정리)
+	if {-m::orig::%{_b}%} is "thief":
+		if {-m::stolen::%{_b}%} is set:
+			if mTeamNow({_b}) is "citizen":
+				if {-mt::thiefsaid::%{_b}%} is not set:
+					set {-mt::thiefsaid::%{_b}%} to true
+					set {_sn} to mRoleName({-m::stolen::%{_b}%})
+					set {_vic} to ""
+					loop {-m::ev::*}:
+						if loop-value starts with "steal|%{_b}%|":
+							set {_vic} to loop-value
+							replace all "steal|%{_b}%|" in {_vic} with ""
+					set {_pre} to "사실 저는 도둑이었어요. 직업을 훔쳐서 이제 %{_sn}%%mKoIe({_sn})%"
+					if {_vic} is not "":
+						set {_pre} to "사실 저는 도둑이었어요. 어젯밤 %mBotRef({_vic})% 님 직업을 훔쳐서 이제 %{_sn}%%mKoIe({_sn})%"
+					set {_txt} to "%{_pre}%. 앞에 한 말은 정체를 숨기려던 거예요. %{_txt}%"
+	mBotSpeak({_b}, "report", {_t}, "", {_txt})
 
 # 보고를 기록하고 직업 주장·모순 검사를 한다. fx = 경찰 결과를 고발/변호로 반영(봇의 보고. 사람 말은 AI 해석이 이미 반영)
 function mBotRepApply(s: text, spec: text, fx: boolean):
