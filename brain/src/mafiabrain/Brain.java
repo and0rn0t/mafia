@@ -52,6 +52,9 @@ public final class Brain {
         double[] cx;
         List<int[]> pol = new ArrayList<>(); // {경찰주장자, 대상, 1=마피아}
         List<int[]> pv = new ArrayList<>();  // {투표한 사람, 대상}
+        List<int[]> vouch = new ArrayList<>(); // {감싼 사람, 대상}
+        List<int[]> acc = new ArrayList<>();   // {지목한 사람, 대상}
+        boolean[] late;
         List<Rep> rp = new ArrayList<>();
         boolean mad;
 
@@ -61,13 +64,14 @@ public final class Brain {
             f.items = new ArrayList<>(items);
             f.claim = claim.clone(); f.pub = pub.clone(); f.dd = dd.clone(); f.nd = nd.clone(); f.liar = liar.clone(); f.cx = cx.clone();
             f.pol = new ArrayList<>(pol); f.pv = new ArrayList<>(pv); f.rp = new ArrayList<>(rp);
+            f.vouch = new ArrayList<>(vouch); f.acc = new ArrayList<>(acc); f.late = late.clone();
             return f;
         }
 
         void alloc() {
             int n = ids.size();
             claim = new String[n]; pub = new int[n]; Arrays.fill(pub, -1); dd = new int[n];
-            nd = new boolean[n]; liar = new boolean[n]; cx = new double[n];
+            nd = new boolean[n]; liar = new boolean[n]; cx = new double[n]; late = new boolean[n];
         }
 
         Integer id(String s) { return s == null ? null : idx.get(s); }
@@ -106,6 +110,13 @@ public final class Brain {
                         if (r.res.startsWith("tgt:")) { Integer y = id(r.res.substring(4)); r.y = y == null ? -1 : y; }
                         rp.add(r);
                     }
+                    break;
+                case "late": if (a != null) late[a] = true; break;
+                case "vouch":
+                    if (a != null && f.length > 2) { Integer t = id(f[2]); if (t != null && t.intValue() != a.intValue()) vouch.add(new int[]{a, t}); }
+                    break;
+                case "acc":
+                    if (a != null && f.length > 2) { Integer t = id(f[2]); if (t != null && t.intValue() != a.intValue()) acc.add(new int[]{a, t}); }
                     break;
                 case "mad": mad = true; break;
                 default: break;
@@ -240,6 +251,7 @@ public final class Brain {
         for (int i = 0; i < n; i++) {
             double x = 1;
             if (f.liar[i]) x *= 0.02;
+            if (f.late[i]) x *= 0.7;
             if (f.cx[i] > 0) x *= Math.max(0.03, Math.exp(-f.cx[i] / 110.0));
             cw[i] = x;
         }
@@ -307,6 +319,13 @@ public final class Brain {
             }
             for (int[] d : detBad) if (worlds[o + d[0]] == C && worlds[o + d[1]] == C) x *= eps;
             for (int[] d : protBad) if (worlds[o + d[0]] == C) x *= 0.15;
+            // 감싸기·지목: 시민 팀은 마피아를 덜 감싸고, 마피아 팀은 팀원(마피아)을 잘 지목하지 않는다
+            for (int[] v : f.vouch) if (worlds[o + v[1]] == M && worlds[o + v[0]] == C) x *= 0.6;
+            for (int[] v : f.acc) {
+                if (worlds[o + v[1]] != M) continue;
+                int a = worlds[o + v[0]];
+                if (a == M) x *= 0.5; else if (a == S) x *= 0.8;
+            }
             for (int[] v : f.pv) {
                 int a = worlds[o + v[0]], b = worlds[o + v[1]];
                 if (b == M && a == M) x *= 0.45;
@@ -417,7 +436,7 @@ public final class Brain {
         for (int i = 0; i < base.items.size(); i++) {
             String it = base.items.get(i);
             String head = it.split("\\|", 2)[0];
-            if (!(head.equals("cl") || head.equals("nd") || head.equals("cx") || head.equals("liar") || head.equals("pol") || head.equals("rp") || head.equals("pv"))) continue;
+            if (!(head.equals("cl") || head.equals("nd") || head.equals("cx") || head.equals("liar") || head.equals("pol") || head.equals("rp") || head.equals("pv") || head.equals("late") || head.equals("vouch") || head.equals("acc"))) continue;
             // 이 사람과 관련된 사실만 따진다(빠르게): 이 사람이 나오는 항목, 같은 직업을 주장한 사람의 주장·밤 사망
             boolean rel = it.contains(id);
             String tc = base.claim[ti];
@@ -471,6 +490,31 @@ public final class Brain {
         if (rebuilt) { worlds = keepW; count = keepC; }
         if (tot <= 0) return -1;
         return sum / tot;
+    }
+
+    /**
+     * 누명 씌우기(마피아 팀 봇): 공개 사실에 extra 를 더했을 때 살아 있는 팀원이 아닌 사람(alive 중 mates 밖) 가운데
+     * "마피아 팀 확률"이 가장 많이 오르는 사람의 오름 폭과 그 사람 id 를 "폭|id" 로. 계산할 수 없으면 ""
+     */
+    public static synchronized String frame(String extra, String mates, String alive) {
+        if (base == null) return "";
+        Facts f = base.copy();
+        for (String it : extra.split(";")) f.apply(it);
+        if (!Arrays.equals(f.pub, base.pub)) return "";
+        double[][] r0 = compute(base, weight, new Cons());
+        double[][] r1 = compute(f, weigh(f), new Cons());
+        if (r0 == null || r1 == null) return "";
+        Set<Integer> ms = new HashSet<>();
+        for (int i : idsOf(base, mates)) ms.add(i);
+        double best = 0;
+        int bi = -1;
+        for (int i : idsOf(base, alive)) {
+            if (ms.contains(i)) continue;
+            double d = (r1[M][i] + r1[S][i]) - (r0[M][i] + r0[S][i]);
+            if (d > best) { best = d; bi = i; }
+        }
+        if (bi < 0) return "0|";
+        return best + "|" + base.ids.get(bi);
     }
 
     // ---- 시민 쪽 미리 따져 보기

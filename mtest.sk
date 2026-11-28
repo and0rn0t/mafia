@@ -308,9 +308,8 @@ function mBotTopicSay(b: text, t: text, why: text) :: boolean:
 	set {_wk} to {-mt::whykey}
 	# 전제(why) + 추론(whyinf) + 결론(문장 틀): 결론만 말하지 않게
 	set {_inf} to {-mt::whyinf}
-	set {_full} to {_why}
-	if {_inf} is not "":
-		set {_full} to "%{_why}%^%{_inf}%"
+	# 봇마다 말투가 다르다(mBotStyled)
+	set {_full} to mBotStyled({_b}, {_why}, {_inf})
 	if {_wk} is "":
 		set {_wk} to "%{_t}%|misc"
 	set {_key} to "%{-m::day}%|%{_wk}%"
@@ -465,9 +464,17 @@ function mBotInit():
 	delete {-mt::pvh::*}
 	delete {-mt::wmmeas}
 	delete {-mt::cctgt}
+	delete {-mt::style::*}
+	delete {-mt::loud::*}
+	delete {-mt::framet::*}
+	delete {-mt::fpacc::*}
+	delete {-mt::late::*}
+	delete {-mt::vch::*}
+	delete {-mt::acs::*}
 	loop {-m::players::*}:
 		set {_b} to loop-value
 		if mIsBot({_b}) is true:
+			mBotStyleInit({_b})
 			loop {-m::players::*}:
 				set {_t} to loop-value-2
 				if {_t} is not {_b}:
@@ -476,6 +483,8 @@ function mBotInit():
 				loop {-m::players::*}:
 					if {-m::team::%loop-value-2%} is "mafia":
 						set {-mt::k::%{_b}%::%loop-value-2%} to "mafia"
+	# 마피아 봇이 여럿이면 한 명만 앞에서 몬다
+	mBotMafiaRoles()
 
 # 낮이 시작될 때: 지난 밤 자기 조사 결과와 기자 특종, 새로 접선한 팀원을 반영한다
 function mBotLearn():
@@ -587,6 +596,14 @@ function mWmFacts() :: text:
 				set {_s} to "%{_s}%;pv|%{_p}%|%{-mt::pvh::%loop-value-2%::%{_p}%}%"
 		if {-mt::liar::%{_p}%} is set:
 			set {_s} to "%{_s}%;liar|%{_p}%"
+		if {-mt::late::%{_p}%} is set:
+			set {_s} to "%{_s}%;late|%{_p}%"
+		# 지목·감싸기(행동 단서)
+		loop {-m::players::*}:
+			if {-mt::acs::%{_p}%::%loop-value-2%} is set:
+				set {_s} to "%{_s}%;acc|%{_p}%|%loop-value-2%"
+			if {-mt::vch::%{_p}%::%loop-value-2%} is set:
+				set {_s} to "%{_s}%;vouch|%{_p}%|%loop-value-2%"
 		if {-mt::cxs::%{_p}%} is set:
 			set {_s} to "%{_s}%;cx|%{_p}%|%{-mt::cxs::%{_p}%}%"
 		loop {-m::day} times:
@@ -848,6 +865,16 @@ function mWmSay(item: text, t: text) :: text:
 					return "%{_rt}% 님이 %mBotRef({_x})% 님을 지켰다는데 %mBotRefS({_x})% 님만 죽고 %mBotRefS({_t})% 님은 살아 있어요"
 			return "%{_rt}% 님 밤 보고가 다른 말이랑 안 맞아요"
 		return ""
+	if {_f::1} is "late":
+		if {_f::2} is {_t}:
+			return "%{_rt}% 님은 지목당하고 나서야 직업을 밝혔어요"
+		return ""
+	if {_f::1} is "vouch":
+		if {_f::2} is {_t}:
+			return "%{_rt}% 님이 의심받는 %mBotRef({_f::3})% 님을 감쌌어요"
+		return ""
+	if {_f::1} is "acc":
+		return ""
 	if {_f::1} is "cx":
 		if {-mt::cxw::%{_t}%} is set:
 			return {-mt::cxw::%{_t}%}
@@ -957,6 +984,195 @@ function mWmEndWin(b: text, t: text) :: number:
 	set {-mt::egw::%{_b}%::%{_t}%} to {_w}
 	return {_w}
 
+# ------------------------------------------------------------------ 마피아 쪽 며칠짜리 계획
+# 가짜 경찰 결과 계획(mBotFakePol): "대상|결과". 추론이 없으면 ""(예전 방식)
+#   밤에 실제로 능력을 썼으면(탐정에게 보일 수 있음) 그 대상 그대로 "시민"(대상은 대개 밤에 죽은 사람이라 몰아도 소용없다).
+#   첫날: 팀원을 "시민"이라고 감싸는 것과 아무 시민을 "시민"이라고 하는 것 중 시민 쪽이 보는 팀원 위험이 낮은 쪽.
+#   둘째 날부터: 정해 둔 누명 대상({-mt::framet::봇}, 시민 쪽이 이미 가장 의심하는 시민)을 한 번 "마피아"로 몬다.
+#     몰았을 때 팀원 위험이 "시민"이라고 할 때보다 0.05 넘게 오르면 미룬다.
+function mBotFakePol(b: text, t0: text, at: text) :: text:
+	if {-mt::wmok} is not set:
+		return ""
+	if {_at} is not "-":
+		return "%{_t0}%|town"
+	set {_mates} to mWmMates({_b})
+	set {_base} to "cl|%{_b}%|police"
+	# "시민" 후보: 팀원(감싸기) 또는 아무 시민
+	set {_bt} to ""
+	set {_br} to 99
+	loop {-m::players::*}:
+		set {_x} to loop-value
+		if {_x} is not {_b}:
+			if {-m::alive::%{_x}%} is true:
+				if {-m::pubrole::%{_x}%} is not set:
+					set {_rk} to mWmRisk("%{_base}%;pol|%{_b}%|%{_x}%|town", {_mates})
+					if {_rk} >= 0:
+						set {_rk} to {_rk} + random number between 0 and 0.02
+						if {_rk} < {_br}:
+							set {_br} to {_rk}
+							set {_bt} to {_x}
+	if {_bt} is "":
+		return ""
+	if {-m::day} < 2:
+		return "%{_bt}%|town"
+	if {-mt::fpacc::%{_b}%} is set:
+		return "%{_bt}%|town"
+	# 누명 대상: 처음 정하면 유지(살아 있고 공개되지 않은 동안)
+	set {_f} to ""
+	if {-mt::framet::%{_b}%} is set:
+		set {_f} to {-mt::framet::%{_b}%}
+		if {-m::alive::%{_f}%} is not true:
+			set {_f} to ""
+		else if {-m::pubrole::%{_f}%} is set:
+			set {_f} to ""
+	if {_f} is "":
+		set {_fs} to -9999
+		loop {-m::players::*}:
+			set {_x} to loop-value
+			if {_x} is not {_b}:
+				if {-m::alive::%{_x}%} is true:
+					if {-m::pubrole::%{_x}%} is not set:
+						if mBotK({_b}, {_x}) is not "mafia":
+							set {_sc} to mWmScore("", {_x})
+							if {_sc} > {_fs}:
+								set {_fs} to {_sc}
+								set {_f} to {_x}
+		if {_f} is "":
+			return "%{_bt}%|town"
+		set {-mt::framet::%{_b}%} to {_f}
+	set {_ra} to mWmRisk("%{_base}%;pol|%{_b}%|%{_f}%|mafia", {_mates})
+	if {_ra} < 0:
+		return "%{_bt}%|town"
+	if {_ra} > {_br} + 0.05:
+		return "%{_bt}%|town"
+	set {-mt::fpacc::%{_b}%} to true
+	mBotDbg("누명 계획 %mNum({_b})%번 → %mNum({_f})%번 (팀 위험 %{_ra}% / 감싸기 %{_br}%)")
+	return "%{_f}%|mafia"
+
+# 누명 효과: 이 사람이 밤에 죽으면 시민 쪽이 가장 많이 더 의심하게 되는 (팀원이 아닌) 사람의 오름 폭(0~1). 계산 전이면 0
+function mBotFrameGain(b: text, t: text) :: number:
+	if {-mt::wmok} is not set:
+		return 0
+	set {_r} to Brain.frame("nd|%{_t}%", mWmMates({_b}), mWmAlive())
+	if {_r} is "":
+		return 0
+	set {_f::*} to split {_r} at "|"
+	set {_g} to {_f::1} parsed as number
+	if {_g} is not set:
+		return 0
+	return {_g}
+
+# 마피아 봇 역할 나누기: 여럿이면 한 명은 앞에서 몰고({-mt::loud::봇}), 나머지는 조용히 숨는다(같이 움직이면 같은 편으로 묶인다)
+function mBotMafiaRoles():
+	set {_ms::*} to mBotMafiaBots()
+	if size of {_ms::*} < 2:
+		loop {_ms::*}:
+			set {-mt::loud::%loop-value%} to true
+		stop
+	set {_l} to random element of {_ms::*}
+	set {-mt::loud::%{_l}%} to true
+
+# 마피아 쪽 봇이 근거 없이 흔들 확률: 앞에서 모는 봇은 자주, 숨는 마피아는 드물게
+function mBotPushChance(b: text) :: number:
+	if mActRole({_b}) is not "mafia":
+		return 30
+	if {-mt::loud::%{_b}%} is set:
+		return 45
+	return 10
+
+# ------------------------------------------------------------------ 봇 말투(개성)
+# 게임 시작 때 봇마다 하나({-mt::style::봇}): short(짧게, 결론만 자주) / normal / long(근거를 길게, 말이 많음) / bold(단호) / careful(조심스럽게)
+function mBotStyleInit(b: text):
+	set {_l::*} to "short", "normal", "normal", "long", "bold" and "careful"
+	set {-mt::style::%{_b}%} to random element of {_l::*}
+
+# 근거(why) + 추론(inf)을 그 봇의 말투로 묶는다
+function mBotStyled(b: text, why: text, inf: text) :: text:
+	set {_st} to "normal"
+	if {-mt::style::%{_b}%} is set:
+		set {_st} to {-mt::style::%{_b}%}
+	set {_w} to {_why}
+	set {_i} to {_inf}
+	if {_st} is "short":
+		if chance of 60%:
+			set {_i} to ""
+	else if {_st} is "careful":
+		if {_w} is not "":
+			set {_w} to "제가 보기엔 %{_w}%"
+		if {_i} is not "":
+			set {_i} to "%{_i}%. 아니면 해명해 주세요"
+	else if {_st} is "bold":
+		if {_i} is not "":
+			set {_i} to "%{_i}%. 거의 확실해요"
+	if {_i} is "":
+		return {_w}
+	if {_w} is "":
+		return {_i}
+	return "%{_w}%^%{_i}%"
+
+# 말이 많은 정도: 낮에 세 번째로 말할 확률(%)
+function mBotTalkMore(b: text) :: number:
+	if {-mt::style::%{_b}%} is "long" or "bold":
+		return 80
+	if {-mt::style::%{_b}%} is "short":
+		return 25
+	return 50
+
+# ------------------------------------------------------------------ 질문에 답하기(추론 근거로)
+# 사람이 봇에게 "왜 ○번 의심해요?", "왜 나 몰아요?", "누구 의심해요?" 라고 물으면 그 봇의 추론 근거(mBotWhy, 가능한 세계 추론의 설명)로 답한다.
+#   거짓말하는 쪽은 공개 관점의 근거로(시민처럼) 답한다. 질문이 아니면 ""(평소 대답)
+function mBotAnswer(b: text, s: text, msg: text) :: text:
+	set {_m} to {_msg}
+	set {_asks} to ""
+	if {_m} contains "왜" or "근거" or "이유" or "어째서":
+		set {_asks} to "why"
+	if {_m} contains "누구":
+		if {_m} contains "의심" or "찍" or "마피아" or "투표":
+			set {_asks} to "who"
+	if {_asks} is "":
+		return ""
+	set {_liar} to mBotLiar({_b})
+	set {_t} to ""
+	if {_asks} is "why":
+		# 물어본 대상: 말에 나온 번호·닉네임(나 말고), 없으면 "나/저" = 물어본 사람, 그것도 없으면 내가 찍겠다고 한 사람
+		loop {-m::players::*}:
+			if loop-value is not {_b}:
+				if {_t} is "":
+					if {_m} contains "%mNum(loop-value)%번":
+						set {_t} to loop-value
+					else if {_m} contains mNameOf(loop-value):
+						set {_t} to loop-value
+		if {_t} is "":
+			if {_m} contains "나를" or "날 " or "나 " or "저를" or "절 ":
+				set {_t} to {_s}
+		if {_t} is "":
+			if {-mt::vdecl::%{_b}%} is set:
+				set {_t} to {-mt::vdecl::%{_b}%}
+	if {_t} is "":
+		# 가장 의심하는 사람
+		if {-mt::vdecl::%{_b}%} is set:
+			set {_t} to {-mt::vdecl::%{_b}%}
+		else:
+			set {_t} to mBotVotePick({_b})
+	if {_t} is "":
+		return "아직 딱히 의심 가는 사람은 없어요"
+	if {_t} is {_b}:
+		return ""
+	if {_liar} is true:
+		set {_why} to mBotWhy("", {_t})
+	else:
+		set {_why} to mBotWhy({_b}, {_t})
+	set {_inf} to {-mt::whyinf}
+	set {_head} to ""
+	if {_asks} is "who":
+		set {_head} to "저는 %mBotRef({_t})% 님이 제일 의심돼요^"
+	if {_why} is "":
+		if {_liar} is false:
+			if mBotScore({_b}, {_t}) < 50:
+				return "%{_head}%%mBotRef({_t})% 님은 아직 크게 의심하진 않아요"
+		return "%{_head}%%mBotRef({_t})% 님은 뚜렷한 근거는 없고 지금까지 나온 말로 보면 좀 걸리는 정도예요"
+	return "%{_head}%%mBotStyled({_b}, {_why}, {_inf})%"
+
 # 거짓말하는 쪽(마피아 팀·중립 살해자·보조)이 본 t 의 위협 점수. 밤에 죽이거나 막을 사람, 낮에 몰 사람을 고를 때 쓴다(고수의 우선순위):
 #   1) 경찰(주장 하나뿐이거나 공개) > 탐정 > 의사·수호자 > 주술사·기자 > 자경단 순으로 위험하다. 팀원을 마피아로 지목한 경찰은 더 위험하다.
 #   2) 군인을 주장한 사람은 마피아 공격을 한 번 버텨 밤 하나를 버리게 되니 피한다(암살자는 군인을 무시하므로 상관없다).
@@ -1021,6 +1237,8 @@ function mBotThreat(b: text, t: text) :: number:
 			if {_r1} >= 0:
 				subtract ({_r1} - {_r0}) * 400 from {_s}
 				set {_looked} to true
+				# 누명: 이 사람이 죽으면 시민 쪽 의심이 (팀원이 아닌) 누군가에게 쏠리면 더 좋다
+				add mBotFrameGain({_b}, {_t}) * 150 to {_s}
 	# 3') 팀원·나와 같은 직업을 주장해 맞서는 상대(미리 따져 보지 못했을 때의 어림 규칙)
 	if {_looked} is false:
 		if {-m::pubrole::%{_t}%} is set:
@@ -1324,9 +1542,7 @@ function mBotDeclare(b: text):
 			mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "", {_fx})
 			stop
 	if {_why} is not "":
-		set {_full} to {_why}
-		if {_inf} is not "":
-			set {_full} to "%{_why}%^%{_inf}%"
+		set {_full} to mBotStyled({_b}, {_why}, {_inf})
 		mBotSpeak({_b}, "decl_why", {_t}, "", {_full}, {_fx})
 	else:
 		mBotSpeak({_b}, "decl", {_t}, "", "", {_fx})
@@ -1444,6 +1660,11 @@ function mBotDeathReview():
 function mBotSetClaim(s: text, r: text):
 	if {-mt::claim::%{_s}%} is {_r}:
 		stop
+	# 늦은 직업 주장: 아침 보고 없이, 오늘 지목당한 뒤에야 처음 직업을 밝힘(행동 단서)
+	if {-mt::claim::%{_s}%} is not set:
+		if {-mt::accd::%{_s}%} is {-m::day}:
+			if {-mt::rep::%{_s}%::%{-m::day}%} is not set:
+				set {-mt::late::%{_s}%} to true
 	set {-mt::claim::%{_s}%} to {_r}
 	if mBotUniqueRole({_r}) is false:
 		stop
@@ -1761,8 +1982,14 @@ function mBotRepMake(b: text) :: text:
 						set {_t} to {_b}
 			if {_r} is "police":
 				set {_res} to "town"
-				# 둘째 날부터 가끔, 이미 의심받는 시민을 마피아로 몬다(근거 있어 보이는 사람이라 믿기 쉽다)
-				if {-m::day} >= 2:
+				# 며칠짜리 계획(가능한 세계로 미리 따져 본다, mBotFakePol): 첫날은 팀원을 시민이라고 감싸고, 둘째 날부터 정해 둔 시민 한 명을 마피아로 몬다
+				set {_pl} to mBotFakePol({_b}, {_t}, {_at})
+				if {_pl} is not "":
+					set {_plf::*} to split {_pl} at "|"
+					set {_t} to {_plf::1}
+					set {_res} to {_plf::2}
+				else if {-m::day} >= 2:
+					# 추론을 못 쓰면: 둘째 날부터 가끔, 이미 의심받는 시민을 마피아로 몬다(근거 있어 보이는 사람이라 믿기 쉽다)
 					if chance of 35%:
 						set {_fr} to ""
 						set {_fs} to 20
@@ -2126,6 +2353,11 @@ function mBotLine(kind: text) :: text:
 		set {_l::*} to "확실한 건 없는데 @t 님이 좀 걸려요", "@t 님 얘기를 좀 더 들어 보고 싶어요", "저는 @t 님이 좀 신경 쓰여요"
 	else if {_kind} is "defend_role":
 		set {_l::*} to "저 @r~ie. 아니에요", "@r인데 왜 저예요?^다른 사람 봐 주세요", "진짜 @r~ie^제 보고 다시 봐 주세요"
+	else if {_kind} is "answer":
+		set {_l::*} to "@x"
+	else if {_kind} is "defend_why":
+		# 근거를 들어 맞받기(가능한 세계 추론으로 찾은, 나를 지목한 사람을 의심할 근거)
+		set {_l::*} to "저 아니에요^오히려 @x", "왜 저예요?^@x^저보다 @t 님이 더 수상해요"
 	else if {_kind} is "defend":
 		set {_l::*} to "저 시민이에요^오히려 @t 님이 수상해요", "왜 저예요? 저 아니에요", "저 몰아가지 마세요^@t 님이 더 이상해요"
 	else if {_kind} is "fake_police":
@@ -2373,6 +2605,11 @@ function mBotSayQueued(b: text):
 function mBotClaim(s: text, t: text, kind: text):
 	if {_t} is {_s}:
 		stop
+	# 행동 단서(가능한 세계 추론에 약한 증거로): 누가 누구를 지목·감쌌는지
+	if {_kind} is "mafia":
+		set {-mt::acs::%{_s}%::%{_t}%} to true
+	else if {_kind} is "town":
+		set {-mt::vch::%{_s}%::%{_t}%} to true
 	# 오늘 고발당한 사람(시민으로 공개된 사람이 몰리면 봇이 막아 준다)
 	if {_kind} is "mafia":
 		set {-mt::accd::%{_t}%} to {-m::day}
@@ -2499,6 +2736,15 @@ function mBotTalk(b: text):
 	if {-mt::defend::%{_b}%} is set:
 		set {_s} to {-mt::defend::%{_b}%}
 		delete {-mt::defend::%{_b}%}
+		# 반박: 지목한 사람을 의심할 근거가 있으면(가능한 세계 추론의 설명, mWmWhy) 근거를 들어 맞받는다
+		if chance of 60%:
+			set {_rk} to ""
+			if mBotLiar({_b}) is false:
+				set {_rk} to {_b}
+			set {_rw} to mWmWhy({_rk}, {_s})
+			if {_rw} is not "":
+				mBotSpeak({_b}, "defend_why", {_s}, "", {_rw})
+				stop
 		# 거짓 보고를 한 봇은 그 가짜 직업으로 해명한다(말이 엇갈리지 않게)
 		set {_cr} to {_role}
 		if {-mt::fakerole::%{_b}%} is set:
@@ -2568,13 +2814,19 @@ function mBotTalk(b: text):
 						if {_sc} > {_bs}:
 							set {_bs} to {_sc}
 							set {_best} to {_t}
+		# 숨는 마피아(앞에서 모는 팀원이 따로 있음)는 반쯤은 나서지 않는다
+		if mActRole({_b}) is "mafia":
+			if {-mt::loud::%{_b}%} is not set:
+				if chance of 50%:
+					set {_best} to ""
 		if {_best} is not "":
 			set {_why} to mBotWhy("", {_best})
 			if {_why} is not "":
 				if mBotTopicSay({_b}, {_best}, {_why}) is true:
 					stop
-		# 3) 근거가 없으면 가끔 직업을 밝힌 시민(위협)을 슬쩍 의심한다
-		if chance of 30%:
+		# 3) 근거가 없으면 가끔 직업을 밝힌 시민(위협)을 슬쩍 의심한다(앞에서 모는 마피아는 자주, 숨는 마피아는 드물게, mBotPushChance)
+		set {_pch} to mBotPushChance({_b})
+		if chance of {_pch}%:
 			loop {-m::players::*}:
 				if {-m::alive::%loop-value%} is true:
 					if mBotK({_b}, loop-value) is not "mafia":
@@ -2848,7 +3100,7 @@ function mBotIntentEffect(b: text, kind: text, t: text):
 		stop
 	# 의심 말하기(봇 말은 AI 로 다시 읽지 않으니 늘 의도로 반영)
 	# 근거 없는 지목(흐릿한 의심, 마피아 쪽의 몰아가기, 억울하다는 반박)은 듣는 봇이 반만 믿는다({-mt::clw}, 근거 있는 지목은 사실 점수로 따로 센다)
-	if {_kind} is "accuse" or "mafia_push" or "mafia_push2" or "defend":
+	if {_kind} is "accuse" or "mafia_push" or "mafia_push2" or "defend" or "defend_why":
 		set {-mt::clw} to 4
 		mBotClaim({_b}, {_t}, "mafia")
 		delete {-mt::clw}
@@ -3216,6 +3468,12 @@ function mBotAddressed(s: text, msg: text):
 
 function mBotQueueReply(b: text, s: text, msg: text):
 	if {_b} is {_s}:
+		stop
+	# 질문(왜 ○번? 누구 의심?)이면 추론 근거로 바로 답한다(mBotAnswer)
+	set {_ans} to mBotAnswer({_b}, {_s}, {_msg})
+	if {_ans} is not "":
+		replace all "|" in {_ans} with "/"
+		mBotQueue({_b}, "answer|%{_s}%||%{_ans}%", random integer between 2 and 4)
 		stop
 	set {_m} to {_msg}
 	replace all "|" in {_m} with "/"
@@ -3992,7 +4250,8 @@ every second:
 								set {_t2} to 3 + {_ri} + random integer between 0 and 3
 						set {-mt::talk::%loop-value%::1} to {_t1}
 						set {-mt::talk::%loop-value%::2} to {_t2}
-						if chance of 50%:
+						set {_tm} to mBotTalkMore(loop-value)
+						if chance of {_tm}%:
 							set {-mt::talk::%loop-value%::3} to {_t2} + random integer between 8 and 30
 							if {-msim::left} is set:
 								set {-mt::talk::%loop-value%::3} to {_t2} + random integer between 1 and 3
