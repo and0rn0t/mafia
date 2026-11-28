@@ -52,8 +52,8 @@ on chat:
 		clear chat recipients
 		loop {_to::*}:
 			mChatSendTo(loop-value, {_p}, "&8[관전] ", "&7", {_msg})
-		# 기록: 말한 사람 자리는 {{n:uuid}}(보는 사람의 메모로 그때그때 표시)
-		mLogAdd("@dead", "&8[관전] &7<{{n:%{_id}%}}&7> &7%{_msg}%")
+		# 기록: 말한 사람 자리는 @@N:uuid@@(보는 사람의 메모로 그때그때 표시)
+		mLogAdd("@dead", "&8[관전] &7<@@N:%{_id}%@@&7> &7%{_msg}%")
 		stop
 	# 밤: 마피아 팀만
 	if {_s} is "night" or "resolve":
@@ -70,7 +70,7 @@ on chat:
 		clear chat recipients
 		loop {_to::*}:
 			mChatSendTo(loop-value, {_p}, "&c[마피아 팀] ", "&f", {_msg})
-		mLogAdd("@mafia", "&c[마피아 팀] &7<{{n:%{_id}%}}&7> &f%{_msg}%")
+		mLogAdd("@mafia", "&c[마피아 팀] &7<@@N:%{_id}%@@&7> &f%{_msg}%")
 		stop
 	# 낮 토론: 마녀 저주
 	if {_s} is "day":
@@ -82,4 +82,4 @@ on chat:
 	clear chat recipients
 	loop all players:
 		mChatSendTo(loop-player, {_p}, "", "&f", {_msg})
-	mLogAdd("*", "&7<{{n:%{_id}%}}&7> &f%{_msg}%")
+	mLogAdd("*", "&7<@@N:%{_id}%@@&7> &f%{_msg}%")

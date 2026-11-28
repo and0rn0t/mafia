@@ -347,25 +347,24 @@ function mLogSees(viewer: text, who: text) :: boolean:
 			return true
 	return false
 
-# 기록 속 말한 사람 자리 {{n:uuid}} 를 보는 사람 기준 "번호 이름 + 메모 표시"로 바꾼다(메모를 바꾸면 기록에도 바로 반영)
+# 기록 속 말한 사람 자리 @@N:uuid@@ 를 보는 사람 기준 "번호 이름 + 메모 표시"로 바꾼다(메모를 바꾸면 기록에도 바로 반영)
 function mLogRender(viewer: text, line: text) :: text:
 	set {_s} to {_line}
 	set {_k} to 0
 	while {_k} < 4:
 		add 1 to {_k}
-		set {_a} to {_s}.indexOf("{{n:")
-		if {_a} < 0:
+		if {_s} does not contain "@@N:":
 			return {_s}
-		set {_a4} to {_a} + 4
-		set {_z} to {_s}.indexOf("}}", {_a4})
-		if {_z} < 0:
+		# 중괄호를 쓰면 Skript 가 변수로 읽어 버려서 @@N:uuid@@ 표시를 정규식으로 꺼낸다
+		set {_x} to {_s}.replaceAll("(?s)^.*?@@N:([0-9a-fA-F-]+)@@.*$", "$1")
+		set {_sid} to "%{_x}%"
+		if {_sid} is {_s}:
 			return {_s}
-		set {_sid} to {_s}.substring({_a4}, {_z})
 		set {_nm} to mNumName({_sid})
 		set {_tag} to mMemoTag({_viewer}, {_sid})
 		if {_tag} is not "":
 			set {_nm} to "%{_nm}% %{_tag}%"
-		replace all "{{n:%{_sid}%}}" in {_s} with {_nm}
+		replace all "@@N:%{_sid}%@@" in {_s} with {_nm}
 	return {_s}
 
 # 채팅창 다시 그리기: 채팅을 비우고 그 사람이 볼 수 있는 최근 기록(공지·본인 결과·대화)을 지금의 메모 표시로 다시 보낸다

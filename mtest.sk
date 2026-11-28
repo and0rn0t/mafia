@@ -1206,7 +1206,7 @@ function mBotSay(b: text, msg: text):
 	if {-mt::said::%{_b}%} is set:
 		if {-mt::said::%{_b}%} >= 5:
 			stop
-	set {_line} to "&7<{{n:%{_b}%}}&7> &f%{_msg}%"
+	set {_line} to "&7<@@N:%{_b}%@@&7> &f%{_msg}%"
 	mBotChatAdd({_b}, {_msg})
 	# 받는 사람마다 그 사람의 메모를 봇 이름 옆에 붙인다(사람 채팅과 같은 모양)
 	loop all players:
@@ -2443,7 +2443,7 @@ function mBotMafiaSay(b: text, msg: text):
 			if {_tag} is not "":
 				set {_nm} to "%{_nm}% %{_tag}%"
 			send colored "&c[마피아 팀] &7<%{_nm}%&7> &f%{_msg}%" to loop-player
-	mLogAdd("@mafia", "&c[마피아 팀] &7<{{n:%{_b}%}}&7> &f%{_msg}%")
+	mLogAdd("@mafia", "&c[마피아 팀] &7<@@N:%{_b}%@@&7> &f%{_msg}%")
 	mBotDbg("마피아 팀 %mNum({_b})%번 %mNameOf({_b})%: %{_msg}%")
 
 # 살아 있는 마피아 직업 봇들
