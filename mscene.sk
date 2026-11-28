@@ -998,7 +998,7 @@ function mPickBar(id: text):
 	if {_c} is not "ignite":
 		set {_lab} to "%{_lab}% %mMemoTag({_id}, {_c})%"
 	send title "" with subtitle colored {_lab} to {_p} for 30 ticks with fadein 0 ticks and fade out 5 ticks
-	send action bar colored "&7(%{_i}%/%{_all}%) &8| &7A/D: 바꾸기 &8| &e스페이스: 확정 &8| &7Shift: 선택하지 않음" to {_p}
+	send action bar colored "&7(%{_i}%/%{_all}%) &8| &7A/D: 바꾸기 &8| &e스페이스: 확정 &8| &7앉기: 선택하지 않음" to {_p}
 
 function mPickMove(id: text, d: number):
 	set {_all} to size of {-ms::cand::%{_id}%::*}
@@ -1084,17 +1084,17 @@ function mKeyHint(id: text):
 			if mState() is not "loading":
 				set {_hint} to "&7A/D: 시점 바꾸기 &8| %mWatchLabel(mWatchOf({_id}))%"
 				if mState() is "day":
-					set {_hint} to "%{_hint}% &8| &7Shift: 메모"
+					set {_hint} to "%{_hint}% &8| &7앉기: 메모"
 				send action bar colored {_hint} to {_p}
 		stop
 	if mPickCanOpen({_id}) is not "":
 		send action bar colored "&7W: 대상 고르기" to {_p}
 		stop
 	if mState() is "day":
-		set {_hint} to "&7Shift: 메모"
+		set {_hint} to "&7앉기: 메모"
 		if {-m::alive::%{_id}%} is true:
 			if {-m::tadj::%{_id}%} is not true:
-				set {_hint} to "&7W: 토론 +15초 &8| &7S: 토론 -15초 &8| &7Shift: 메모"
+				set {_hint} to "&7W: 토론 +15초 &8| &7S: 토론 -15초 &8| &7앉기: 메모"
 		send action bar colored {_hint} to {_p}
 
 every second:
