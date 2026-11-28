@@ -238,6 +238,22 @@ on death of player:
 	clear drops
 	set dropped exp to 0
 	set {-pvp::dead::%uuid of victim%} to true
+	# 킬 소리(MCK killcine.sk 와 같은 소리): 쓰러지는 순간 피격자·공격자에게 mck:knockout, 조금 뒤 공격자에게 mck:killsound, 피격자에게는 부서지는 소리 3개
+	set {_v} to victim
+	if attacker is a player:
+		if attacker is not victim:
+			set {_atk} to attacker
+	play sound "mck:knockout" with volume 1.5 and pitch 1 to {_v}
+	if {_atk} is set:
+		play sound "mck:knockout" with volume 1.5 and pitch 1 to {_atk}
+	wait 12 ticks
+	if {_atk} is set:
+		if {_atk} is online:
+			play sound "mck:killsound" with volume 1.5 and pitch 1 to {_atk}
+	if {_v} is online:
+		play sound "entity.player.attack.crit" with volume 2 and pitch 0.6 to {_v}
+		play sound "block.bone_block.break" with volume 2 and pitch 0.5 to {_v}
+		play sound "entity.zombie.break_wooden_door" with volume 1.5 and pitch 0.6 to {_v}
 
 on respawn:
 	set {_id} to "%uuid of player%"

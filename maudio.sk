@@ -15,7 +15,8 @@ import:
 function mAuUrl() :: text:
 	if {mcfg::packurl} is set:
 		return {mcfg::packurl}
-	return "https://raw.githubusercontent.com/and0rn0t/mafia/main/mafia-pack.zip"
+	# 팩이 바뀌면 주소도 바뀌게(?v=SHA-1) 한다: 같은 주소면 GitHub 캐시가 몇 분 동안 옛 팩을 줘서 확인값이 안 맞아 팩이 안 들어갈 수 있다
+	return "https://raw.githubusercontent.com/and0rn0t/mafia/main/mafia-pack.zip?v=%mAuSha1()%"
 
 function mAuVol() :: number:
 	if {mcfg::bgmvol} is set:
