@@ -82,7 +82,7 @@ function mGuideBook() :: object:
 # 로비 핫바 9번 칸(인덱스 8)에 안내서(없을 때만 넣는다)
 # 책을 바꿀 때마다 mGuideVer 를 올리면 이미 가진 사람의 책도 한 번 새것으로 바뀐다
 function mGuideVer() :: text:
-	return "2"
+	return "3"
 
 function mGuideGive(p: player):
 	set {_cur} to {_p}.getInventory().getItem(8)
