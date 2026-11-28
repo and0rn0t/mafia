@@ -473,6 +473,163 @@ public final class Brain {
         return sum / tot;
     }
 
+    // ---- 시민 쪽 미리 따져 보기
+
+    static double hb(double p) {
+        if (p <= 1e-9 || p >= 1 - 1e-9) return 0;
+        return -(p * Math.log(p) + (1 - p) * Math.log(1 - p));
+    }
+
+    static int[] idsOf(Facts f, String csv) {
+        List<Integer> l = new ArrayList<>();
+        for (String s : csv.split(",")) { Integer i = f.idx.get(s.trim()); if (i != null) l.add(i); }
+        int[] a = new int[l.size()];
+        for (int i = 0; i < a.length; i++) a[i] = l.get(i);
+        return a;
+    }
+
+    static double entropy(double[][] r, int[] alive) {
+        double h = 0;
+        for (int i : alive) h += hb(r[M][i]);
+        return h;
+    }
+
+    /**
+     * 조사 가치: 관점(me, constraints)에서 x 를 조사하면 살아 있는 사람들(alive, 쉼표)의 "마피아인가" 불확실성(엔트로피 합)이 평균 얼마나 줄어드나.
+     * kind "M" = 경찰(마피아인지 아닌지 알게 됨), "C" = 탐정(대략 시민 팀인지 아닌지 알게 됨). 계산할 수 없으면 -1
+     */
+    public static synchronized double probe(String me, String constraints, String alive, String x, String kind) {
+        if (base == null) return -1;
+        Integer xi = base.idx.get(x);
+        if (xi == null) return -1;
+        Cons c = cons(base, me, constraints);
+        double[][] r0 = compute(base, weight, c);
+        if (r0 == null) return -1;
+        int[] al = idsOf(base, alive);
+        double h0 = entropy(r0, al);
+        boolean pol = !"C".equals(kind);
+        double pPos = pol ? r0[M][xi] : (r0[M][xi] + r0[S][xi] + r0[N][xi]);
+        Cons cp = cons(base, me, constraints + ";k|" + x + "|" + (pol ? "M" : "E"));
+        Cons cn = cons(base, me, constraints + ";k|" + x + "|" + (pol ? "T" : "C"));
+        double[][] rp = pPos > 1e-6 ? compute(base, weight, cp) : null;
+        double[][] rn = pPos < 1 - 1e-6 ? compute(base, weight, cn) : null;
+        double h1 = 0;
+        if (rp != null) h1 += pPos * entropy(rp, al); else if (pPos > 1e-6) h1 += pPos * h0;
+        if (rn != null) h1 += (1 - pPos) * entropy(rn, al); else if (pPos < 1 - 1e-6) h1 += (1 - pPos) * h0;
+        return h0 - h1;
+    }
+
+    // ---- 막판 계산: 생존자가 적을 때 "오늘 x 를 처형하면 시민 팀이 이길 확률"
+    //   규칙(mvote.sk mWinBase 를 줄인 것): 마피아(M)가 모두 죽으면 시민 승(중립이 남아 있으면 반반으로 친다),
+    //   중립이 없고 마피아 팀(M+S) 수 ≥ 시민 팀 수면 마피아 승. 밤에는 마피아가 시민 팀 중 한 명을 고르게 죽인다(마피아가 없으면 밤 사망 없음).
+    //   앞으로의 낮에는 시민 쪽이 지금 관점에서 마피아 확률이 가장 높은 사람을 처형한다고 본다(믿음은 그대로, 대략).
+
+    static byte[] egT;
+    static double[] egPm;
+    static int egN;
+
+    static double egTerm(int mask) {
+        int m = 0, s = 0, nn = 0, c = 0;
+        for (int i = 0; i < egN; i++) {
+            if ((mask & (1 << i)) == 0) continue;
+            switch (egT[i]) { case M: m++; break; case S: s++; break; case N: nn++; break; default: c++; }
+        }
+        if (m == 0) return nn == 0 ? 1 : 0.5;
+        if (nn == 0 && m + s >= c) return 0;
+        if (m + s + nn + c <= 1) return 0.5;
+        return -1;
+    }
+
+    static double egNight(int mask, int depth) {
+        double t = egTerm(mask);
+        if (t >= 0) return t;
+        if (depth > 8) return 0.5;
+        boolean anyM = false;
+        List<Integer> vic = new ArrayList<>();
+        for (int i = 0; i < egN; i++) {
+            if ((mask & (1 << i)) == 0) continue;
+            if (egT[i] == M) anyM = true;
+            else if (egT[i] == C) vic.add(i);
+        }
+        if (!anyM || vic.isEmpty()) return egDay(mask, depth + 1);
+        double v = 0;
+        for (int i : vic) v += egDay(mask & ~(1 << i), depth + 1);
+        return v / vic.size();
+    }
+
+    static double egDay(int mask, int depth) {
+        double t = egTerm(mask);
+        if (t >= 0) return t;
+        if (depth > 8) return 0.5;
+        int y = -1;
+        double bp = -1;
+        for (int i = 0; i < egN; i++) {
+            if ((mask & (1 << i)) == 0) continue;
+            if (egPm[i] > bp) { bp = egPm[i]; y = i; }
+        }
+        if (y < 0) return 0.5;
+        return egNight(mask & ~(1 << y), depth);
+    }
+
+    /** 관점(me, constraints)에서 오늘 x 를 처형하면 시민 팀이 이길 확률(alive: 살아 있는 사람, 쉼표). 계산할 수 없으면 -1 */
+    public static synchronized double endgame(String me, String constraints, String alive, String x) {
+        if (base == null) return -1;
+        Integer xi = base.idx.get(x);
+        if (xi == null) return -1;
+        int n = base.ids.size();
+        if (n > 30) return -1;
+        Cons c = cons(base, me, constraints);
+        double[][] r = compute(base, weight, c);
+        if (r == null) return -1;
+        int[] al = idsOf(base, alive);
+        int mask = 0;
+        for (int i : al) mask |= 1 << i;
+        if ((mask & (1 << xi)) == 0) return -1;
+        egN = n;
+        egPm = new double[n];
+        for (int i = 0; i < n; i++) egPm[i] = (c.meI == i) ? -1 : r[M][i];
+        egT = new byte[n];
+        double tot = 0, win = 0;
+        double eps = base.mad ? 0.15 : 0.04;
+        for (int q = 0; q < count; q++) {
+            double w = viewWeight(c, q, eps);
+            if (w <= 0) continue;
+            System.arraycopy(worlds, q * n, egT, 0, n);
+            double t0 = egTerm(mask & ~(1 << xi));
+            double v = t0 >= 0 ? t0 : egNight(mask & ~(1 << xi), 0);
+            tot += w;
+            win += w * v;
+        }
+        if (tot <= 0) return -1;
+        return win / tot;
+    }
+
+    /** 관점 c 에서 세계 q 의 가중치(맞지 않으면 0) */
+    static double viewWeight(Cons c, int q, double eps) {
+        Facts f = base;
+        int n = f.ids.size();
+        int o = q * n;
+        if (c.meI >= 0 && c.meT >= 0 && worlds[o + c.meI] != c.meT) return 0;
+        for (Map.Entry<Integer, Character> e : c.k.entrySet()) {
+            int t = worlds[o + e.getKey()];
+            boolean ok = true;
+            switch (e.getValue()) {
+                case 'M': ok = t == M; break;
+                case 'T': ok = t != M; break;
+                case 'E': ok = t != C; break;
+                case 'X': ok = t == M || t == S; break;
+                case 'C': ok = t == C; break;
+                default: break;
+            }
+            if (!ok) return 0;
+        }
+        double x = weight[q];
+        if (c.myRole != null && UNIQUE.contains(c.myRole) && c.meT == C) {
+            for (int i = 0; i < n; i++) if (i != c.meI && c.myRole.equals(f.claim[i]) && worlds[o + i] == C) x *= eps;
+        }
+        return x;
+    }
+
     /** 세계 수(확인용) */
     public static synchronized int size() { return count; }
 }

@@ -461,6 +461,7 @@ function mBotInit():
 	delete {-mt::wmok}
 	delete {-mt::wmx::*}
 	delete {-mt::ndd::*}
+	delete {-mt::egw::*}
 	delete {-mt::pvh::*}
 	delete {-mt::wmmeas}
 	delete {-mt::cctgt}
@@ -600,6 +601,8 @@ function mWmFacts() :: text:
 				# 모든 밤 보고(탐정 보고와 각자의 보고를 맞춰 보고, 의사·수호자 보고와 밤 사망을 맞춰 본다)
 				set {_s} to "%{_s}%;rp|%{_p}%|%{_d}%|%{_rs}%"
 			delete {_rs}
+	# 살아 있는 사람(처형으로 바뀌어도 다시 계산하게. 추론 자체는 이 항목을 쓰지 않는다)
+	set {_s} to "%{_s}%;al|%mWmAlive()%"
 	return {_s}
 
 # 봇 b 의 관점 조건: 나는 시민 팀이고 내 진짜(라고 아는) 직업, 내가 아는 사람들
@@ -627,6 +630,7 @@ function mWmUpdate():
 		set {-mt::wmf} to {_f}
 		delete {-mt::wmc::*}
 		delete {-mt::wmx::*}
+		delete {-mt::egw::*}
 		set {_cnt} to Brain.load({_f})
 		Brain.view("", "", "")
 		set {_new} to true
@@ -852,6 +856,107 @@ function mWmSay(item: text, t: text) :: text:
 		return "자경단이 %{_rt}% 님을 처단했다는데 자경단은 멀쩡해요"
 	return ""
 
+# ------------------------------------------------------------------ 시민 쪽 미리 따져 보기(가능한 세계 추론 위에서)
+# 조사(경찰·탐정): 조사하면 판의 불확실성이 가장 많이 줄어드는 사람(Brain.probe). 예) 경찰 주장이 둘이면 둘 중 하나를 조사해 한 번에 정리
+# 보호(의사·수호자): 마피아가 죽이고 싶어 할 만한 직업(경찰 > 탐정 > 의사 …)이면서 시민 팀일 확률이 높은 사람(mBotProtect)
+# 막판(생존자 6명 이하): 처형 후보마다 "이 사람을 처형하면 시민 팀이 이길 확률"을 끝까지 계산해(Brain.endgame) 가장 높은 사람을 찍는다.
+#   마피아 쪽은 막판에 표를 한 사람에게 모은다. 변수: {-mt::egw::봇::대상}(막판 승률, 사실이 바뀌면 지움)
+
+# 살아 있는 사람(쉼표)
+function mWmAlive() :: text:
+	set {_s} to ""
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			if {_s} is "":
+				set {_s} to loop-value
+			else:
+				set {_s} to "%{_s}%,%loop-value%"
+	return {_s}
+
+# 조사 대상: 아직 모르는 후보 중 조사 가치가 가장 큰 사람(kind "M" 경찰, "C" 탐정). 고를 수 없으면 ""
+function mWmProbePick(b: text, c: texts, kind: text) :: text:
+	if {-mt::wmok} is not set:
+		return ""
+	set {_cons} to mWmCons({_b})
+	set {_al} to mWmAlive()
+	set {_best} to ""
+	set {_bs} to 0.01
+	loop {_c::*}:
+		set {_t} to loop-value
+		if {_t} is not {_b}:
+			if mBotK({_b}, {_t}) is "":
+				if {-m::pubrole::%{_t}%} is not set:
+					set {_g} to Brain.probe({_b}, {_cons}, {_al}, {_t}, {_kind})
+					if {_g} >= 0:
+						set {_g} to {_g} + random number between 0 and 0.02
+						if {_g} > {_bs}:
+							set {_bs} to {_g}
+							set {_best} to {_t}
+	return {_best}
+
+# 보호 점수: 마피아가 노릴 만한 정도(직업) × 시민 팀일 확률(내 관점). 추론 전이면 -9999
+function mBotProtect(b: text, t: text) :: number:
+	if {-mt::wmok} is not set:
+		return -9999
+	set {_c} to ""
+	if {-m::pubrole::%{_t}%} is set:
+		set {_c} to {-m::pubrole::%{_t}%}
+	else if {-mt::claim::%{_t}%} is set:
+		set {_c} to {-mt::claim::%{_t}%}
+	set {_v} to 20
+	if {_c} is "police":
+		set {_v} to 110
+	else if {_c} is "detective":
+		set {_v} to 90
+	else if {_c} is "doctor":
+		set {_v} to 75
+	else if {_c} is "guardian":
+		set {_v} to 55
+	else if {_c} is "shaman" or "reporter":
+		set {_v} to 45
+	else if {_c} is "vigilante":
+		set {_v} to 40
+	else if {_c} is "soldier":
+		# 군인은 공격을 한 번 버틴다
+		set {_v} to 5
+	else if {_c} is "":
+		set {_v} to 25
+	# 직업이 공개된 시민은 마피아가 노리기 좋다
+	if {-m::pubrole::%{_t}%} is set:
+		if mRolePool({-m::pubrole::%{_t}%}) is "citizen":
+			add 30 to {_v}
+	set {_pc} to 1
+	if {_t} is not {_b}:
+		if mBotK({_b}, {_t}) is "town":
+			set {_pc} to 1
+		else:
+			set {_pm} to Brain.pm({_b}, {_t})
+			if {_pm} < 0:
+				return -9999
+			set {_pc} to 1 - {_pm} - Brain.ps({_b}, {_t}) - Brain.pn({_b}, {_t})
+	return {_v} * {_pc}
+
+# 막판인지(생존자 6명 이하, 추론 있음)
+function mWmEnd() :: boolean:
+	if {-mt::wmok} is not set:
+		return false
+	set {_n} to 0
+	loop {-m::players::*}:
+		if {-m::alive::%loop-value%} is true:
+			add 1 to {_n}
+	if {_n} <= 6:
+		if {_n} >= 3:
+			return true
+	return false
+
+# 막판 승률: 봇 b 의 관점에서 오늘 t 를 처형하면 시민 팀이 이길 확률(0~1). 계산할 수 없으면 -1
+function mWmEndWin(b: text, t: text) :: number:
+	if {-mt::egw::%{_b}%::%{_t}%} is set:
+		return {-mt::egw::%{_b}%::%{_t}%}
+	set {_w} to Brain.endgame({_b}, mWmCons({_b}), mWmAlive(), {_t})
+	set {-mt::egw::%{_b}%::%{_t}%} to {_w}
+	return {_w}
+
 # 거짓말하는 쪽(마피아 팀·중립 살해자·보조)이 본 t 의 위협 점수. 밤에 죽이거나 막을 사람, 낮에 몰 사람을 고를 때 쓴다(고수의 우선순위):
 #   1) 경찰(주장 하나뿐이거나 공개) > 탐정 > 의사·수호자 > 주술사·기자 > 자경단 순으로 위험하다. 팀원을 마피아로 지목한 경찰은 더 위험하다.
 #   2) 군인을 주장한 사람은 마피아 공격을 한 번 버텨 밤 하나를 버리게 되니 피한다(암살자는 군인을 무시하므로 상관없다).
@@ -973,12 +1078,16 @@ function mBotBest(b: text, c: texts, mode: text) :: text:
 				# 마피아 팀: 위험한 직업을 밝힌 사람, 팀원을 의심하는 사람(mBotThreat)
 				add mBotThreat({_b}, {_t}) to {_s}
 			else if {_mode} is "protect":
-				# 지키기: 경찰 등 직업을 밝힌 사람, 시민으로 아는 사람
-				if {-mt::claim::%{_t}%} is set:
-					add 60 to {_s}
-				if mBotK({_b}, {_t}) is "town":
-					add 30 to {_s}
-				subtract mBotSus({_b}, {_t}) from {_s}
+				# 지키기: 마피아가 노릴 만한 직업 × 시민 팀일 확률(mBotProtect). 추론 전이면 직업을 밝힌 사람, 시민으로 아는 사람
+				set {_pv} to mBotProtect({_b}, {_t})
+				if {_pv} > -9999:
+					add {_pv} to {_s}
+				else:
+					if {-mt::claim::%{_t}%} is set:
+						add 60 to {_s}
+					if mBotK({_b}, {_t}) is "town":
+						add 30 to {_s}
+					subtract mBotSus({_b}, {_t}) from {_s}
 			if {_s} > {_bs}:
 				set {_bs} to {_s}
 				set {_best} to {_t}
@@ -1015,7 +1124,15 @@ function mTestNight(id: text):
 	else if {_role} is "guardian":
 		set {_t} to mBotBest({_id}, {_c::*}, "protect")
 	else if {_role} is "police" or "spy" or "detective":
-		set {_t} to mBotBest({_id}, {_c::*}, "unknown")
+		# 시민 쪽 경찰·탐정: 조사하면 판이 가장 많이 정리되는 사람(가능한 세계 추론, mWmProbePick)
+		if {_role} is not "spy":
+			if mBotLiar({_id}) is false:
+				set {_pk} to "M"
+				if {_role} is "detective":
+					set {_pk} to "C"
+				set {_t} to mWmProbePick({_id}, {_c::*}, {_pk})
+		if {_t} is "":
+			set {_t} to mBotBest({_id}, {_c::*}, "unknown")
 	else if {_role} is "reporter":
 		if {-m::day} < 2:
 			stop
@@ -1094,6 +1211,9 @@ function mBotVotePick(id: text) :: text:
 		if mBotLiar({_id}) is true:
 			# 거짓말하는 쪽(마피아 팀·보조·중립): 표가 몰린 시민에 얹어 티 나지 않게, 직업을 밝힌 시민을 노린다. 직업이 공개된 사람(정치인 등)은 표가 헛되거나 티가 나서 피한다
 			add {_v} * 12 to {_s}
+			# 막판: 표가 갈리면 지므로 한 사람에게 모은다
+			if mWmEnd() is true:
+				add {_v} * 30 to {_s}
 			if mBotK({_id}, {_t}) is "mafia":
 				# 팀원: 이미 정체가 공개됐으면 같이 찍어 시민인 척(버린다), 아니면 지킨다
 				if {-m::pubrole::%{_t}%} is set:
@@ -1126,6 +1246,11 @@ function mBotVotePick(id: text) :: text:
 				if {-m::pubrole::%{_t}%} is not set:
 					subtract 40 from {_s}
 			add mBotScore({_id}, {_t}) to {_s}
+			# 막판(생존자 6명 이하): 이 사람을 처형하면 이길 확률을 끝까지 계산해 가장 높은 사람(mWmEndWin)
+			if mWmEnd() is true:
+				set {_eg} to mWmEndWin({_id}, {_t})
+				if {_eg} >= 0:
+					add {_eg} * 600 to {_s}
 		if {_s} > {_bs}:
 			set {_bs} to {_s}
 			set {_best} to {_t}
@@ -1176,6 +1301,14 @@ function mBotDeclare(b: text):
 	else:
 		set {_why} to mBotWhy({_b}, {_t})
 	set {_inf} to {-mt::whyinf}
+	# 막판: 계산한 승률을 결론에 덧붙인다(틀리면 질 수 있는 날)
+	if mBotLiar({_b}) is false:
+		if mWmEnd() is true:
+			if {-mt::egw::%{_b}%::%{_t}%} is set:
+				set {_egp} to rounded ({-mt::egw::%{_b}%::%{_t}%} * 100)
+				set {_inf} to "사람이 얼마 안 남아서 오늘 틀리면 위험해요. 따져 보면 %mBotRefS({_t})% 님을 처형해야 이길 확률이 제일 높아요(%{_egp}%%% 정도)"
+				if {_why} is "":
+					set {_why} to "남은 사람이 얼마 없어요"
 	# 이 결론이 채팅에 나온 뒤에 다른 봇이 따라가도록 결론 수는 말이 나온 순간 센다(mBotFxRun "decl")
 	set {_rs} to "0"
 	if {_why} is not "":
