@@ -96,7 +96,7 @@ function killWeaponSprite(a: entity) :: text:
 
 # 킬로그 한 줄을 접속자 모두에게 보낸다. v: 피격자, ae: 공격자(없으면 피격자 본인), c/dt: 피해 원인 이름/피해 종류 키.
 function killLogShow(v: player, ae: entity, c: text, dt: text):
-	set {_vn} to "%{_v}'s name%"
+	set {_vn} to {_v}'s name
 	set {_ci} to killIcon(killCauseSprite({_v}, {_ae}, {_c}, {_dt}))
 	set {_vf} to killFace({_vn})
 	set {_gap} to "{""text"":"" ""}"
@@ -112,7 +112,7 @@ function killLogShow(v: player, ae: entity, c: text, dt: text):
 		loop all players:
 			loop-player.sendMessage({_cc})
 		stop
-	set {_an} to "%{_ae}'s name%"
+	set {_an} to {_ae}'s name
 	set {_af} to killFace({_an})
 	set {_anj} to "{""text"":""%{_an}%""}"
 	set {_mid} to "%{_af}%,%{_gap}%,%{_anj}%,%{_gap}%,%{_ci}%,%{_gap}%,%{_vf}%,%{_gap}%,%{_vnj}%"

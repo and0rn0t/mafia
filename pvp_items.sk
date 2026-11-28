@@ -749,23 +749,6 @@ function readyColorJ(p: player) :: text:
 function tabUpdate(p: player):
 	# 마피아 서버: 탭 목록은 마피아 쪽(mTabUpdate)이 만든다
 	stop
-	# 게임 중 참가자의 탭 이름은 gametab.sk 가 만든다(전적 표시)
-	if gInGame({_p}) is true:
-		stop
-	set {_gap} to "{""text"":"" ""}"
-	set {_nm} to name of {_p}
-	set {_pre} to tierPreJ("%uuid of {_p}%")
-	set {_nc} to readyColorJ({_p})
-	set {_ex} to "%{_pre}%,{""text"":""%{_nm}%""%{_nc}%}"
-	# 아이콘 순서는 구성 번호와 상관없이 GUI 정렬 순서(itemOrder: 금속 -> 나무 -> cc기 -> 포션류)를 따른다.
-	loop integers from 1 to 4:
-		add loadoutGet({_p}, loop-value) to {_ld::*}
-	loop itemOrder():
-		if {_ld::*} contains loop-value:
-			set {_ic} to itemIcon(loop-value)
-			set {_ex} to "%{_ex}%,%{_gap}%,%{_ic}%"
-	set {_json} to "{""text"":"""",""extra"":[%{_ex}%]}"
-	{_p}.playerListName(GsonComponentSerializer.gson().deserialize({_json}))
 
 # 무기고 아이템(상자). 이름은 아래 armoryName() 하나로 통일.
 function armoryName() :: text:
