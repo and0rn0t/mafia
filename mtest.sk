@@ -11,7 +11,7 @@
 #   /mtest llm url|key|model|on|off|test|status   봇 말하기 AI(OpenAI 호환 API) 설정. 아래 "봇 말하기: AI(LLM) 연결"
 #   /mtest stop                게임을 끝내고 로비로(= /mstop)
 # 봇 동작(규칙 기반 AI, 아래 "봇 AI"): 밤·투표 시간 중 무작위 시점에 직업과 아는 것·의심 점수로 판단해 능력을 쓰고 투표한다.
-#   낮에는 말도 한다(경찰 결과 밝히기, 의심 가는 사람 말하기, 고발당하면 해명, 마피아는 거짓 고발·거짓 경찰 주장). 사람 채팅의 고발/변호도 듣는다.
+#   낮에는 말도 한다(아침마다 번호 순서로 직업과 지난밤 행적 보고: 시민은 사실, 마피아 팀·중립은 가짜 직업으로 거짓. 보고끼리 모순을 찾아 짚는다. 경찰 결과 밝히기, 의심 가는 사람 말하기, 고발당하면 해명, 마피아는 거짓 고발·거짓 경찰 주장). 사람 채팅의 고발/변호도 듣는다.
 #   테러리스트 봇은 화형 컷신 뒤 가장 의심 가는 사람을 길동무로 고른다.
 #   추리: 투표가 끝나면 확인된 시민을 찍은 사람(+20), 아는 마피아 대신 다른 사람을 찍은 사람(+8), 나를 찍은 사람(+15)을 의심하고,
 #   밤에 죽은 사람을 어제 찍은 사람(+12)도 의심한다. 한 명뿐인 직업을 두 사람이 주장하면 충돌로 보고(진짜는 상대를 강하게 의심, 구경꾼은 둘 다 의심) 짚어서 말한다.
@@ -123,6 +123,11 @@ function mBotInit():
 	delete {-mt::defend::*}
 	delete {-mt::conflict::*}
 	delete {-mt::mk::*}
+	delete {-mt::rep::*}
+	delete {-mt::fakerole::*}
+	delete {-mt::cx::*}
+	delete {-mt::repdue::*}
+	delete {-mt::noparse::*}
 	loop {-m::players::*}:
 		set {_b} to loop-value
 		if mIsBot({_b}) is true:
@@ -171,6 +176,8 @@ function mBotLearn():
 						set {-mt::k::%{_b}%::%loop-value-2%} to "mafia"
 	# 밤 사망자를 어제 찍은 사람은 조금 수상
 	mBotDeathReview()
+	# 지난 보고들을 밤사이 공개된 직업·어제 투표와 맞춰 본다
+	mBotContraSweep()
 
 # 조사 결과 값을 글로
 function mBotResText(r: text) :: text:
@@ -477,6 +484,417 @@ function mBotConflict(a: text, b: text, r: text):
 	if {_any} is not "":
 		mBotQueue({_any}, "conflict|%{_a}%|%{_b}%|%{_r}%", random integer between 2 and 5)
 
+
+# ------------------------------------------------------------------ 아침 보고와 모순 찾기
+# 낮이 시작되면 살아 있는 봇이 번호 순서대로 "직업 + 지난밤 한 일(결과)"을 말한다(첫 번째 말할 차례가 보고).
+#   시민 팀 봇은 사실대로(진짜 직업, {-m::act} 대상, {-m::inv} 결과). 마피아 팀·중립 봇은 첫 보고 때 그럴듯한 가짜 직업을 정해
+#   ({-mt::fakerole::봇}, 아직 아무도 주장하지 않은 직업 우선) 게임 내내 그 직업으로 가짜 행적을 꾸민다. 진짜 대상이 살아 있으면 그 사람을 대상으로 말해 탐정 결과와 어긋나지 않게 한다.
+#   광인은 자기가 그 직업인 줄 알므로 사실대로(결과는 지어냄) 말한다.
+# 보고 기록 {-mt::rep::사람::일차} = "직업|대상uuid 또는 -|결과 또는 -" (결과: 경찰 mafia/town, 의사 saved, 탐정 tgt:uuid/none/ign, 자경단 kill).
+#   사람의 보고는 AI 가 말 뜻을 읽을 때 함께 기록한다(mBotApplyParse 의 night_target/night_result).
+# 모순(mBotContraOne, 보고할 때와 낮이 시작될 때 검사, {-mt::cx::키} 로 한 번만):
+#   주장한 직업이 공개된 직업(기자 특종 등)과 다름 / 의사·수호자가 지켰다는 사람이 그날 밤 죽음(방화 제외) /
+#   경찰 결과가 나중에 공개된 직업과 다름 / 탐정 결과와 대상 본인의 보고가 다름(둘 다 의심) / 건달이 협박했다는 사람이 투표함.
+#   찾으면 시민 팀 봇들이 의심을 크게 올리고(마피아 팀 봇은 팀원이면 모른 척), 봇 하나가 "contra" 로 짚는다.
+
+# 한글 낱말 끝 받침이 있으면 a, 없으면 b (예: 경찰"이에요" / 의사"예요")
+function mKoJ(w: text, a: text, b: text) :: text:
+	set {_n} to {_w}.length()
+	if {_n} is 0:
+		return {_a}
+	set {_i} to {_n} - 1
+	set {_c} to {_w}.codePointAt({_i})
+	if {_c} < 44032:
+		return {_a}
+	if {_c} > 55203:
+		return {_a}
+	set {_x} to {_c} - 44032
+	if mod({_x}, 28) is 0:
+		return {_b}
+	return {_a}
+
+# 색 코드를 뺀 글(AI 에게 줄 때)
+function mBotPlain(s: text) :: text:
+	return {_s}.replaceAll("[&§][0-9a-fk-orA-FK-OR]", "")
+
+# 거짓 보고를 하는 봇인지: 시민 팀이 아니면(마피아 팀, 접선 전 보조, 중립) 거짓. 광인은 자기가 시민인 줄 안다
+function mBotLiar(b: text) :: boolean:
+	if {-m::role::%{_b}%} is "madman":
+		return false
+	if {-m::team::%{_b}%} is "citizen":
+		return false
+	return true
+
+# 가짜 직업 고르기(한 번 정하면 유지). 많이 쓰이는 무난한 직업 위주, 이미 누가 주장했거나 공개된 직업은 피한다
+function mBotFakePick(b: text) :: text:
+	if {-mt::fakerole::%{_b}%} is set:
+		return {-mt::fakerole::%{_b}%}
+	set {_w::*} to "soldier", "soldier", "soldier", "politician", "politician", "terrorist", "terrorist", "shaman", "shaman", "doctor", "doctor", "guardian", "detective", "thug" and "police"
+	loop {_w::*}:
+		if mRoleOn(loop-value) is true:
+			add loop-value to {_c::*}
+	if size of {_c::*} is 0:
+		set {_c::*} to "soldier" and "politician"
+	set {_pick} to random element of {_c::*}
+	set {_k} to 0
+	while {_k} < 8:
+		add 1 to {_k}
+		set {_x} to random element of {_c::*}
+		set {_ok} to true
+		loop {-m::players::*}:
+			if loop-value is not {_b}:
+				if {-mt::claim::%loop-value%} is {_x}:
+					set {_ok} to false
+				if {-mt::fakerole::%loop-value%} is {_x}:
+					set {_ok} to false
+				if {-m::pubrole::%loop-value%} is {_x}:
+					set {_ok} to false
+				if {-m::alive::%loop-value%} is true:
+					if mActRole(loop-value) is {_x}:
+						# 마피아 팀은 팀원의 진짜 직업을 안다(겹치지 않게)
+						if {-m::team::%loop-value%} is "mafia":
+							if {-m::team::%{_b}%} is "mafia":
+								set {_ok} to false
+		if {_ok} is true:
+			set {_pick} to {_x}
+			set {_k} to 99
+	set {-mt::fakerole::%{_b}%} to {_pick}
+	return {_pick}
+
+# 오늘 할 보고 만들기("직업|대상|결과"). 이미 했으면 ""
+function mBotRepMake(b: text) :: text:
+	set {_d} to {-m::day}
+	if {-mt::rep::%{_b}%::%{_d}%} is set:
+		return ""
+	set {_at} to "-"
+	if {-m::act::%{_b}%} is set:
+		set {_at} to {-m::act::%{_b}%}
+	set {_res} to "-"
+	# ---- 거짓 보고(직업이 공개된 뒤에는 숨길 수 없으니 사실대로)
+	if mBotLiar({_b}) is true:
+		if {-m::pubrole::%{_b}%} is not set:
+			set {_r} to mBotFakePick({_b})
+			loop {-m::players::*}:
+				if loop-value is not {_b}:
+					if {-m::alive::%loop-value%} is true:
+						add loop-value to {_al::*}
+						if {-m::team::%loop-value%} is "mafia":
+							if {-m::team::%{_b}%} is "mafia":
+								add loop-value to {_mates::*}
+							else:
+								add loop-value to {_others::*}
+						else:
+							add loop-value to {_others::*}
+			if size of {_al::*} is 0:
+				return "%{_r}%|-|-"
+			set {_t} to "-"
+			if {_r} is "police" or "doctor" or "guardian" or "shaman" or "thug" or "detective":
+				set {_t} to random element of {_al::*}
+				# 진짜로 능력을 쓴 대상이 살아 있으면 그 사람을 말한다(탐정 결과와 맞게)
+				if {_at} is not "-":
+					if {_al::*} contains {_at}:
+						if chance of 60%:
+							set {_t} to {_at}
+				if {_r} is "doctor":
+					if chance of 25%:
+						set {_t} to {_b}
+			if {_r} is "police":
+				# 둘째 날부터 가끔 시민을 마피아로 몬다. 아니면 팀원이나 아무나 "마피아 아님"
+				set {_res} to "town"
+				if {-m::day} >= 2:
+					if chance of 35%:
+						if size of {_others::*} > 0:
+							set {_fr} to mBotBest({_b}, {_others::*}, "threat")
+							if {_fr} is not "":
+								set {_t} to {_fr}
+								set {_res} to "mafia"
+				if {_res} is "town":
+					if size of {_mates::*} > 0:
+						if chance of 40%:
+							set {_t} to random element of {_mates::*}
+			if {_r} is "detective":
+				set {_res} to "none"
+				if size of {_others::*} > 0:
+					set {_t} to random element of {_others::*}
+				if chance of 40%:
+					set {_y} to random element of {_al::*}
+					if {_y} is not {_t}:
+						set {_res} to "tgt:%{_y}%"
+			set {_spec} to "%{_r}%|%{_t}%|%{_res}%"
+			mBotPMem({_b}, "%{-m::day}%일차 아침에 거짓 보고를 했다: %mBotPlain(mBotRepText({_b}, {_spec}))%")
+			return {_spec}
+	# ---- 사실대로
+	set {_r} to mActRole({_b})
+	set {_mad} to false
+	if {-m::role::%{_b}%} is "madman":
+		set {_mad} to true
+	set {_t} to {_at}
+	if {_r} is "police":
+		if {_t} is not "-":
+			if {-m::inv::%{_b}%} is set:
+				set {_res} to {-m::inv::%{_b}%}
+			else:
+				# 광인: 결과가 없으니 지어낸다
+				set {_res} to "town"
+				if chance of 30%:
+					set {_res} to "mafia"
+	else if {_r} is "doctor":
+		if {_t} is not "-":
+			loop {-m::ev::*}:
+				if loop-value starts with "healed|":
+					if loop-value ends with "|%{_t}%":
+						set {_res} to "saved"
+	else if {_r} is "detective":
+		if {_t} is not "-":
+			set {_res} to "none"
+			if {-m::inv::%{_b}%} is set:
+				set {_res} to {-m::inv::%{_b}%}
+	else if {_r} is "vigilante":
+		if {_t} is not "-":
+			loop {-m::ev::*}:
+				if loop-value is "kill|%{_b}%|%{_t}%":
+					set {_res} to "kill"
+	else if {_r} is "reporter":
+		if {_mad} is true:
+			set {_t} to "-"
+	else if {_r} is "guardian" or "shaman" or "thug":
+		set {_res} to "-"
+	else:
+		set {_t} to "-"
+	return "%{_r}%|%{_t}%|%{_res}%"
+
+# 보고 문장(색 있는 글). s = 말하는 사람
+function mBotRepText(s: text, spec: text) :: text:
+	set {_f::*} to split {_spec} at "|"
+	set {_r} to {_f::1}
+	set {_t} to {_f::2}
+	set {_res} to {_f::3}
+	set {_rn} to mRoleName({_r})
+	set {_head} to "%{_rn}%%mKoJ({_rn}, ""이에요"", ""예요"")%."
+	set {_tr} to ""
+	if {_t} is not "-":
+		set {_tr} to mBotRef({_t})
+	if {_r} is "police":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 조사를 못 했어요"
+		if {_res} is "mafia":
+			return "%{_head}% 어젯밤 %{_tr}% 조사했는데 마피아예요!"
+		return "%{_head}% 어젯밤 %{_tr}% 조사했는데 마피아 아니에요"
+	if {_r} is "doctor":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 아무도 못 살렸어요"
+		set {_x} to "%{_tr}% 님을 살렸어요"
+		if {_t} is {_s}:
+			set {_x} to "저를 살렸어요"
+		if {_res} is "saved":
+			return "%{_head}% 어젯밤 %{_x}%. 공격도 막았어요"
+		return "%{_head}% 어젯밤 %{_x}%"
+	if {_r} is "guardian":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 아무도 안 지켰어요"
+		return "%{_head}% 어젯밤 %{_tr}% 님을 지켰어요"
+	if {_r} is "detective":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 조사를 못 했어요"
+		if {_res} starts with "tgt:":
+			set {_y} to {_res}
+			replace all "tgt:" in {_y} with ""
+			return "%{_head}% %{_tr}% 님이 어젯밤 %mBotRef({_y})% 님에게 능력을 썼어요"
+		if {_res} is "ign":
+			return "%{_head}% %{_tr}% 님이 어젯밤 대상 없이 능력을 썼어요"
+		return "%{_head}% %{_tr}% 님은 어젯밤 아무에게도 능력을 안 썼어요"
+	if {_r} is "reporter":
+		if {_t} is "-":
+			return "%{_head}% 특종은 아직 아껴 두고 있어요"
+		return "%{_head}% 어젯밤 %{_tr}% 님 특종을 냈어요"
+	if {_r} is "thug":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 아무도 협박 안 했어요"
+		return "%{_head}% 어젯밤 %{_tr}% 님을 협박해서 오늘 투표 못 해요"
+	if {_r} is "shaman":
+		if {_t} is "-":
+			return "%{_head}% 어젯밤엔 주술을 안 걸었어요"
+		return "%{_head}% 어젯밤 %{_tr}% 님에게 주술을 걸었어요"
+	if {_r} is "vigilante":
+		if {_t} is "-":
+			return "%{_head}% 처단은 아직 안 썼어요"
+		if {_res} is "kill":
+			return "%{_head}% 어젯밤 %{_tr}% 님을 처단했어요"
+		return "%{_head}% 어젯밤 %{_tr}% 님을 노렸는데 실패했어요"
+	return "%{_head}% 밤에 쓰는 능력은 없어요"
+
+# 아침 보고 차례
+function mBotReport(b: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	set {_spec} to mBotRepMake({_b})
+	if {_spec} is "":
+		stop
+	set {-mt::told::%{_b}%::%{-m::day}%} to true
+	mBotRepApply({_b}, {_spec}, true)
+	set {_f::*} to split {_spec} at "|"
+	set {_t} to ""
+	if {_f::2} is not "-":
+		set {_t} to {_f::2}
+	# 보고는 뜻이 정해져 있으니 AI 로 다시 읽지 않는다
+	set {-mt::noparse::%{_b}%} to true
+	mBotSpeak({_b}, "report", {_t}, "", mBotRepText({_b}, {_spec}))
+
+# 보고를 기록하고 직업 주장·모순 검사를 한다. fx = 경찰 결과를 고발/변호로 반영(봇의 보고. 사람 말은 AI 해석이 이미 반영)
+function mBotRepApply(s: text, spec: text, fx: boolean):
+	set {_d} to {-m::day}
+	set {-mt::rep::%{_s}%::%{_d}%} to {_spec}
+	set {_f::*} to split {_spec} at "|"
+	mBotSetClaim({_s}, {_f::1})
+	mBotDbg("보고 %mNum({_s})%번: %{_spec}%")
+	if {_fx} is true:
+		if {_f::1} is "police":
+			if {_f::2} is not "-":
+				if {_f::3} is "mafia":
+					mBotClaim({_s}, {_f::2}, "mafia")
+				else if {_f::3} is "town":
+					mBotClaim({_s}, {_f::2}, "town")
+	mBotContraOne({_s}, {_d}, 0)
+	# 이 사람을 본 탐정 보고와 맞춰 본다
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {_p} is not {_s}:
+			set {_ps} to {-mt::rep::%{_p}%::%{_d}%}
+			if {_ps} is set:
+				set {_pf::*} to split {_ps} at "|"
+				if {_pf::1} is "detective":
+					if {_pf::2} is {_s}:
+						mBotDetPair({_p}, {_s}, {_d}, 0)
+
+# 사람 s 의 d 일차 보고에 모순이 있는지(dl = 짚기 전 더 기다릴 초)
+function mBotContraOne(s: text, d: number, dl: number):
+	set {_spec} to {-mt::rep::%{_s}%::%{_d}%}
+	if {_spec} is not set:
+		stop
+	if {-m::alive::%{_s}%} is not true:
+		stop
+	set {_f::*} to split {_spec} at "|"
+	set {_r} to {_f::1}
+	set {_t} to {_f::2}
+	set {_res} to {_f::3}
+	set {_rs} to mBotRef({_s})
+	set {_rn} to mRoleName({_r})
+	# 주장한 직업과 공개된 직업이 다름
+	set {_pr} to {-m::pubrole::%{_s}%}
+	if {_pr} is set:
+		if {_pr} is not {_r}:
+			set {_pn} to mRoleName({_pr})
+			mBotContra({_s}, "", "pub-%{_s}%", "%{_rs}% 님은 %{_rn}%%mKoJ({_rn}, ""이라고"", ""라고"")% 했는데 공개된 직업은 %{_pn}%%mKoJ({_pn}, ""이에요"", ""예요"")%", 80, {_dl})
+			stop
+	if {_t} is "-":
+		stop
+	set {_rt} to mBotRef({_t})
+	# 지켰다는 사람이 그날 밤 죽음(방화는 무엇으로도 못 막는다)
+	if {_d} is {-m::day}:
+		if {_r} is "doctor" or "guardian":
+			if {_t} is not {_s}:
+				if {-m::dead::*} contains {_t}:
+					set {_burn} to false
+					loop {-m::ev::*}:
+						if loop-value starts with "burn|":
+							if loop-value ends with "|%{_t}%":
+								set {_burn} to true
+					if {_burn} is false:
+						mBotContra({_s}, "", "save-%{_s}%-%{_d}%", "%{_rs}% 님이 어젯밤 %{_rt}% 님을 지켰다는데 %{_rt}% 님이 죽었어요", 60, {_dl})
+	# 경찰 결과가 나중에 공개된 직업과 다름
+	if {_r} is "police":
+		set {_tp} to {-m::pubrole::%{_t}%}
+		if {_tp} is set:
+			set {_tpn} to mRoleName({_tp})
+			if {_res} is "mafia":
+				if {_tp} is not "mafia":
+					mBotContra({_s}, "", "pol-%{_s}%-%{_d}%", "%{_rs}% 님이 %{_rt}% 님을 마피아라고 했는데 공개된 직업은 %{_tpn}%%mKoJ({_tpn}, ""이에요"", ""예요"")%", 80, {_dl})
+			else if {_res} is "town":
+				if {_tp} is "mafia":
+					mBotContra({_s}, "", "pol-%{_s}%-%{_d}%", "%{_rs}% 님이 %{_rt}% 님은 마피아가 아니라고 했는데 마피아였어요", 80, {_dl})
+	if {_r} is "detective":
+		mBotDetPair({_s}, {_t}, {_d}, {_dl})
+
+# 탐정 det 의 결과와 대상 x 본인의 보고(같은 날)가 맞는지. 어긋나면 둘 중 하나는 거짓말
+function mBotDetPair(det: text, x: text, d: number, dl: number):
+	set {_ds} to {-mt::rep::%{_det}%::%{_d}%}
+	set {_xs} to {-mt::rep::%{_x}%::%{_d}%}
+	if {_ds} is not set:
+		stop
+	if {_xs} is not set:
+		stop
+	set {_df::*} to split {_ds} at "|"
+	set {_xf::*} to split {_xs} at "|"
+	set {_res} to {_df::3}
+	set {_bad} to false
+	if {_res} starts with "tgt:":
+		set {_y} to {_res}
+		replace all "tgt:" in {_y} with ""
+		if {_xf::2} is not {_y}:
+			set {_bad} to true
+	else if {_res} is "none":
+		if {_xf::2} is not "-":
+			set {_bad} to true
+	if {_bad} is false:
+		stop
+	mBotContra({_x}, {_det}, "det-%{_det}%-%{_x}%-%{_d}%", "%mBotRef({_det})% 님 탐정 결과랑 %mBotRef({_x})% 님이 말한 행적이 달라요", 35, {_dl})
+
+# s 의 말에 모순(why)이 있다. o = 함께 의심받는 사람(없으면 ""). w = 의심 점수, dl = 짚기 전 더 기다릴 초
+function mBotContra(s: text, o: text, key: text, why: text, w: number, dl: number):
+	if {-mt::cx::%{_key}%} is set:
+		stop
+	set {-mt::cx::%{_key}%} to true
+	mBotDbg("모순 %mNum({_s})%번: %mBotPlain({_why})%")
+	loop {-m::players::*}:
+		set {_x} to loop-value
+		if mIsBot({_x}) is true:
+			if {-m::alive::%{_x}%} is true:
+				if {_x} is not {_s}:
+					if {_x} is not {_o}:
+						set {_skip} to false
+						if mBotEvilSide({_x}) is true:
+							# 마피아 팀: 팀원의 거짓말은 모른 척
+							if {-m::team::%{_s}%} is "mafia":
+								set {_skip} to true
+						if mBotK({_x}, {_s}) is "town":
+							set {_skip} to true
+						if {_skip} is false:
+							mBotAddSus({_x}, {_s}, {_w})
+							if {_o} is not "":
+								if mBotK({_x}, {_o}) is not "town":
+									mBotAddSus({_x}, {_o}, {_w})
+							if {-mt::qm::%{_x}%} is not set:
+								add {_x} to {_cand::*}
+	if size of {_cand::*} is 0:
+		stop
+	set {_c} to random element of {_cand::*}
+	set {_u} to {_o}
+	if {_u} is "":
+		set {_u} to {_s}
+	set {_m} to {_why}
+	replace all "|" in {_m} with "/"
+	set {_sec} to {_dl} + random integer between 3 and 6
+	mBotQueue({_c}, "contra|%{_s}%|%{_u}%|%{_m}%", {_sec})
+
+# 낮이 시작될 때: 지난 보고들을 다시 맞춰 본다(밤사이 공개된 직업), 어제 협박당했다던 사람이 투표했는지
+function mBotContraSweep():
+	set {_dl} to mStgMorningLen() + 2
+	set {_pd} to {-m::day} - 1
+	loop {-m::players::*}:
+		set {_p} to loop-value
+		if {-m::alive::%{_p}%} is true:
+			set {_i} to 0
+			while {_i} < {-m::day}:
+				add 1 to {_i}
+				mBotContraOne({_p}, {_i}, {_dl})
+			set {_ps} to {-mt::rep::%{_p}%::%{_pd}%}
+			if {_ps} is set:
+				set {_f::*} to split {_ps} at "|"
+				if {_f::1} is "thug":
+					if {_f::2} is not "-":
+						if {-mt::lastvote::%{_f::2}%} is set:
+							mBotContra({_p}, "", "thug-%{_p}%-%{_pd}%", "%mBotRef({_p})% 님이 %mBotRef({_f::2})% 님을 협박했다는데 %mBotRef({_f::2})% 님이 투표했어요", 60, {_dl})
+
 # ------------------------------------------------------------------ 봇 채팅
 
 # 말 고르기: 종류마다 여러 문장 중 하나. @t = 대상, @u = 두 번째 대상, @r = 직업 이름
@@ -509,6 +927,12 @@ function mBotLine(kind: text) :: text:
 		set {_l::*} to "@t 갑니다", "저는 @t", "@t 찍었어요", "@t 님 투표했어요"
 	else if {_kind} is "idle":
 		set {_l::*} to "아직 잘 모르겠어요", "다들 의심 가는 사람 있어요?", "경찰 있으면 말해 주세요", "음... 누구지", "어젯밤 누가 움직였을까요"
+	else if {_kind} is "report":
+		# @x = 보고 문장(mBotRepText)
+		set {_l::*} to "@x"
+	else if {_kind} is "contra":
+		# @x = 모순 내용
+		set {_l::*} to "잠깐만요, @x. @t 님 설명해 보세요", "이상한데요? @x", "@x. @t 님 거짓말하는 거 아니에요?"
 	if size of {_l::*} is 0:
 		return ""
 	return random element of {_l::*}
@@ -520,6 +944,10 @@ function mBotRef(t: text) :: text:
 
 function mBotFill(line: text, t: text, u: text, r: text) :: text:
 	set {_s} to {_line}
+	# @x 는 r 을 글 그대로 넣는다(보고·모순 문장)
+	if {_s} contains "@x":
+		replace all "@x" in {_s} with {_r}
+		set {_r} to ""
 	if {_t} is not "":
 		replace all "@t" in {_s} with mBotRef({_t})
 	if {_u} is not "":
@@ -548,7 +976,10 @@ function mBotSay(b: text, msg: text):
 	add 1 to {-mt::said::%{_b}%}
 	mBotDbg("말 %mNum({_b})%번 %mNameOf({_b})%: %{_msg}%")
 	# AI 가 켜져 있으면 봇이 한 말도 사람 말처럼 뜻을 읽는다(봇끼리의 토론이 깊어지게)
-	if mBotLlmOn() is true:
+	# (아침 보고는 이미 기록했으니 건너뛴다)
+	if {-mt::noparse::%{_b}%} is set:
+		delete {-mt::noparse::%{_b}%}
+	else if mBotLlmOn() is true:
 		mBotLlmParse({_b}, {_msg})
 
 # 조금 뒤에 할 말을 예약한다(spec = "종류|대상|두 번째|직업", 초 뒤)
@@ -683,6 +1114,11 @@ function mBotTalk(b: text):
 	if {-m::alive::%{_b}%} is not true:
 		stop
 	set {_role} to mActRole({_b})
+	# 아침 보고 차례(번호 순서)
+	if {-mt::repdue::%{_b}%} is set:
+		delete {-mt::repdue::%{_b}%}
+		mBotReport({_b})
+		stop
 	# 직업 사칭을 당했으면(내가 진짜) 반박
 	if {-mt::conflict::%{_b}%} is set:
 		set {_o} to {-mt::conflict::%{_b}%}
@@ -694,15 +1130,19 @@ function mBotTalk(b: text):
 	if {-mt::defend::%{_b}%} is set:
 		set {_s} to {-mt::defend::%{_b}%}
 		delete {-mt::defend::%{_b}%}
-		if mBotEvilSide({_b}) is true:
+		# 거짓 보고를 한 봇은 그 가짜 직업으로 해명한다(말이 엇갈리지 않게)
+		set {_cr} to {_role}
+		if {-mt::fakerole::%{_b}%} is set:
+			set {_cr} to {-mt::fakerole::%{_b}%}
+		else if mBotEvilSide({_b}) is true:
 			if chance of 45%:
 				mBotSetClaim({_b}, "police")
 				mBotSpeak({_b}, "fake_police", {_s}, "", "")
 				stop
-		if {_role} is "doctor" or "police" or "soldier" or "reporter" or "detective" or "politician":
+		if {_cr} is "doctor" or "police" or "soldier" or "reporter" or "detective" or "politician" or "guardian" or "shaman" or "thug" or "terrorist" or "vigilante":
 			if chance of 70%:
-				mBotSetClaim({_b}, {_role})
-				mBotSpeak({_b}, "defend_role", {_s}, "", {_role})
+				mBotSetClaim({_b}, {_cr})
+				mBotSpeak({_b}, "defend_role", {_s}, "", {_cr})
 				stop
 		mBotSpeak({_b}, "defend", {_s}, "", "")
 		stop
@@ -791,6 +1231,10 @@ function mBotLlmOn() :: boolean:
 function mBotIntent(kind: text, t: text, u: text, r: text) :: text:
 	if {_kind} is "reply":
 		return "%mNum({_t})%번 %mNameOf({_t})% 이(가) 너에게 이렇게 말했다: ""%{_r}%"". 네 입장(직업·팀·아는 것)에 맞게 자연스럽게 대답해라. 질문이면 답하고, 의심받으면 해명해라."
+	if {_kind} is "report":
+		return "아침 보고 차례다. 모두에게 네 직업과 지난밤 한 일을 밝힌다. 밝힐 내용: ""%mBotPlain({_r})%"". 직업, 사람 번호, 결과를 바꾸거나 빼지 말고 네 말투로 자연스럽게 한 문장으로 말해라."
+	if {_kind} is "contra":
+		return "%mNum({_t})%번 %mNameOf({_t})% 의 말에 모순을 찾았다: %mBotPlain({_r})%. 이 점을 짚고 %mNum({_t})%번에게 해명을 요구해라."
 	set {_tn} to ""
 	set {_un} to ""
 	set {_rn} to ""
@@ -851,7 +1295,9 @@ function mBotSelf(b: text) :: text:
 			set {_c} to "%{_c}% 같은 팀: %{_mates::*}%."
 	else if {-m::role::%{_b}%} is "jester":
 		set {_c} to "%{_c}% 너는 광대다. 투표로 처형당해야 이긴다(정체는 숨겨라)."
-	if {-mt::claim::%{_b}%} is set:
+	if {-mt::fakerole::%{_b}%} is set:
+		set {_c} to "%{_c}% 너는 진짜 직업을 숨기고 %mRoleName({-mt::fakerole::%{_b}%})% 인 척하고 있다(거짓 보고). 들키지 않게 그 직업답게 말하고 진짜 직업은 절대 밝히지 마라."
+	else if {-mt::claim::%{_b}%} is set:
 		set {_c} to "%{_c}% 너는 사람들에게 %mRoleName({-mt::claim::%{_b}%})% 이라고 말해 두었다. 말이 엇갈리지 않게."
 	set {_pm} to mBotPMemText({_b})
 	if {_pm} is not "":
@@ -1309,7 +1755,7 @@ function mBotLlmParseNow(s: text, msg: text):
 	set {_ps} to ""
 	loop {-m::players::*}:
 		set {_ps} to "%{_ps}%%mNum(loop-value)%번 %mNameOf(loop-value)%, "
-	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호]}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
+	set {_sys} to "채팅 한 줄의 뜻을 분석해라. 참가자: %{_ps}%. 말한 사람: %mNum({_s})%번 %mNameOf({_s})%. JSON 하나만 출력해라(설명 금지): {""accuse"":[번호],""clear"":[번호],""claim"":""직업"",""ask"":[번호],""night_target"":번호,""night_result"":""결과""}. accuse = 마피아로 의심하거나 지목한 사람, clear = 시민이라고 변호하거나 믿는다고 한 사람, claim = 말한 사람이 자기 직업이라고 밝힌 것(police, doctor, soldier, reporter, detective, politician, terrorist, thug, guardian, shaman, vigilante, madman, spy, madam, witch, thief, assassin, arsonist, jester 중 하나, 없으면 none), ask = 말한 사람이 질문하거나 말을 건 상대. 없으면 빈 배열. night_target = 말한 사람이 지난밤 자기 능력을 썼다고 밝힌 대상 번호(자기 자신도 됨, 밝히지 않았으면 0). night_result = 그 결과: 경찰 조사면 mafia 또는 town, 탐정이면 그 대상이 능력을 쓴 상대 번호(아무에게도 안 썼으면 none), 의사가 공격을 막았으면 saved, 그 밖에는 빈 문자열. 앞 대화를 보고 뜻을 정확히 읽어라: ""2 노마피아"", ""2번 마피아 아님"", ""2 시민 확인"" 은 2번 변호(clear)다. ""저 경찰인데"" 다음 줄의 ""3 마피아"" 는 경찰 조사 결과로 3번 고발(accuse)이다. 번호만 나왔다고 고발이 아니다. 확실하지 않으면 넣지 마라."
 	# 공개 기록(대화 포함, 앞 요청과 같은 앞부분) 뒤에 분석할 말을 붙인다
 	set {_f} to mBotLlmPost(mBotStatic(), mBotUser("", "%{_sys}%%nl%[분석할 말] %mNum({_s})%번 %mNameOf({_s})%: %{_msg}%%nl%JSON 하나만 답해라."), 300)
 	if {_f} is not set:
@@ -1380,6 +1826,38 @@ function mBotApplyParse(s: text, msg: text, raw: text):
 			if mRoleExists({_cr}) is true:
 				if {_cr} is not "mafia":
 					mBotSetClaim({_s}, {_cr})
+	# 지난밤 행적 보고(사람): 주장한 직업과 함께 기록해 모순 검사에 쓴다(하루 한 번)
+	if {_o}.has("night_target") is true:
+		if {_o}.get("night_target").isJsonPrimitive() is true:
+			set {_nt} to {_o}.get("night_target").getAsInt()
+			if {_nt} > 0:
+				if {-mt::claim::%{_s}%} is set:
+					if {-mt::rep::%{_s}%::%{-m::day}%} is not set:
+						loop {-m::players::*}:
+							if {-m::num::%loop-value%} is {_nt}:
+								set {_ntu} to loop-value
+						if {_ntu} is set:
+							set {_nr} to "-"
+							if {_o}.has("night_result") is true:
+								set {_jr} to {_o}.get("night_result")
+								if {_jr}.isJsonPrimitive() is true:
+									set {_nr} to {_jr}.getAsString()
+							set {_cl} to {-mt::claim::%{_s}%}
+							set {_res} to "-"
+							if {_cl} is "police":
+								if {_nr} is "mafia" or "town":
+									set {_res} to {_nr}
+							else if {_cl} is "doctor":
+								if {_nr} is "saved":
+									set {_res} to "saved"
+							else if {_cl} is "detective":
+								set {_res} to "none"
+								set {_yn} to {_nr} parsed as integer
+								if {_yn} is set:
+									loop {-m::players::*}:
+										if {-m::num::%loop-value%} is {_yn}:
+											set {_res} to "tgt:%loop-value%"
+							mBotRepApply({_s}, "%{_cl}%|%{_ntu}%|%{_res}%", false)
 	if {_o}.has("ask") is true:
 		set {_arr} to {_o}.getAsJsonArray("ask")
 		set {_n} to {_arr}.size()
@@ -1668,9 +2146,22 @@ every second:
 		delete {-mtllm::dqm::*}
 		if {_s} is "loading":
 			mBotInit()
+		delete {-mt::repdue::*}
+		delete {-mt::noparse::*}
 		if {_s} is "day":
 			delete {-mt::said::*}
 			mBotLearn()
+			# 아침 보고 순서: 살아 있는 봇을 번호 순으로 3초 간격
+			set {_ri} to 0
+			set {_i} to 0
+			while {_i} < 12:
+				add 1 to {_i}
+				loop {-m::players::*}:
+					if {-m::num::%loop-value%} is {_i}:
+						if mIsBot(loop-value) is true:
+							if {-m::alive::%loop-value%} is true:
+								set {_rat::%loop-value%} to {_ri}
+								add 1 to {_ri}
 		if {_s} is "night":
 			delete {-mt::qm::*}
 			# 지난 하루를 요약해 둔다(긴 게임에서도 초반을 기억하게)
@@ -1699,6 +2190,12 @@ every second:
 						set {_ms} to mStgMorningLen() + 2
 						set {_t1} to {_ms} + random integer between 1 and 12
 						set {_t2} to {_t1} + random integer between 6 and 30
+						# 첫 차례는 아침 보고(번호 순). 다음 말은 보고가 다 끝난 뒤
+						if {_rat::%loop-value%} is set:
+							set {_t1} to {_ms} + 1 + ({_rat::%loop-value%} * 3)
+							set {-mt::repdue::%loop-value%} to true
+							set {_re} to {_ms} + 1 + ({_ri} * 3)
+							set {_t2} to {_re} + random integer between 4 and 25
 						set {-mt::talk::%loop-value%::1} to {_t1}
 						set {-mt::talk::%loop-value%::2} to {_t2}
 						if chance of 50%:
@@ -1727,10 +2224,11 @@ every second:
 						if {-mt::talk::%{_id}%::%{_k}%} <= 0:
 							delete {-mt::talk::%{_id}%::%{_k}%}
 							mBotTalk({_id})
-				# 고발당하면 곧 해명
+				# 고발당하면 곧 해명(아침 보고를 마친 뒤)
 				if {-mt::defend::%{_id}%} is set:
-					if chance of 35%:
-						mBotTalk({_id})
+					if {-mt::repdue::%{_id}%} is not set:
+						if chance of 35%:
+							mBotTalk({_id})
 		if {_s} is "day" or "vote":
 			if mIsBot({_id}) is true:
 				# 예약한 말(맞장구, 충돌 지적)
@@ -1740,8 +2238,9 @@ every second:
 						mBotSayQueued({_id})
 				# 사칭당한 진짜 직업 봇은 곧 반박
 				if {-mt::conflict::%{_id}%} is set:
-					if chance of 40%:
-						mBotTalk({_id})
+					if {-mt::repdue::%{_id}%} is not set:
+						if chance of 40%:
+							mBotTalk({_id})
 
 # ------------------------------------------------------------------ 봇 탭 목록(가짜 항목, ProtocolLib)
 # 게임 중에는 봇도 탭 목록에 번호·이름·생존 상태로 뜬다(mjoin.sk mTabJson 과 같은 모양). 머리는 UUID 로 정해지는 기본 스킨 = 더미 스킨과 같다.
