@@ -418,6 +418,9 @@ function mBotInit():
 	delete {-mt::saidtxt::*}
 	delete {-mt::susr::*}
 	delete {-mt::thiefsaid::*}
+	delete {-mt::vdecl::*}
+	delete {-mt::vdn::*}
+	delete {-mt::vdfirst::*}
 	delete {-mt::repdue::*}
 	delete {-mt::noparse::*}
 	loop {-m::players::*}:
@@ -616,32 +619,30 @@ function mTestNight(id: text):
 	mSetAct({_id}, {_t})
 
 # 투표
-function mTestVote(id: text):
-	if mVoteCan({_id}) is not "":
-		stop
-	if chance of 8%:
-		stop
+# 투표할 사람 고르기(토론 중 결론 낼 때와 투표 때 같은 계산). 고를 사람이 없으면 ""
+#   남의 표(투표 중) 또는 남이 토론에서 밝힌 투표 결론({-mt::vdn::대상}, 토론 중)을 조금 따라간다
+function mBotVotePick(id: text) :: text:
 	loop {-m::players::*}:
 		if loop-value is not {_id}:
 			if {-m::alive::%loop-value%} is true:
 				add loop-value to {_c::*}
 	if size of {_c::*} is 0:
-		stop
-	set {_role} to {-m::role::%{_id}%}
-	if {_role} is "jester":
-		mVoteCast({_id}, random element of {_c::*})
-		stop
-	# 지금 표가 몰린 만큼 점수를 더해(따라가기) 고른다
+		return ""
+	if {-m::role::%{_id}%} is "jester":
+		return random element of {_c::*}
 	set {_best} to ""
 	set {_bs} to -9999
 	loop {_c::*}:
 		set {_t} to loop-value
 		set {_s} to random number between 0 and 10
-		set {_v} to {-m::votes::%{_t}%}
+		set {_v} to 0
+		if {-m::votes::%{_t}%} is set:
+			add {-m::votes::%{_t}%} to {_v}
+		if {-mt::vdn::%{_t}%} is set:
+			add {-mt::vdn::%{_t}%} to {_v}
 		if mBotLiar({_id}) is true:
 			# 거짓말하는 쪽(마피아 팀·보조·중립): 표가 몰린 시민에 얹어 티 나지 않게, 직업을 밝힌 시민을 노린다. 직업이 공개된 사람(정치인 등)은 표가 헛되거나 티가 나서 피한다
-			if {_v} is set:
-				add {_v} * 12 to {_s}
+			add {_v} * 12 to {_s}
 			if mBotK({_id}, {_t}) is "mafia":
 				# 팀원: 이미 정체가 공개됐으면 같이 찍어 시민인 척(버린다), 아니면 지킨다
 				if {-m::pubrole::%{_t}%} is set:
@@ -661,27 +662,74 @@ function mTestVote(id: text):
 			add mBotSus({_id}, {_t}) to {_s}
 		else:
 			# 시민 쪽: 아는 것 + 공개된 사실 + 의심. 남의 표는 조금만 따라간다(말 많은 사람에게 우르르 몰리지 않게)
-			if {_v} is set:
-				add {_v} * 4 to {_s}
+			add {_v} * 4 to {_s}
 			add mBotScore({_id}, {_t}) to {_s}
 		if {_s} > {_bs}:
 			set {_bs} to {_s}
 			set {_best} to {_t}
+	return {_best}
+
+# 투표: 토론에서 밝힌 결론({-mt::vdecl::봇})대로 찍는다(그 사람이 죽었거나 못 찍으면 다시 고른다)
+function mTestVote(id: text):
+	if mVoteCan({_id}) is not "":
+		stop
+	set {_best} to ""
+	if {-mt::vdecl::%{_id}%} is set:
+		set {_d} to {-mt::vdecl::%{_id}%}
+		if {-m::alive::%{_d}%} is true:
+			if {_d} is not {_id}:
+				set {_best} to {_d}
+	if {_best} is "":
+		if chance of 8%:
+			stop
+		set {_best} to mBotVotePick({_id})
 	if {_best} is "":
 		stop
 	if mVoteCast({_id}, {_best}) is "":
-		# 가끔 누구 찍었는지 말한다
+		# 토론에서 이미 결론을 말했으면 투표 때는 짧게만(가끔)
 		if mIsBot({_id}) is true:
-			if chance of 35%:
-				# 근거가 있으면 왜 찍었는지 같이 말한다(거짓말하는 쪽은 공개 정보로 그럴듯하게)
-				if mBotLiar({_id}) is true:
-					set {_vw} to mBotWhy("", {_best})
-				else:
-					set {_vw} to mBotWhy({_id}, {_best})
-				if {_vw} is not "":
-					mBotSpeak({_id}, "vote_why", {_best}, "", {_vw})
-				else:
-					mBotSpeak({_id}, "vote", {_best}, "", "")
+			if {-mt::vdecl::%{_id}%} is not set:
+				if chance of 35%:
+					if mBotLiar({_id}) is true:
+						set {_vw} to mBotWhy("", {_best})
+					else:
+						set {_vw} to mBotWhy({_id}, {_best})
+					if {_vw} is not "":
+						mBotSpeak({_id}, "vote_why", {_best}, "", {_vw})
+					else:
+						mBotSpeak({_id}, "vote", {_best}, "", "")
+
+# 토론이 끝나기 전에 봇이 투표할 사람을 결론 낸다(근거 → 결론). 같은 사람을 먼저 밝힌 봇이 있으면 그 말에 얹는다
+function mBotDeclare(b: text):
+	if {-m::alive::%{_b}%} is not true:
+		stop
+	if {-mt::vdecl::%{_b}%} is set:
+		stop
+	set {_t} to mBotVotePick({_b})
+	if {_t} is "":
+		stop
+	set {-mt::vdecl::%{_b}%} to {_t}
+	set {_n} to 0
+	if {-mt::vdn::%{_t}%} is set:
+		set {_n} to {-mt::vdn::%{_t}%}
+	set {-mt::vdn::%{_t}%} to {_n} + 1
+	if mBotLiar({_b}) is true:
+		set {_why} to mBotWhy("", {_t})
+	else:
+		set {_why} to mBotWhy({_b}, {_t})
+	set {_inf} to {-mt::whyinf}
+	if {_n} > 0:
+		if {-mt::vdfirst::%{_t}%} is set:
+			mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "")
+			stop
+	set {-mt::vdfirst::%{_t}%} to {_b}
+	if {_why} is not "":
+		set {_full} to {_why}
+		if {_inf} is not "":
+			set {_full} to "%{_why}%. %{_inf}%"
+		mBotSpeak({_b}, "decl_why", {_t}, "", {_full})
+	else:
+		mBotSpeak({_b}, "decl", {_t}, "", "")
 
 # 테러리스트 봇의 길동무: 아는 마피아 → 가장 의심
 function mTestTake(id: text):
@@ -1354,6 +1402,13 @@ function mBotLine(kind: text) :: text:
 		set {_l::*} to "음... 저 뽑으셔도 괜찮아요 ㅎㅎ", "제가 마피아일 수도 있죠~", "저 찍어 보실래요?", "ㅋㅋ 저 수상하죠?"
 	else if {_kind} is "reply":
 		set {_l::*} to "@t 님, 저요? 저는 시민이에요", "@t 님 왜 저를 부르세요?", "@t 님 생각은 어떠세요?", "음... @t 님 말 좀 더 들어 볼게요", "@t 님, 저는 아직 확신이 없어요"
+	else if {_kind} is "decl_why":
+		# 토론 끝 무렵 투표 결론(근거 → 결론)
+		set {_l::*} to "정리하면 @x. 저는 @t 님 투표할게요", "제 결론은 이래요. @x. 그래서 @t 님 찍을게요"
+	else if {_kind} is "decl":
+		set {_l::*} to "확실한 근거는 없지만 지금까지 흐름으로는 @t 님이 제일 걸려요. 저는 @t 님 투표할게요", "아직 애매하지만 나온 얘기들을 보면 @t 님 쪽이에요. 저는 @t 님 찍을게요"
+	else if {_kind} is "decl_same":
+		set {_l::*} to "@u 님이랑 같은 결론이에요. 저도 @t 님 투표할게요", "저도 @t 님이요. @u 님 말에 동의해요"
 	else if {_kind} is "vote_why":
 		set {_l::*} to "@x. 그래서 @t 님 찍었어요", "@x. 저는 @t 님한테 투표했어요"
 	else if {_kind} is "vote":
@@ -1467,7 +1522,7 @@ function mBotSayNow(b: text, msg: text):
 		stop
 	add {_msg} to {-mt::saidtxt::%{_b}%::*}
 	if {-mt::said::%{_b}%} is set:
-		if {-mt::said::%{_b}%} >= 5:
+		if {-mt::said::%{_b}%} >= 6:
 			stop
 	set {_line} to "&7<@@N:%{_b}%@@&7> &f%{_msg}%"
 	mBotChatAdd({_b}, {_msg})
@@ -2554,6 +2609,10 @@ function mBotRoleHint(r: text, mode: text) :: text:
 function mBotDecideQueue(b: text, mode: text):
 	if mBotLlmOn() is false:
 		stop
+	# 토론에서 투표 결론을 이미 밝혔으면 그대로 찍는다(AI 에게 다시 묻지 않음)
+	if {_mode} is "vote":
+		if {-mt::vdecl::%{_b}%} is set:
+			stop
 	if {-mtllm::dq::*} contains {_b}:
 		stop
 	if {-mtllm::df::%{_b}%} is set:
@@ -2933,6 +2992,9 @@ every second:
 		delete {-mt::isrep::*}
 		if {_s} is "day":
 			delete {-mt::said::*}
+			delete {-mt::vdecl::*}
+			delete {-mt::vdn::*}
+			delete {-mt::vdfirst::*}
 			delete {-mt::saidtxt::*}
 			mBotLearn()
 			# 아침 보고 순서: 살아 있는 봇을 번호 순으로 3초 간격
@@ -3021,6 +3083,14 @@ every second:
 						if {-mt::talk::%{_id}%::%{_k}%} <= 0:
 							delete {-mt::talk::%{_id}%::%{_k}%}
 							mBotTalk({_id})
+				# 토론이 끝나기 전에 투표할 사람을 결론 낸다(30초 남았을 때부터 하나씩, 12초 남으면 아직 안 한 봇은 바로)
+				if {-mt::vdecl::%{_id}%} is not set:
+					if {-mt::repdue::%{_id}%} is not set:
+						if {-m::left} <= 12:
+							mBotDeclare({_id})
+						else if {-m::left} <= 30:
+							if chance of 15%:
+								mBotDeclare({_id})
 				# 고발당하면 곧 해명(아침 보고를 마친 뒤)
 				if {-mt::defend::%{_id}%} is set:
 					if {-mt::repdue::%{_id}%} is not set:
