@@ -682,6 +682,9 @@ on PlayerMoveEvent:
 # mStart 가 직업 배정과 이동을 끝낸 뒤 부른다. 장소가 다 정해졌을 때만 연출을 켠다.
 function mSceneStart():
 	delete {-ms::on}
+	# 빠른 시뮬레이션은 연출 없이
+	if {-msim::left} is set:
+		stop
 	mEndClear()
 	if mSceneMissing() is not "":
 		mBc("&7연출 장소가 정해지지 않아 연출 없이 진행합니다. (&f%mSceneMissing()%&7)")

@@ -87,6 +87,9 @@ function mTally():
 		stop
 	set {_x} to {_top::1}
 	set {_xn} to mNameOf({_x})
+	# 빠른 시뮬레이션 기록(mtest.sk): 일차|직업|팀
+	if {-msim::left} is set:
+		add "%{-m::day}%|%{-m::role::%{_x}%}%|%mTeamNow({_x})%" to {-msim::ex::*}
 	if {-m::role::%{_x}%} is "politician":
 		# 정치인은 처형되지 않고 직업이 모두에게 공개된다(확정)
 		set {-m::pubrole::%{_x}%} to "politician"
@@ -306,6 +309,14 @@ function mEnd(w: text):
 	set {-m::state} to "end"
 	mAuUpdate()
 	set {-m::left} to 10
+	# 빠른 시뮬레이션 기록(mtest.sk): 승자, 일수, 최초 직업
+	if {-msim::left} is set:
+		set {-m::left} to 1
+		set {-msim::win} to {_w}
+		set {-msim::days} to {-m::day}
+		delete {-msim::roles::*}
+		loop {-m::players::*}:
+			add {-m::orig::%loop-value%} to {-msim::roles::*}
 	if {_w} is "draw":
 		set {_why} to {-m::drawwhy}
 		if {_why} is not set:

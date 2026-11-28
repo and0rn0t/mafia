@@ -67,23 +67,35 @@ function mTimeDiscussPer() :: number:
 
 function mTimeDiscuss() :: number:
 	set {_n} to 0
+	# 빠른 시뮬레이션(mtest.sk /mtest sim): 봇만 있어 짧게
+	if {-msim::left} is set:
+		loop {-m::players::*}:
+			if {-m::alive::%loop-value%} is true:
+				add 1 to {_n}
+		return 6 + {_n} * 2
 	loop {-m::players::*}:
 		if {-m::alive::%loop-value%} is true:
 			add 1 to {_n}
 	return {_n} * mTimeDiscussPer()
 
 function mTimeVote() :: number:
+	if {-msim::left} is set:
+		return 4
 	if {mcfg::vote} is set:
 		return {mcfg::vote}
 	return 30
 
 function mTimeNight() :: number:
+	if {-msim::left} is set:
+		return 3
 	if {mcfg::night} is set:
 		return {mcfg::night}
 	return 30
 
 # 테러리스트 길동무 선택 시간(초). 관리자 메뉴에서 바꾼다. 기본 10(확정)
 function mTimeTake() :: number:
+	if {-msim::left} is set:
+		return 2
 	if {mcfg::take} is set:
 		return {mcfg::take}
 	return 10
@@ -253,6 +265,8 @@ function mBegin():
 	delete {-m::log::*}
 	set {-m::state} to "loading"
 	set {-m::left} to 5
+	if {-msim::left} is set:
+		set {-m::left} to 1
 
 # 게임 상태를 전부 지우고 로비로 돌린다(강제 종료, 게임 종료 뒤 공통).
 function mReset():

@@ -10,6 +10,7 @@
 #   /mtest ai <이름>            그 봇이 아는 것과 의심 점수를 본다
 #   /mtest llm url|key|model|on|off|test|status   봇 말하기 AI(OpenAI 호환 API) 설정. 아래 "봇 말하기: AI(LLM) 연결"
 #   /mtest stop                게임을 끝내고 로비로(= /mstop)
+#   /mtest sim <판 수> [인원]    봇만으로 빠르게 연달아 돌려 AI 통계를 콘솔에 남긴다([mafia-sim], 아래 "빠른 시뮬레이션"). /mtest sim stop
 # 봇 동작(규칙 기반 AI, 아래 "봇 AI"): 밤·투표 시간 중 무작위 시점에 직업과 아는 것·의심 점수로 판단해 능력을 쓰고 투표한다.
 #   낮에는 말도 한다(아침마다 번호 순서로 직업과 지난밤 행적 보고: 시민은 사실, 마피아 팀·중립은 가짜 직업으로 거짓. 보고끼리 모순을 찾아 짚는다. 경찰 결과 밝히기, 의심 가는 사람 말하기, 고발당하면 해명, 마피아는 거짓 고발·거짓 경찰 주장). 사람 채팅의 고발/변호도 듣는다.
 #   테러리스트 봇은 화형 컷신 뒤 가장 의심 가는 사람을 길동무로 고른다.
@@ -1548,6 +1549,9 @@ function mBotTypeSec(msg: text) :: number:
 
 # 이번에 칠 말이 나오기까지 기다릴 초(같은 봇의 앞 말, 보고 순서까지 계산)
 function mBotTypeWait(b: text, msg: text) :: number:
+	# 빠른 시뮬레이션: 타자 시간 없이 바로
+	if {-msim::left} is set:
+		return 0.05
 	set {_now} to {-mau::sec}
 	set {_d} to mBotTypeSec({_msg})
 	if {-mt::typeuntil::%{_b}%} is set:
@@ -1959,6 +1963,9 @@ function mBotLlmClient() :: object:
 	return HttpClient.newBuilder().version(HttpVer.HTTP_1_1).connectTimeout(Duration.ofSeconds(8)).build()
 
 function mBotLlmOn() :: boolean:
+	# 빠른 시뮬레이션에서는 AI(느림)를 쓰지 않는다
+	if {-msim::left} is set:
+		return false
 	if {mcfg::llm::on} is not true:
 		return false
 	if {mcfg::llm::url} is not set:
@@ -3260,10 +3267,16 @@ every second:
 							# 보고는 치는 시간이 있어 한 사람에 6초쯤 잡는다
 							set {_re} to {_ms} + 1 + ({_ri} * 6)
 							set {_t2} to {_re} + random integer between 4 and 25
+							# 빠른 시뮬레이션: 보고 1초 간격, 나머지 말도 바로바로
+							if {-msim::left} is set:
+								set {_t1} to 2 + {_rat::%loop-value%}
+								set {_t2} to 3 + {_ri} + random integer between 0 and 3
 						set {-mt::talk::%loop-value%::1} to {_t1}
 						set {-mt::talk::%loop-value%::2} to {_t2}
 						if chance of 50%:
 							set {-mt::talk::%loop-value%::3} to {_t2} + random integer between 8 and 30
+							if {-msim::left} is set:
+								set {-mt::talk::%loop-value%::3} to {_t2} + random integer between 1 and 3
 				# 처형 단계: 테러리스트 봇 길동무는 화형 컷신이 끝난 뒤
 				if {_s} is "execute":
 					set {-mt::when::%loop-value%} to mStgBurnLen() + random integer between 1 and 3
@@ -3299,10 +3312,17 @@ every second:
 				# 토론이 끝나기 전에 투표할 사람을 결론 낸다(30초 남았을 때부터 하나씩, 12초 남으면 아직 안 한 봇은 바로)
 				if {-mt::vdecl::%{_id}%} is not set:
 					if {-mt::repdue::%{_id}%} is not set:
-						if {-m::left} <= 12:
+						set {_dl1} to 12
+						set {_dl2} to 30
+						set {_dc} to 15
+						if {-msim::left} is set:
+							set {_dl1} to 3
+							set {_dl2} to 7
+							set {_dc} to 30
+						if {-m::left} <= {_dl1}:
 							mBotDeclare({_id})
-						else if {-m::left} <= 30:
-							if chance of 15%:
+						else if {-m::left} <= {_dl2}:
+							if chance of {_dc}%:
 								mBotDeclare({_id})
 				# 고발당하면 곧 해명(아침 보고를 마친 뒤)
 				if {-mt::defend::%{_id}%} is set:
@@ -3403,6 +3423,146 @@ function mTestTeamName(t: text) :: text:
 		return "&e중립"
 	return "&7무소속"
 
+# ------------------------------------------------------------------ 빠른 시뮬레이션(/mtest sim <판 수> [인원])
+# 봇만으로 게임을 연달아 빠르게 돌려 AI 의 실수를 숫자로 본다(사람은 그동안 관전으로 빠진다. 끝나면 원래대로).
+#   연출 없음, 밤 3초, 투표 4초, 토론 6 + 생존자 × 2초, 로딩·종료 1초, 타자 지연·AI(LLM) 없음. 한 판 대략 20~40초.
+#   판마다 콘솔에 "[mafia-sim]" 한 줄(승자, 일수, 날마다 처형된 직업/팀), 다 끝나면 요약(팀별 승률, 처형 정확도, 1일차 처형, 경찰·의사 처형 수).
+#   중간에 멈추기: /mtest sim stop(지금 판이 끝나면 멈춤), 바로 끝내려면 이어서 /mtest stop.
+# 변수(RAM): {-msim::left}(남은 판 수, 있으면 시뮬레이션 중) {-msim::n}(인원) {-msim::total} {-msim::spec::uuid}(사람의 원래 관전 선택)
+#   {-msim::ex::*}(이번 판 처형 "일차|직업|팀", mvote.sk) {-msim::win} {-msim::days} {-msim::roles::*}(mvote.sk mEnd) {-msim::st::*}(누적 통계) {-msim::wait}(로비에서 다음 판까지 초)
+# 게임 쪽 파일(mcore/mscene/mvote)은 {-msim::left} 만 보고 짧게 돈다(이 파일을 빼도 그 검사는 아무 일도 안 한다).
+
+function mSimLog(s: text):
+	Bukkit.getConsoleSender().sendMessage("[mafia-sim] %{_s}%")
+
+function mSimAdd(k: text, d: number):
+	set {_v} to 0
+	if {-msim::st::%{_k}%} is set:
+		set {_v} to {-msim::st::%{_k}%}
+	set {-msim::st::%{_k}%} to {_v} + {_d}
+
+function mSimGet(k: text) :: number:
+	if {-msim::st::%{_k}%} is set:
+		return {-msim::st::%{_k}%}
+	return 0
+
+# 봇 n 명을 만든다(/mtest start 와 같은 방식, 이름 12개)
+function mSimMakeBots(n: number):
+	delete {-mt::*}
+	set {_bn::*} to "Alex", "Mia", "Leo", "Emma", "Noah", "Lily", "Ethan", "Chloe", "Ryan", "Zoe", "Owen" and "Ruby"
+	loop {_n} times:
+		set {_u} to UUID.randomUUID()
+		set {_id} to "%{_u}%"
+		add {_id} to {-mt::bots::*}
+		set {-mt::name::%{_id}%} to {_bn::%loop-value%}
+		set {-mt::skin::%{_id}%} to mod({_u}.hashCode(), 18)
+
+# 한 판이 끝났을 때 기록을 모은다
+function mSimRecord():
+	set {_g} to mSimGet("games") + 1
+	mSimAdd("games", 1)
+	set {_w} to "draw"
+	if {-msim::win} is set:
+		set {_w} to {-msim::win}
+	if {_w} starts with "neutral:":
+		set {_w} to "neutral"
+	mSimAdd("win_%{_w}%", 1)
+	set {_days} to 0
+	if {-msim::days} is set:
+		set {_days} to {-msim::days}
+	mSimAdd("days", {_days})
+	set {_ex} to ""
+	loop {-msim::ex::*}:
+		set {_f::*} to split loop-value at "|"
+		set {_ex} to "%{_ex}% %{_f::1}%일:%mRoleName({_f::2})%"
+		mSimAdd("exec", 1)
+		mSimAdd("exec_%{_f::3}%", 1)
+		if {_f::1} is "1":
+			mSimAdd("d1exec", 1)
+			if {_f::3} is "citizen":
+				mSimAdd("d1exec_citizen", 1)
+		if {_f::2} is "police" or "doctor":
+			mSimAdd("exec_key", 1)
+	set {_noex} to {_days} - size of {-msim::ex::*}
+	if {_noex} > 0:
+		mSimAdd("noexec", {_noex})
+	if {_ex} is "":
+		set {_ex} to " 없음"
+	set {_rl} to ""
+	loop {-msim::roles::*}:
+		set {_rl} to "%{_rl}%%mRoleName(loop-value)%,"
+	mSimLog("판 %{_g}%/%{-msim::total}%: 승리=%{_w}% 일수=%{_days}% 처형:%{_ex}% | 직업: %{_rl}%")
+	delete {-msim::ex::*}
+	delete {-msim::win}
+	delete {-msim::days}
+	delete {-msim::roles::*}
+
+function mSimPct(a: number, b: number) :: text:
+	if {_b} <= 0:
+		return "-"
+	set {_x} to round({_a} * 1000 / {_b}) / 10
+	return "%{_x}%%%"
+
+# 다 끝났을 때 요약
+function mSimSummary():
+	set {_g} to mSimGet("games")
+	set {_wc} to mSimGet("win_citizen")
+	set {_wm} to mSimGet("win_mafia")
+	set {_wn} to mSimGet("win_neutral")
+	set {_wd} to mSimGet("win_draw")
+	set {_ex} to mSimGet("exec")
+	set {_ec} to mSimGet("exec_citizen")
+	set {_em} to mSimGet("exec_mafia")
+	set {_en} to mSimGet("exec_neutral")
+	set {_eo} to mSimGet("exec_none")
+	set {_ne} to mSimGet("noexec")
+	set {_d1} to mSimGet("d1exec")
+	set {_d1c} to mSimGet("d1exec_citizen")
+	set {_ek} to mSimGet("exec_key")
+	set {_days} to mSimGet("days")
+	set {_avg} to 0
+	if {_g} > 0:
+		set {_avg} to round({_days} * 10 / {_g}) / 10
+	mSimLog("===== 요약: %{_g}%판, %{-msim::n}%명 =====")
+	mSimLog("승리: 시민 %{_wc}%(%mSimPct({_wc}, {_g})%) / 마피아 %{_wm}%(%mSimPct({_wm}, {_g})%) / 중립 %{_wn}% / 무승부 %{_wd}%")
+	mSimLog("처형 %{_ex}%번: 시민 팀 %{_ec}%(%mSimPct({_ec}, {_ex})%) / 마피아 팀 %{_em}%(%mSimPct({_em}, {_ex})%) / 중립 %{_en}% / 접선 전 보조 %{_eo}%, 처형 없는 날 %{_ne}%")
+	mSimLog("1일차 처형 %{_d1}%번 중 시민 팀 %{_d1c}%(%mSimPct({_d1c}, {_d1})%), 경찰·의사 처형 %{_ek}%번, 평균 %{_avg}%일")
+
+# 시뮬레이션을 끝내고 사람의 관전 선택을 되돌린다
+function mSimFinish():
+	mSimSummary()
+	loop all players:
+		set {_id} to "%uuid of loop-player%"
+		if {-msim::spec::%{_id}%} is true:
+			set {-m::spec::%{_id}%} to true
+		else:
+			delete {-m::spec::%{_id}%}
+	delete {-msim::*}
+	mBc("&6[시뮬레이션] &7끝났습니다. 결과는 서버 콘솔(로그)의 [mafia-sim] 줄을 보세요.")
+
+# 1초마다: 로비로 돌아왔으면 기록하고 다음 판을 시작한다
+every second:
+	if {-msim::left} is not set:
+		stop
+	if mState() is not "lobby":
+		stop
+	if {-msim::played} is true:
+		delete {-msim::played}
+		mSimRecord()
+	if {-msim::left} <= 0:
+		mSimFinish()
+		stop
+	# 다음 판(사람은 관전으로)
+	loop all players:
+		set {-m::spec::%uuid of loop-player%} to true
+	mSimMakeBots({-msim::n})
+	subtract 1 from {-msim::left}
+	if mStart("sim") is not true:
+		mSimLog("시작하지 못했습니다(인원·직업·월드 설정을 확인하세요). 시뮬레이션을 멈춥니다.")
+		set {-msim::left} to 0
+		stop
+	set {-msim::played} to true
+
 command /mtest [<text>] [<text>] [<text>]:
 	permission: minecraft.command.op
 	permission message: &c권한이 없습니다.
@@ -3415,7 +3575,46 @@ command /mtest [<text>] [<text>] [<text>]:
 		set {_me} to "%uuid of player%"
 		set {_a} to arg-1
 		if {_a} is not set:
-			send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
+			send "&7사용법: /mtest start [봇 수] | sim <판 수> [인원] | sim stop | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
+			stop
+		# 빠른 시뮬레이션: /mtest sim <판 수> [인원 6~12] | /mtest sim stop
+		if {_a} is "sim":
+			if arg-2 is "stop":
+				if {-msim::left} is set:
+					set {-msim::left} to 0
+					send "&7지금 판이 끝나면 시뮬레이션을 멈춥니다(바로 끝내려면 /mtest stop)."
+				stop
+			if {-msim::left} is set:
+				send "&c이미 시뮬레이션 중입니다. /mtest sim stop"
+				stop
+			if mState() is not "lobby":
+				send "&c로비에서만 시작할 수 있습니다."
+				stop
+			set {_g} to 20
+			if arg-2 is set:
+				set {_g} to arg-2 parsed as integer
+			set {_pn} to 8
+			if arg-3 is set:
+				set {_pn} to arg-3 parsed as integer
+			if {_g} is not set:
+				send "&c/mtest sim <판 수> [인원 6~12]"
+				stop
+			if {_pn} is not set:
+				send "&c/mtest sim <판 수> [인원 6~12]"
+				stop
+			if {_pn} < 6:
+				set {_pn} to 6
+			if {_pn} > 12:
+				set {_pn} to 12
+			delete {-msim::*}
+			loop all players:
+				if {-m::spec::%uuid of loop-player%} is true:
+					set {-msim::spec::%uuid of loop-player%} to true
+			set {-msim::n} to {_pn}
+			set {-msim::total} to {_g}
+			set {-msim::left} to {_g}
+			mSimLog("시작: %{_g}%판, 봇 %{_pn}%명")
+			send "&6[시뮬레이션] &7봇 %{_pn}%명으로 %{_g}%판을 빠르게 돌립니다. 그동안 관전으로 빠집니다. 결과는 콘솔의 [mafia-sim] 줄."
 			stop
 		if {_a} is "start":
 			if mState() is not "lobby":
@@ -3680,7 +3879,7 @@ command /mtest [<text>] [<text>] [<text>]:
 			if {_tp} is set:
 				mRoleReveal({_tp})
 			stop
-		send "&7사용법: /mtest start [봇 수] | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
+		send "&7사용법: /mtest start [봇 수] | sim <판 수> [인원] | sim stop | role <직업id> [이름] | info | ai <이름> | llm ... | skip | kill <이름> | auto | stop"
 
 # 다시 불러오면 AI 접속 객체를 새로 만든다(설정이 바뀌었을 수 있음)
 on load:
