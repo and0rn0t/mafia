@@ -546,6 +546,7 @@ function mBotSay(b: text, msg: text):
 		send colored "&7<%{_nm}%&7> &f%{_msg}%" to loop-player
 	mLogAdd("*", {_line})
 	add 1 to {-mt::said::%{_b}%}
+	mBotDbg("말 %mNum({_b})%번 %mNameOf({_b})%: %{_msg}%")
 	# AI 가 켜져 있으면 봇이 한 말도 사람 말처럼 뜻을 읽는다(봇끼리의 토론이 깊어지게)
 	if mBotLlmOn() is true:
 		mBotLlmParse({_b}, {_msg})
@@ -926,17 +927,17 @@ function mBotLlmText(body: text) :: text:
 function mBotIntentEffect(b: text, kind: text, t: text):
 	if {_t} is "":
 		stop
-	# AI 가 켜져 있으면 봇이 한 말도 AI 가 읽으니(mBotLlmParse) 여기서는 반영하지 않는다(두 번 세지 않게)
-	if mBotLlmOn() is true:
-		stop
-	# 분명한 주장(경찰 결과, 사칭 반박, 해명 중 맞고발)만 반영한다. 의심 말하기는 AI 가 실제로 무슨 말을 할지 몰라 반영하지 않는다
+	# 분명한 주장(경찰 결과 발표, 거짓 경찰 주장, 사칭 반박)은 AI 가 켜져 있어도 늘 반영한다(작은 모델이 해석을 틀려도 핵심은 전달되게)
 	if {_kind} is "police_mafia" or "fake_police" or "real_vs_fake":
 		mBotClaim({_b}, {_t}, "mafia")
-	else if mBotLlmOn() is false:
+		stop
+	if {_kind} is "police_town":
+		mBotClaim({_b}, {_t}, "town")
+		stop
+	# 의심 말하기는 AI 가 꺼져 있을 때만(켜져 있으면 실제로 한 말을 AI 가 읽는다)
+	if mBotLlmOn() is false:
 		if {_kind} is "accuse" or "mafia_push" or "defend":
 			mBotClaim({_b}, {_t}, "mafia")
-	else if {_kind} is "police_town":
-		mBotClaim({_b}, {_t}, "town")
 
 function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
 	if {-m::alive::%{_b}%} is not true:
@@ -959,6 +960,19 @@ function mBotSpeak(b: text, kind: text, t: text, u: text, r: text):
 	if {_fb} is not "":
 		mBotSay({_b}, {_fb})
 
+
+# AI 결정(밤 능력·투표) 켜짐 여부({mcfg::llm::decide}, 기본 꺼짐: 작은 모델은 규칙보다 결정을 못할 때가 많다)
+function mBotDecideOn() :: boolean:
+	if mBotLlmOn() is false:
+		return false
+	if {mcfg::llm::decide} is true:
+		return true
+	return false
+
+# 디버그 기록(/mtest llm debug on): 봇이 한 말, AI 결정, 말 해석 결과를 콘솔에 남긴다
+function mBotDbg(s: text):
+	if {mcfg::llm::debug} is true:
+		Bukkit.getConsoleSender().sendMessage("[mafia-ai] %{_s}%")
 # 동시에 보낼 요청 수({mcfg::llm::par}, 기본 1)와 지금 보낸 수
 function mBotLlmPar() :: number:
 	if {mcfg::llm::par} is set:
@@ -999,6 +1013,7 @@ function mBotLlmDispatch():
 			if {-m::alive::%{_b}%} is true:
 				if mState() is "day" or "vote":
 					if {_age} > 20:
+						mBotDbg("%mNum({_b})%번 말하기가 줄에서 %{_age}%초 기다려 정해 둔 문장으로 대신함")
 						set {_fb} to {-mtllm::fb::%{_b}%}
 						delete {-mtllm::fb::%{_b}%}
 						if {_fb} is set:
@@ -1052,6 +1067,10 @@ function mBotLlmPoll():
 				if {_say} is not "":
 					mBotSay({_b}, {_say})
 				else if {_fb} is set:
+					set {_er} to "-"
+					if {-mtllm::err} is set:
+						set {_er} to {-mtllm::err}
+					mBotDbg("%mNum({_b})%번 AI 답이 없거나 실패해 정해 둔 문장으로 대신함 (%{_er}%)")
 					if {_fb} is not "":
 						mBotSay({_b}, {_fb})
 
@@ -1262,7 +1281,7 @@ function mBotAddressed(s: text, msg: text):
 					replace all "?" in {_x} with ""
 					if {_x} is mNameOf({_b}):
 						set {_hit} to true
-					if {_x} is "%mNum({_b})%":
+					if {_x} is mNum({_b}):
 						set {_hit} to true
 				if {_hit} is true:
 					mBotQueueReply({_b}, {_s}, {_msg})
@@ -1331,6 +1350,7 @@ function mBotLlmPost(sys: text, usr: text, maxt: number) :: object:
 
 # 뜻 읽기 결과 적용
 function mBotApplyParse(s: text, msg: text, raw: text):
+	mBotDbg("해석 %mNum({_s})%번 ""%{_msg}%"" → %{_raw}%")
 	set {_a} to {_raw}.indexOf("{")
 	set {_z} to {_raw}.lastIndexOf("}")
 	if {_a} < 0:
@@ -1524,6 +1544,7 @@ function mBotDecideNow(b: text, mode: text):
 
 # 결정 답 적용
 function mBotDecideApply(b: text, mode: text, raw: text):
+	mBotDbg("결정 %mNum({_b})%번 %mNameOf({_b})% (%{_mode}%) 답: %{_raw}%")
 	set {_a} to {_raw}.indexOf("{")
 	set {_z} to {_raw}.lastIndexOf("}")
 	if {_a} < 0:
@@ -1663,8 +1684,8 @@ every second:
 				if {_max} < 2:
 					set {_max} to 2
 				set {-mt::when::%loop-value%} to random integer between 1 and {_max}
-				# AI 가 켜져 있으면 밤 능력·투표를 AI 에게 먼저 묻고, 규칙은 단계가 끝나기 직전에만 대신 고른다
-				if mBotLlmOn() is true:
+				# AI 결정이 켜져 있으면(/mtest llm decide on) 밤 능력·투표를 AI 에게 먼저 묻고, 규칙은 단계가 끝나기 직전에만 대신 고른다
+				if mBotDecideOn() is true:
 					if mIsBot(loop-value) is true:
 						if {_s} is "night" or "vote":
 							mBotDecideQueue(loop-value, {_s})
@@ -1893,6 +1914,26 @@ command /mtest [<text>] [<text>] [<text>]:
 				delete {-mtllm::client}
 				send "&a답을 기다리는 시간을 &f%{_w}%초&a로 정했습니다."
 				stop
+			if {_k} is "decide":
+				if arg-3 is "on":
+					set {mcfg::llm::decide} to true
+					send "&a밤 능력·투표도 AI 가 정합니다. &7(늦으면 규칙이 대신)"
+				else if arg-3 is "off":
+					delete {mcfg::llm::decide}
+					send "&7밤 능력·투표는 규칙이 정하고, AI 는 말만 합니다."
+				else:
+					send "&7사용법: /mtest llm decide on|off"
+				stop
+			if {_k} is "debug":
+				if arg-3 is "on":
+					set {mcfg::llm::debug} to true
+					send "&a디버그 기록 켬: 봇이 한 말, AI 결정, 말 해석 결과가 콘솔에 [mafia-ai] 로 남습니다."
+				else if arg-3 is "off":
+					delete {mcfg::llm::debug}
+					send "&7디버그 기록 끔."
+				else:
+					send "&7사용법: /mtest llm debug on|off"
+				stop
 			if {_k} is "par":
 				set {_w} to arg-3 parsed as integer
 				if {_w} is not set:
@@ -1948,7 +1989,7 @@ command /mtest [<text>] [<text>] [<text>]:
 				if {_er}.length() > 150:
 					set {_er} to {_er}.substring(0, 150)
 				send "&7마지막 오류: &c%{_er}%"
-			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | effort [none|low] | wait <초> | par <수> | on | off | test | status"
+			send "&7사용법: /mtest llm url <주소> | key <키> | model <모델> | effort [none|low] | wait <초> | par <수> | decide on|off | debug on|off | on | off | test | status"
 			stop
 		if {_a} is "stop":
 			mToLobby()

@@ -158,7 +158,7 @@ function mFxPart(vid: text, name: text, l: location, n: number):
 	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_l}.getY() + 1, {_l}.getZ())
 	loop mFxAud({_vid}):
 		set {_p} to loop-value
-		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, 0.3, 0.3, 0.3, 0)
+		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, 0.3, 0.3, 0.3, 0.001, null)
 
 # 그 사람(과 관전 중인 사람)에게만 보이는 엔티티로 만든다
 function mFxOnly(e: object, vid: text):
@@ -297,7 +297,10 @@ function mFxP(vid: text, name: text, l: location, n: number, dy: number, sp: num
 	set {_at} to new Location({_l}.getWorld(), {_l}.getX(), {_y}, {_l}.getZ())
 	loop mFxAud({_vid}):
 		set {_p} to loop-value
-		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, {_sp}, {_sp}, {_sp}, {_spd})
+		# 속도가 정수(0 등)면 skript-reflect 가 "data" 를 받는 다른 형태로 착각해 오류가 난다 → 소수로 바꾸고 data 자리에 null 을 준다
+		set {_s2} to {_sp} + 0.0001
+		set {_v2} to {_spd} + 0.0001
+		{_p}.spawnParticle(Particle.valueOf({_name}), {_at}, {_n}, {_s2}, {_s2}, {_s2}, {_v2}, null)
 
 # 엔티티 위치 기준 파티클
 function mFxPE(vid: text, name: text, e: object, n: number, dy: number, sp: number, spd: number):

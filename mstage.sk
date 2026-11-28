@@ -68,7 +68,7 @@ function mStgPartAll(name: text, l: location, n: number):
 	loop mStgViewers():
 		set {_p} to mPlayerOf(loop-value)
 		if {_p} is set:
-			{_p}.spawnParticle(Particle.valueOf({_name}), {_l}, {_n}, 0.4, 0.4, 0.4, 0)
+			{_p}.spawnParticle(Particle.valueOf({_name}), {_l}, {_n}, 0.4, 0.4, 0.4, 0.001, null)
 
 # ------------------------------------------------------------------ 해골 바꾸기 미루기
 
@@ -541,8 +541,8 @@ function mStgFanfare(w: text):
 			set {_l} to new Location({_c}.getWorld(), {_rx}, {_y}, {_c}.getZ())
 			loop all players:
 				set {_pl} to loop-player
-				{_pl}.spawnParticle(Particle.FIREWORK, {_l}, 60, 0.6, 0.6, 0.6, 0.15)
-				{_pl}.spawnParticle(Particle.END_ROD, {_l}, 20, 0.8, 0.8, 0.8, 0.05)
+				{_pl}.spawnParticle(Particle.FIREWORK, {_l}, 60, 0.6, 0.6, 0.6, 0.15, null)
+				{_pl}.spawnParticle(Particle.END_ROD, {_l}, 20, 0.8, 0.8, 0.8, 0.05, null)
 		wait 6 ticks
 
 # ------------------------------------------------------------------ 광대 승리 컷신
