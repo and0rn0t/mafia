@@ -350,6 +350,13 @@ function mLogSees(viewer: text, who: text) :: boolean:
 # 기록 속 말한 사람 자리 @@N:uuid@@ 를 보는 사람 기준 "번호 이름 + 메모 표시"로 바꾼다(메모를 바꾸면 기록에도 바로 반영)
 function mLogRender(viewer: text, line: text) :: text:
 	set {_s} to {_line}
+	# 관전자(사망자, 참가하지 않은 사람)에게는 [마피아 팀] 머리말을 빼고 보여 준다
+	set {_living} to false
+	if {-m::players::*} contains {_viewer}:
+		if {-m::alive::%{_viewer}%} is true:
+			set {_living} to true
+	if {_living} is false:
+		replace all "&c[마피아 팀] " in {_s} with ""
 	set {_k} to 0
 	while {_k} < 4:
 		add 1 to {_k}

@@ -69,7 +69,11 @@ on chat:
 				add loop-player to {_to::*}
 		clear chat recipients
 		loop {_to::*}:
-			mChatSendTo(loop-value, {_p}, "&c[마피아 팀] ", "&f", {_msg})
+			# 관전자(사망자 포함)에게는 [마피아 팀] 머리말 없이(직업 표시로 이미 알 수 있다)
+			if mChatAlive(loop-value) is true:
+				mChatSendTo(loop-value, {_p}, "&c[마피아 팀] ", "&f", {_msg})
+			else:
+				mChatSendTo(loop-value, {_p}, "", "&f", {_msg})
 		mLogAdd("@mafia", "&c[마피아 팀] &7<@@N:%{_id}%@@&7> &f%{_msg}%")
 		stop
 	# 낮 토론: 마녀 저주

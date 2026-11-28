@@ -2442,7 +2442,10 @@ function mBotMafiaSay(b: text, msg: text):
 			set {_tag} to mMemoTag("%uuid of loop-player%", {_b})
 			if {_tag} is not "":
 				set {_nm} to "%{_nm}% %{_tag}%"
-			send colored "&c[마피아 팀] &7<%{_nm}%&7> &f%{_msg}%" to loop-player
+			if mChatAlive(loop-player) is true:
+				send colored "&c[마피아 팀] &7<%{_nm}%&7> &f%{_msg}%" to loop-player
+			else:
+				send colored "&7<%{_nm}%&7> &f%{_msg}%" to loop-player
 	mLogAdd("@mafia", "&c[마피아 팀] &7<@@N:%{_b}%@@&7> &f%{_msg}%")
 	mBotDbg("마피아 팀 %mNum({_b})%번 %mNameOf({_b})%: %{_msg}%")
 
