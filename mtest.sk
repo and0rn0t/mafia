@@ -423,6 +423,8 @@ function mBotInit():
 	delete {-mt::vdecl::*}
 	delete {-mt::vdn::*}
 	delete {-mt::vdfirst::*}
+	delete {-mt::vdr::*}
+	delete {-mt::vdfr::*}
 	delete {-mt::repdue::*}
 	delete {-mt::noparse::*}
 	loop {-m::players::*}:
@@ -640,8 +642,12 @@ function mBotVotePick(id: text) :: text:
 		set {_v} to 0
 		if {-m::votes::%{_t}%} is set:
 			add {-m::votes::%{_t}%} to {_v}
-		if {-mt::vdn::%{_t}%} is set:
-			add {-mt::vdn::%{_t}%} to {_v}
+		# 남이 토론에서 밝힌 결론: 거짓말하는 쪽은 아무 결론에나 얹고(티 나지 않게), 시민 쪽은 근거를 댄 결론만 따른다(근거 없는 몰아가기에 우르르 따라가지 않게)
+		if mBotLiar({_id}) is true:
+			if {-mt::vdn::%{_t}%} is set:
+				add {-mt::vdn::%{_t}%} to {_v}
+		else if {-mt::vdr::%{_t}%} is set:
+			add {-mt::vdr::%{_t}%} to {_v}
 		if mBotLiar({_id}) is true:
 			# 거짓말하는 쪽(마피아 팀·보조·중립): 표가 몰린 시민에 얹어 티 나지 않게, 직업을 밝힌 시민을 노린다. 직업이 공개된 사람(정치인 등)은 표가 헛되거나 티가 나서 피한다
 			add {_v} * 12 to {_s}
@@ -720,11 +726,26 @@ function mBotDeclare(b: text):
 	else:
 		set {_why} to mBotWhy({_b}, {_t})
 	set {_inf} to {-mt::whyinf}
+	# 근거를 댄 결론 수(시민 쪽 봇은 이것만 따라간다, mBotVotePick)
+	if {_why} is not "":
+		set {_nr} to 0
+		if {-mt::vdr::%{_t}%} is set:
+			set {_nr} to {-mt::vdr::%{_t}%}
+		set {-mt::vdr::%{_t}%} to {_nr} + 1
 	if {_n} > 0:
 		if {-mt::vdfirst::%{_t}%} is set:
-			mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "")
-			stop
-	set {-mt::vdfirst::%{_t}%} to {_b}
+			# 시민 쪽은 먼저 말한 사람이 근거를 댔을 때만 "같은 결론"이라고 얹는다(근거 없는 지목을 그대로 받아 주지 않게)
+			set {_same} to true
+			if mBotLiar({_b}) is false:
+				if {-mt::vdfr::%{_t}%} is not set:
+					set {_same} to false
+			if {_same} is true:
+				mBotSpeak({_b}, "decl_same", {_t}, {-mt::vdfirst::%{_t}%}, "")
+				stop
+	if {-mt::vdfirst::%{_t}%} is not set:
+		set {-mt::vdfirst::%{_t}%} to {_b}
+		if {_why} is not "":
+			set {-mt::vdfr::%{_t}%} to true
 	if {_why} is not "":
 		set {_full} to {_why}
 		if {_inf} is not "":
@@ -3034,6 +3055,8 @@ every second:
 			delete {-mt::vdecl::*}
 			delete {-mt::vdn::*}
 			delete {-mt::vdfirst::*}
+			delete {-mt::vdr::*}
+			delete {-mt::vdfr::*}
 			delete {-mt::saidtxt::*}
 			mBotLearn()
 			# 아침 보고 순서: 살아 있는 봇을 번호 순으로 3초 간격
